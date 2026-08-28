@@ -1,4 +1,4 @@
-# RA2 Explorer v0.1 架构
+# RA2 Explorer v0.2 架构
 
 ## 运行模型
 
@@ -8,7 +8,7 @@ RA2 Explorer 是单机、只读源数据的本地 Web 应用：
 合法安装目录 / Mod 目录
           │ 只读扫描与按需读取
           ▼
-格式层（MIX / PAL / SHP）
+格式层（MIX / SHP / PAL / VXL / HVA / TMP / CSF / INI / WAV / PCX）
           │
           ▼
 SQLite 索引 ── Python Library ── CLI
@@ -31,12 +31,19 @@ Python 服务是唯一的数据访问入口。CLI 和 HTTP API 都调用 `Source
 
 ## 格式支持矩阵
 
-| 格式 | v0.1 能力 | 说明 |
+| 格式 | v0.2 能力 | 说明 |
 | --- | --- | --- |
 | MIX / MMX / YRO | 解析、递归索引、按需读取 | 基础、扩展和 Blowfish 加密索引；同时检测 RA2/TS 与经典哈希 |
 | PAL | 解析、网格预览 | 768 字节、256 色、6 位色值扩展到 8 位 |
 | SHP (TS/RA2) | 元数据、逐帧 PNG | 支持压缩 0–3、裁剪帧、透明索引 0、可选调色板 |
-| INI / CSF / VXL / HVA / TMP / WAV 等 | 索引、搜索、原始导出 | 仅识别；语义解析或渲染在后续版本 |
+| VXL | 体素列解码、部件元数据、等距 PNG | 使用 802 字节真实头部、内嵌或外部调色板，限制异常列与总体素数 |
+| HVA | 帧/部件/3×4 变换矩阵解析 | 可核对 VXL 配套动画结构，当前预览仍为 VXL 静态部件 |
+| TMP / TEM / SNO / URB / DES | 地块元数据、逐地块 PNG | 使用 TS/RA2 52 字节块头、菱形像素、深度层和可选 extra 层 |
+| CSF | 标签、反码 UTF-16LE、Extra Value、全文检索 | 使用真实的 ` FSC` / ` LBL` / ` RTS` / `WRTS` 标识 |
+| INI / MAP / MPR / TXT | 编码探测、结构统计、全文预览与检索 | 支持 UTF-8/UTF-16、GB18030 和 Windows-1252 回退 |
+| WAV | 元数据、浏览器内播放、原始导出 | 校验 RIFF/WAVE 参数；AUD/BAG 目前仍只索引导出 |
+| PCX | 尺寸/色彩模式、PNG 预览 | 通过 Pillow 解码并限制最大预览像素数 |
+| AUD / BAG / IDX / VPL / FNT / VQA / BIK | 索引、搜索、原始导出 | 已识别但尚未语义解码 |
 | 未知条目 | CRC、大小、原始导出 | 文件名未知时显示稳定的 `crc_XXXXXXXX` 名称 |
 
 ## MIX 名称与加密
@@ -50,10 +57,14 @@ RA2/TS 的文件名标识是对大写文件名执行带特殊尾部填充的 CRC
 主要契约：
 
 - `GET /api/sources`、`POST /api/sources`：列出或导入源目录；
+- `GET /api/discovery`：只读发现 Steam App 2229850、EA App/Origin 和旧版注册表安装；
 - `POST /api/sources/{id}/scan`：原子替换该来源的索引；
 - `GET /api/assets`：按来源、名称/路径/CRC 和格式分页检索；
 - `GET /api/assets/{id}/content`：导出原始资产；
-- `GET /api/assets/{id}/shp`、`preview.png`：读取帧信息与渲染预览；
+- `GET /api/assets/{id}/metadata`：按格式读取结构化元数据；
+- `GET /api/assets/{id}/text`：预览/检索 CSF、INI、MAP 与 TXT；
+- `GET /api/assets/{id}/shp`、`preview.png`：兼容 SHP 帧接口及统一图像预览；
+- `GET /api/assets/{id}/media`：以正确媒体类型播放 WAV；
 - `GET /api/palettes`、`GET /api/stats`：辅助浏览；
 - `POST /api/demo`：创建无商业素材的合成资料库；
 - `POST /api/reference-data/names/sync`：同步固定提交的名称数据库。
@@ -65,9 +76,10 @@ OpenAPI 页面在 `/api/docs`。生产端口固定为 `46120`，可通过 `pytho
 - 根 MIX 最大 1 GiB、单归档最多 4096 个条目、嵌套最大 6 层；这些是首版的防御性限制，不是格式极限。
 - 搜索 API 单次最多返回 500 条，适合交互检索而非全库批量导出。
 - 预览会把单个资产读入内存；尚无超大文件流式解码或后台任务队列。
-- 已在合成的基础/扩展/加密/嵌套 MIX 与 SHP 压缩样本上验证；由于本机没有合法安装，真实 RA2/YR 全量目录 smoke test 仍待用户安装后执行。
-- VXL/HVA、TMP/MAP、CSF/INI 语义与音视频渲染尚未实现。
+- VXL 最多 512 个部件、400 万总体素，单部件预览最多 30 万体素；HVA 变换最多 100 万组。
+- TMP 最多 16384 个槽，CSF 最多 10 万标签/20 万字符串，文本最多 16 MiB；限制用于抵抗损坏或恶意文件。
+- 已在合成的基础/扩展/加密/嵌套 MIX、SHP 压缩和格式有效的 VXL/HVA/TMP/CSF/WAV 样本上验证；由于本机没有合法安装，真实 RA2/YR 全量目录 smoke test 仍待合法安装后执行。
 
 ## 参考实现与可重复数据
 
-格式行为交叉核对了 OpenRA、`iron-curtain-engine/cnc-formats` 和 `ra2web/ra2web-studio`。运行时名称库固定在 `cnc-formats` 提交 `77da596ed72a1201740e054855bf2ff60640bfa9`，下载清单会记录仓库、文件、提交、时间和条目数量。参考代码仓库仅用于开发核对，不参与应用运行。
+格式行为交叉核对了 OpenRA（开发快照 `2f09f50d5c2c3508c857f703e50af27af2d5625f`）、`iron-curtain-engine/cnc-formats` 和 `ra2web/ra2web-studio`。其中参考项目对 VXL 头部和 TMP 字段位置存在冲突，当前实现采用 OpenRA 已用于实际游戏内容的 802 字节 VXL 头与 TMP 读取顺序，而不是照搬较新的不一致描述。运行时名称库固定在 `cnc-formats` 提交 `77da596ed72a1201740e054855bf2ff60640bfa9`，下载清单会记录仓库、文件、提交、时间和条目数量。参考代码仓库仅用于开发核对，不参与应用运行。

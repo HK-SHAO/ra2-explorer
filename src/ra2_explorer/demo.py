@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import io
+import math
 import struct
+import wave
 from pathlib import Path
 
 from ra2_explorer.codecs.mix import MixHashType, build_mix
@@ -18,7 +21,16 @@ def create_demo_installation(target: Path) -> Path:
         b"Primary=DemoCannon\r\n"
     )
     nested = build_mix(
-        [("demo.pal", palette), ("demo.shp", sprite), ("rules.ini", rules)],
+        [
+            ("demo.pal", palette),
+            ("demo.shp", sprite),
+            ("rules.ini", rules),
+            ("demo.csf", _build_demo_csf()),
+            ("demo.vxl", _build_demo_vxl(palette)),
+            ("demo.hva", _build_demo_hva()),
+            ("demo.tem", _build_demo_tmp()),
+            ("demo.wav", _build_demo_wav()),
+        ],
         hash_type=MixHashType.RA2,
     )
     key_source = bytes((index * 37 + 11) & 0xFF for index in range(80))
@@ -71,6 +83,170 @@ def _build_demo_shp() -> bytes:
             _fill_rect(pixels, width, 66 + frame_index, 16, 73 + frame_index, 20, 57)
         frames.append(bytes(pixels))
     return _encode_shp(width, height, frames)
+
+
+def _build_demo_csf() -> bytes:
+    labels = (
+        ("UI:ExplorerTitle", "RA2 Explorer format sample", None),
+        ("VOX:ExplorerReady", "Asset pipeline ready.", "explorer-ready"),
+        ("UNIT:DemoVehicle", "Generated test vehicle", None),
+    )
+    output = bytearray(b" FSC")
+    output.extend(struct.pack("<IIIII", 3, len(labels), len(labels), 0, 0))
+    for name, text, extra in labels:
+        encoded_name = name.encode("ascii")
+        output.extend(b" LBL")
+        output.extend(struct.pack("<II", 1, len(encoded_name)))
+        output.extend(encoded_name)
+        output.extend(b"WRTS" if extra else b" RTS")
+        units = text.encode("utf-16-le")
+        output.extend(struct.pack("<I", len(units) // 2))
+        output.extend(byte ^ 0xFF for byte in units)
+        if extra:
+            encoded_extra = extra.encode("ascii")
+            output.extend(struct.pack("<I", len(encoded_extra)))
+            output.extend(encoded_extra)
+    return bytes(output)
+
+
+def _build_demo_vxl(palette: bytes) -> bytes:
+    size_x, size_y, size_z = 12, 8, 7
+    columns: dict[tuple[int, int], list[tuple[int, int, int]]] = {}
+
+    def add(x: int, y: int, z: int, color: int, normal: int = 20) -> None:
+        columns.setdefault((x, y), []).append((z, color, normal))
+
+    for x in range(2, 10):
+        for y in range(1, 7):
+            add(x, y, 1, 44)
+            if 3 <= x <= 8 and 2 <= y <= 5:
+                add(x, y, 2, 48)
+    for x in range(4, 8):
+        for y in range(3, 5):
+            add(x, y, 3, 112)
+    for x in range(6, 12):
+        add(x, 3, 4, 28)
+    for x in (2, 9):
+        for y in range(1, 7):
+            add(x, y, 0, 210)
+
+    span_data = bytearray()
+    starts = []
+    ends = []
+    for y in range(size_y):
+        for x in range(size_x):
+            values = sorted(columns.get((x, y), []))
+            if not values:
+                starts.append(-1)
+                ends.append(-1)
+                continue
+            starts.append(len(span_data))
+            cursor_z = 0
+            run: list[tuple[int, int, int]] = []
+            for value in values:
+                if run and value[0] != run[-1][0] + 1:
+                    cursor_z = _write_vxl_run(span_data, run, cursor_z)
+                    run = []
+                run.append(value)
+            cursor_z = _write_vxl_run(span_data, run, cursor_z)
+            if cursor_z < size_z:
+                span_data.extend((size_z - cursor_z, 0, 0))
+            ends.append(len(span_data) - 1)
+
+    column_count = size_x * size_y
+    body = bytearray()
+    body.extend(struct.pack(f"<{column_count}i", *starts))
+    body.extend(struct.pack(f"<{column_count}i", *ends))
+    body.extend(span_data)
+
+    embedded_palette = bytes(min(255, component * 4) for component in palette)
+    output = bytearray(b"Voxel Animation\0")
+    output.extend(struct.pack("<IIII", 1, 1, 1, len(body)))
+    output.extend((0, 0))
+    output.extend(embedded_palette)
+    output.extend(b"BODY" + b"\0" * 12)
+    output.extend(struct.pack("<III", 0, 0, 0))
+    output.extend(body)
+    output.extend(struct.pack("<III", 0, column_count * 4, column_count * 8))
+    output.extend(struct.pack("<f", 1.0))
+    identity = (1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+    output.extend(struct.pack("<12f", *identity))
+    output.extend(struct.pack("<3f", -6.0, -4.0, -2.0))
+    output.extend(struct.pack("<3f", 6.0, 4.0, 5.0))
+    output.extend(bytes((size_x, size_y, size_z, 4)))
+    return bytes(output)
+
+
+def _write_vxl_run(
+    output: bytearray,
+    run: list[tuple[int, int, int]],
+    cursor_z: int,
+) -> int:
+    if not run:
+        return cursor_z
+    output.extend((run[0][0] - cursor_z, len(run)))
+    for _, color, normal in run:
+        output.extend((color, normal))
+    output.append(len(run))
+    return run[-1][0] + 1
+
+
+def _build_demo_hva() -> bytes:
+    output = bytearray(b"demo.hva" + b"\0" * 8)
+    output.extend(struct.pack("<II", 4, 1))
+    output.extend(b"BODY" + b"\0" * 12)
+    for frame in range(4):
+        transform = (
+            1.0,
+            0.0,
+            0.0,
+            frame * 0.1,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+        )
+        output.extend(struct.pack("<12f", *transform))
+    return bytes(output)
+
+
+def _build_demo_tmp() -> bytes:
+    tile_width, tile_height = 60, 30
+    iso_size = tile_width * tile_height // 2
+    colors = bytearray()
+    row_width = 4
+    for y in range(tile_height):
+        for x in range(row_width):
+            colors.append(64 + ((x + y * 3) % 52))
+        row_width += 4 if y < tile_height // 2 - 1 else -4
+    output = bytearray(struct.pack("<IIiiI", 1, 1, tile_width, tile_height, 20))
+    output.extend(struct.pack("<iiIII", 0, 0, 0, 52 + iso_size, 0))
+    output.extend(struct.pack("<iiiiI", 0, 0, 0, 0, 0))
+    output.extend(bytes((0, 0, 0, 34, 80, 34, 48, 112, 48, 0, 0, 0)))
+    output.extend(colors)
+    output.extend(bytes(iso_size))
+    return bytes(output)
+
+
+def _build_demo_wav() -> bytes:
+    sample_rate = 11_025
+    frame_count = sample_rate // 3
+    frames = bytearray()
+    for index in range(frame_count):
+        envelope = max(0.0, 1.0 - index / frame_count)
+        value = round(math.sin(index * 2 * math.pi * 440 / sample_rate) * envelope * 12_000)
+        frames.extend(struct.pack("<h", value))
+    output = io.BytesIO()
+    with wave.open(output, "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(sample_rate)
+        audio.writeframes(frames)
+    return output.getvalue()
 
 
 def _fill_rect(

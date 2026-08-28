@@ -2,12 +2,14 @@
 
 RA2 Explorer 是一个本地优先的《命令与征服：红色警戒 2》资产浏览器。它只读挂载用户自己的游戏目录，把 MIX 条目、PAL 调色板和 SHP 动画组织成可搜索、可预览、可导出的本地资产库。
 
-第一版的可执行边界：
+当前可执行边界：
 
 - 扫描本地目录中的松散资产和 MIX / MMX / YRO；
 - 读取基础、扩展和 Blowfish 加密 MIX，并递归索引已知的嵌套 MIX；
 - 同时解析 RA2/TS CRC32 与早期 Westwood 文件名哈希；
-- 预览 PAL 和 RA2/TS SHP，逐帧导出透明 PNG；
+- 预览 PAL、RA2/TS SHP、VXL 体素部件、TMP 地块和 PCX；
+- 读取 HVA 矩阵、CSF/INI/MAP 文本，并在浏览器播放 WAV；
+- 自动发现 Steam App 2229850、EA App/Origin 与兼容旧版安装；
 - 通过 SQLite、HTTP API、CLI 和浏览器界面访问同一份索引；
 - 生成不包含 EA 内容的本地演示资产库。
 
@@ -15,7 +17,7 @@ RA2 Explorer 是一个本地优先的《命令与征服：红色警戒 2》资�
 
 ## 立即运行
 
-项目命令使用 Git Bash；不可用时使用 `cmd.exe`。以下命令均为 `cmd.exe` 语法，要求 Python 3.11+ 和 Node 18+：
+开发、构建、测试、检查和运行命令强制使用 `cmd.exe`；只有 Git 操作使用 Git Bash。以下命令均为 `cmd.exe` 语法，要求 Python 3.11+ 和 Node 18+：
 
 ```bat
 python -m venv .venv

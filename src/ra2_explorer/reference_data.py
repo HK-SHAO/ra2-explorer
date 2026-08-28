@@ -45,6 +45,11 @@ BUILTIN_NAMES = (
     "gaweap.shp",
     "demo.pal",
     "demo.shp",
+    "demo.csf",
+    "demo.hva",
+    "demo.tem",
+    "demo.vxl",
+    "demo.wav",
 )
 
 

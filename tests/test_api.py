@@ -24,7 +24,7 @@ def test_demo_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     source = source_response.json()
     assert source["state"] == "ready"
     assert source["archive_count"] == 2
-    assert source["asset_count"] == 5
+    assert source["asset_count"] == 10
 
     assets_response = client.get("/api/assets", params={"source_id": source["id"], "q": "demo.shp"})
     assert assets_response.status_code == 200
@@ -43,6 +43,31 @@ def test_demo_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert preview.status_code == 200
     assert preview.headers["content-type"] == "image/png"
     assert preview.content.startswith(b"\x89PNG")
+
+    page = client.get("/api/assets", params={"source_id": source["id"], "limit": 100}).json()
+    by_name = {asset["display_name"]: asset for asset in page["items"]}
+
+    vxl = by_name["demo.vxl"]
+    vxl_metadata = client.get(f"/api/assets/{vxl['id']}/metadata")
+    assert vxl_metadata.status_code == 200
+    assert vxl_metadata.json()["voxel_count"] > 80
+    assert client.get(f"/api/assets/{vxl['id']}/preview.png").content.startswith(b"\x89PNG")
+
+    terrain = by_name["demo.tem"]
+    terrain_preview = client.get(f"/api/assets/{terrain['id']}/preview.png")
+    assert terrain_preview.status_code == 200
+    assert terrain_preview.content.startswith(b"\x89PNG")
+
+    strings = by_name["demo.csf"]
+    text = client.get(f"/api/assets/{strings['id']}/text", params={"q": "ready"})
+    assert text.status_code == 200
+    assert "Asset pipeline ready" in text.json()["text"]
+
+    sound = by_name["demo.wav"]
+    media = client.get(f"/api/assets/{sound['id']}/media")
+    assert media.status_code == 200
+    assert media.headers["content-type"] == "audio/wav"
+    assert media.content.startswith(b"RIFF")
 
 
 def test_api_rejects_untrusted_host(tmp_path: Path) -> None:

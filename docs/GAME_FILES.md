@@ -14,7 +14,13 @@
 
 ## 当前机器状态
 
-如果 Steam 或 EA App 中尚未安装游戏，RA2 Explorer 无法合法代为下载。先在平台客户端购买/领取并完成安装，然后启动 RA2 Explorer，点击“添加目录”，粘贴包含 `ra2.mix` 或 `ra2md.mix` 的目录路径。
+如果 Steam 或 EA App 中尚未安装游戏，RA2 Explorer 无法合法代为下载。先在平台客户端购买/领取并完成安装。应用会读取 Steam 库清单、App 2229850 清单、EA/Westwood 安装注册表和常见 EA App/Origin 目录，并只在找到 `ra2.mix` 或 `ra2md.mix` 时给出可导入候选。
+
+命令行可先核对发现结果：
+
+```bat
+.venv\Scripts\ra2-explorer.exe discover
+```
 
 Steam 常见路径示例：
 
@@ -26,13 +32,13 @@ D:\SteamLibrary\steamapps\common\Command & Conquer Red Alert II
 
 ## 无游戏文件时
 
-下面的演示资料库由项目现场生成，包含一个加密根 MIX、一个嵌套 MIX、PAL、六帧 SHP 和 INI，不含任何 EA 图像、声音或文本：
+下面的格式验证资料库由项目现场生成，包含一个加密根 MIX、一个嵌套 MIX，以及 PAL、六帧 SHP、VXL/HVA、TMP、CSF、INI 和 WAV，不含任何 EA 图像、声音或文本：
 
 ```bat
 .venv\Scripts\ra2-explorer.exe demo
 ```
 
-浏览器空状态中的“先看合成演示”执行相同操作。它用于确认安装、加密索引、嵌套读取、搜索、预览和导出链路。
+浏览器空状态中的“先看格式样本”执行相同操作。它用于确认安装、加密索引、嵌套读取、搜索、真实格式解析、预览、播放和导出链路；它不是用来替代真实游戏目录的展示 Demo。
 
 ## 成熟的可解析参考数据
 

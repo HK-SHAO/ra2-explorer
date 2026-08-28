@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import os
+import wave
 from pathlib import Path
 from urllib.parse import quote
 
@@ -14,11 +15,17 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from ra2_explorer import __version__
+from ra2_explorer.codecs.csf import parse_csf
+from ra2_explorer.codecs.hva import parse_hva
 from ra2_explorer.codecs.pal import parse_palette
 from ra2_explorer.codecs.shp import parse_shp
+from ra2_explorer.codecs.text import decode_legacy_text, parse_ini, text_excerpt
+from ra2_explorer.codecs.tmp import parse_tmp
+from ra2_explorer.codecs.vxl import parse_vxl
 from ra2_explorer.config import Settings, load_settings
 from ra2_explorer.demo import create_demo_installation
-from ra2_explorer.errors import AssetNotFoundError, Ra2ExplorerError
+from ra2_explorer.discovery import discover_installations
+from ra2_explorer.errors import AssetNotFoundError, InvalidFormatError, Ra2ExplorerError
 from ra2_explorer.library import AssetReader, SourceLibrary
 from ra2_explorer.reference_data import (
     load_known_names,
@@ -92,6 +99,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/sources")
     def sources() -> list[dict[str, object]]:
         return services.database.list_sources()
+
+    @app.get("/api/discovery")
+    async def discovery() -> dict[str, object]:
+        return await run_in_threadpool(discover_installations)
 
     @app.post("/api/sources", status_code=201)
     async def add_source(payload: SourceRequest) -> dict[str, object]:
@@ -169,6 +180,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ],
         }
 
+    @app.get("/api/assets/{asset_id}/metadata")
+    def asset_metadata(asset_id: str) -> dict[str, object]:
+        asset_record, data = services.reader.read(asset_id)
+        return _inspect_asset(asset_record, data)
+
+    @app.get("/api/assets/{asset_id}/text")
+    def asset_text(
+        asset_id: str,
+        q: str | None = Query(default=None, max_length=200),
+        limit: int = Query(default=400, ge=1, le=2_000),
+    ) -> dict[str, object]:
+        asset_record, data = services.reader.read(asset_id)
+        asset_format = str(asset_record["format"])
+        if asset_format == "csf":
+            parsed = parse_csf(data)
+            return {
+                "format": "csf",
+                "version": parsed.version,
+                "language": parsed.language,
+                "label_count": len(parsed.labels),
+                "string_count": parsed.string_count,
+                **parsed.excerpt(query=q, limit=limit),
+            }
+        if asset_format in {"ini", "map"}:
+            parsed_ini = parse_ini(data)
+            return {
+                "format": asset_format,
+                "encoding": parsed_ini.encoding,
+                "section_count": len(parsed_ini.sections),
+                "entry_count": parsed_ini.entry_count,
+                **text_excerpt(parsed_ini.text, query=q, limit=limit),
+            }
+        if asset_format == "text":
+            decoded = decode_legacy_text(data)
+            return {
+                "format": "text",
+                "encoding": decoded.encoding,
+                **text_excerpt(decoded.text, query=q, limit=limit),
+            }
+        raise HTTPException(status_code=409, detail="该格式不是可读取的文本资产")
+
     @app.get("/api/assets/{asset_id}/preview.png")
     def asset_preview(
         asset_id: str,
@@ -185,6 +237,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise HTTPException(status_code=416, detail="帧编号超出范围")
             palette = _select_palette(services, asset_record, palette_id)
             image = sprite.render(frame, palette, scale=scale)
+        elif asset_record["format"] == "vxl":
+            model = parse_vxl(data)
+            if frame >= len(model.limbs):
+                raise HTTPException(status_code=416, detail="部件编号超出范围")
+            palette = _select_palette(services, asset_record, palette_id)
+            image = model.render(frame, palette=palette, scale=scale)
+        elif asset_record["format"] == "tmp":
+            template = parse_tmp(data)
+            if frame >= len(template.tiles):
+                raise HTTPException(status_code=416, detail="地块编号超出范围")
+            palette = _select_palette(services, asset_record, palette_id)
+            image = template.render(frame, palette=palette, scale=scale)
+        elif asset_record["format"] == "pcx":
+            from PIL import Image, UnidentifiedImageError
+
+            try:
+                image = Image.open(io.BytesIO(data))
+                image.load()
+            except (OSError, UnidentifiedImageError) as error:
+                raise InvalidFormatError("PCX 文件无法解码") from error
+            if image.width * image.height > 16_777_216:
+                raise InvalidFormatError("PCX 图像超过预览安全限制")
+            image = image.convert("RGBA")
+            if scale > 1:
+                image = image.resize(
+                    (image.width * scale, image.height * scale),
+                    resample=Image.Resampling.NEAREST,
+                )
         else:
             raise HTTPException(status_code=409, detail="该格式没有图像预览")
         output = io.BytesIO()
@@ -193,6 +273,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content=output.getvalue(),
             media_type="image/png",
             headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/api/assets/{asset_id}/media")
+    def asset_media(asset_id: str) -> Response:
+        asset_record, data = services.reader.read(asset_id)
+        if asset_record["format"] != "wav":
+            raise HTTPException(status_code=409, detail="该格式不能直接在浏览器中播放")
+        return Response(
+            content=data,
+            media_type="audio/wav",
+            headers={"Cache-Control": "private, max-age=3600"},
         )
 
     @app.get("/api/palettes")
@@ -249,13 +340,22 @@ def _select_palette(
         return parse_palette(palette_data)
     if not palettes:
         return None
-    priority = {
-        "unittem.pal": 0,
-        "uniturb.pal": 1,
-        "unitsno.pal": 2,
-        "unitdes.pal": 3,
-        "demo.pal": 4,
-    }
+    extension = str(asset.get("extension") or "").lower()
+    theater = {
+        "tem": "tem",
+        "tmp": "tem",
+        "urb": "urb",
+        "sno": "sno",
+        "des": "des",
+    }.get(extension, "tem")
+    preferred = [
+        f"iso{theater}.pal",
+        f"unit{theater}.pal",
+        "unittem.pal",
+        "isotem.pal",
+        "demo.pal",
+    ]
+    priority = {name: index for index, name in enumerate(preferred)}
     palette_asset = min(
         palettes,
         key=lambda item: (
@@ -265,6 +365,149 @@ def _select_palette(
     )
     _, palette_data = services.reader.read(palette_asset["id"])
     return parse_palette(palette_data)
+
+
+def _inspect_asset(asset: dict[str, object], data: bytes) -> dict[str, object]:
+    asset_format = str(asset["format"])
+    base: dict[str, object] = {
+        "format": asset_format,
+        "size": len(data),
+    }
+    if asset_format == "shp":
+        sprite = parse_shp(data)
+        return {
+            **base,
+            "width": sprite.width,
+            "height": sprite.height,
+            "frame_count": len(sprite.frames),
+            "frames": [
+                {
+                    "index": frame.index,
+                    "x": frame.x,
+                    "y": frame.y,
+                    "width": frame.width,
+                    "height": frame.height,
+                    "compression": frame.compression,
+                }
+                for frame in sprite.frames
+            ],
+        }
+    if asset_format == "pal":
+        parse_palette(data)
+        return {**base, "color_count": 256, "frame_count": 1}
+    if asset_format == "vxl":
+        model = parse_vxl(data)
+        return {
+            **base,
+            "file_name": model.file_name,
+            "palette_count": model.palette_count,
+            "remap_range": [model.remap_start, model.remap_end],
+            "frame_count": len(model.limbs),
+            "limb_count": len(model.limbs),
+            "voxel_count": model.voxel_count,
+            "limbs": [
+                {
+                    "index": index,
+                    "name": limb.name,
+                    "number": limb.number,
+                    "size": list(limb.size),
+                    "voxel_count": len(limb.voxels),
+                    "normals_mode": limb.normals_mode,
+                    "scale": limb.scale,
+                    "min_bounds": list(limb.min_bounds),
+                    "max_bounds": list(limb.max_bounds),
+                }
+                for index, limb in enumerate(model.limbs)
+            ],
+        }
+    if asset_format == "hva":
+        animation = parse_hva(data)
+        first_transform = list(animation.transforms[0]) if animation.transforms else []
+        return {
+            **base,
+            "file_name": animation.file_name,
+            "frame_count": animation.frame_count,
+            "section_count": len(animation.section_names),
+            "section_names": list(animation.section_names),
+            "first_transform": first_transform,
+        }
+    if asset_format == "tmp":
+        template = parse_tmp(data)
+        return {
+            **base,
+            "width": template.tile_width,
+            "height": template.tile_height,
+            "template_width": template.template_width,
+            "template_height": template.template_height,
+            "frame_count": len(template.tiles),
+            "tile_count": template.tile_count,
+            "tiles": [
+                None
+                if tile is None
+                else {
+                    "index": tile.index,
+                    "height": tile.height,
+                    "terrain_type": tile.terrain_type,
+                    "ramp_type": tile.ramp_type,
+                    "has_extra": tile.extra_pixels is not None,
+                }
+                for tile in template.tiles
+            ],
+        }
+    if asset_format == "csf":
+        strings = parse_csf(data)
+        return {
+            **base,
+            "version": strings.version,
+            "language": strings.language,
+            "label_count": len(strings.labels),
+            "string_count": strings.string_count,
+            "declared_string_count": strings.declared_string_count,
+        }
+    if asset_format in {"ini", "map"}:
+        ini = parse_ini(data)
+        return {
+            **base,
+            "encoding": ini.encoding,
+            "section_count": len(ini.sections),
+            "entry_count": ini.entry_count,
+            "section_names": [section.name for section in ini.sections[:500]],
+        }
+    if asset_format == "text":
+        decoded = decode_legacy_text(data)
+        return {
+            **base,
+            "encoding": decoded.encoding,
+            "line_count": len(decoded.text.splitlines()),
+        }
+    if asset_format == "wav":
+        try:
+            with wave.open(io.BytesIO(data), "rb") as audio:
+                frames = audio.getnframes()
+                rate = audio.getframerate()
+                channels = audio.getnchannels()
+                sample_width = audio.getsampwidth()
+        except (EOFError, wave.Error) as error:
+            raise InvalidFormatError("WAV 文件无法解码") from error
+        return {
+            **base,
+            "channels": channels,
+            "sample_rate": rate,
+            "sample_width": sample_width,
+            "sample_frames": frames,
+            "duration_seconds": frames / rate if rate else 0,
+        }
+    if asset_format == "pcx":
+        from PIL import Image, UnidentifiedImageError
+
+        try:
+            with Image.open(io.BytesIO(data)) as image:
+                width, height = image.size
+                mode = image.mode
+        except (OSError, UnidentifiedImageError) as error:
+            raise InvalidFormatError("PCX 文件无法解码") from error
+        return {**base, "width": width, "height": height, "mode": mode, "frame_count": 1}
+    return base
 
 
 app = create_app()

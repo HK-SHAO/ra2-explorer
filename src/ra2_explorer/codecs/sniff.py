@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import struct
 from pathlib import PurePath
 
 from ra2_explorer.codecs.shp import looks_like_shp
@@ -9,6 +10,8 @@ KNOWN_FORMATS = {
     ".bag": "bag",
     ".bik": "video",
     ".csf": "csf",
+    ".des": "tmp",
+    ".fnt": "fnt",
     ".hva": "hva",
     ".idx": "idx",
     ".ini": "ini",
@@ -25,6 +28,7 @@ KNOWN_FORMATS = {
     ".txt": "text",
     ".urb": "tmp",
     ".vqa": "video",
+    ".vpl": "vpl",
     ".vxl": "vxl",
     ".wav": "wav",
     ".yro": "mix",
@@ -44,19 +48,59 @@ def sniff_format(data: bytes | bytearray | memoryview, name: str | None = None) 
     view = memoryview(data)
     if len(view) == 768:
         return "pal"
+    if len(view) >= 4 and bytes(view[:4]) == b" FSC":
+        return "csf"
+    if len(view) >= 16 and bytes(view[:16]).startswith(b"Voxel Animation"):
+        return "vxl"
     if looks_like_shp(view):
         return "shp"
     sample = bytes(view[:4096])
     if sample.startswith(b"RIFF") and sample[8:12] == b"WAVE":
         return "wav"
+    if len(view) >= 128 and sample[:1] == b"\x0a" and sample[2:3] == b"\x01":
+        return "pcx"
+    if _looks_like_hva(view):
+        return "hva"
+    if _looks_like_tmp(view):
+        return "tmp"
     if b"[" in sample and b"]" in sample and b"=" in sample:
-        try:
-            sample.decode("utf-8")
-        except UnicodeDecodeError:
-            pass
-        else:
-            return "ini"
+        return "ini"
     return "binary"
+
+
+def _looks_like_hva(data: memoryview) -> bool:
+    if len(data) < 24:
+        return False
+    frame_count, section_count = struct.unpack_from("<II", data, 16)
+    if not 0 < frame_count <= 65_536 or not 0 < section_count <= 512:
+        return False
+    expected = 24 + 16 * section_count + 48 * frame_count * section_count
+    if expected != len(data):
+        return False
+    name = bytes(data[:16]).split(b"\0", 1)[0]
+    return bool(name) and all(32 <= byte < 127 for byte in name)
+
+
+def _looks_like_tmp(data: memoryview) -> bool:
+    if len(data) < 20:
+        return False
+    template_width, template_height, tile_width, tile_height = struct.unpack_from(
+        "<IIii", data, 0
+    )
+    if not (0 < template_width <= 128 and 0 < template_height <= 128):
+        return False
+    if tile_width <= 0 or tile_height <= 0 or tile_width % 4 or tile_height % 2:
+        return False
+    tile_count = template_width * template_height
+    table_end = 16 + tile_count * 4
+    if table_end > len(data):
+        return False
+    offsets = struct.unpack_from(f"<{tile_count}I", data, 16)
+    first = next((offset for offset in offsets if offset), None)
+    if first is None or first + 52 > len(data):
+        return False
+    depth_offset = struct.unpack_from("<I", data, first + 12)[0]
+    return depth_offset == tile_width * tile_height // 2 + 52
 
 
 __all__ = ["KNOWN_FORMATS", "format_from_name", "sniff_format"]
