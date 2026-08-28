@@ -118,6 +118,52 @@ export interface DiscoveryResult {
   official_sources: Array<{ provider: string; url: string }>;
 }
 
+export type EntityKind = "vehicle" | "infantry" | "aircraft" | "building";
+
+export interface EntitySummary {
+  id: string;
+  kind: EntityKind;
+  display_name: string;
+  internal_name: string;
+  ui_name: string | null;
+  image: string;
+  voxel: boolean;
+  renderable: boolean;
+  component_count: number;
+  cost: string | null;
+  strength: string | null;
+  owner: string | null;
+  primary: string | null;
+}
+
+export interface EntityComponentAsset {
+  id: string;
+  display_name: string;
+  format: string;
+  virtual_path: string;
+  size: number;
+  storage_kind: "mix" | "loose";
+}
+
+export interface EntityComponent {
+  role: string;
+  expected_name: string;
+  asset: EntityComponentAsset | null;
+}
+
+export interface GameEntity extends EntitySummary {
+  rules: Record<string, string>;
+  art: Record<string, string>;
+  components: EntityComponent[];
+}
+
+export interface EntityPage {
+  items: EntitySummary[];
+  total: number;
+  kinds: Array<{ kind: EntityKind; count: number }>;
+  warnings: string[];
+}
+
 export interface ReferenceStatus {
   available: boolean;
   manifest_valid?: boolean;
@@ -160,6 +206,16 @@ export const api = {
     if (format) params.set("format", format);
     return request<AssetPage>(`/api/assets?${params}`);
   },
+  entities: (sourceId: string, query: string, kind: EntityKind | "") => {
+    const params = new URLSearchParams({ source_id: sourceId, limit: "500" });
+    if (query.trim()) params.set("q", query.trim());
+    if (kind) params.set("kind", kind);
+    return request<EntityPage>(`/api/entities?${params}`);
+  },
+  entity: (sourceId: string, entityId: string) =>
+    request<GameEntity>(
+      `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}`,
+    ),
   asset: (id: string) => request<Asset>(`/api/assets/${id}`),
   stats: (sourceId: string) => request<Stats>(`/api/stats?source_id=${encodeURIComponent(sourceId)}`),
   palettes: (sourceId: string) =>
@@ -176,6 +232,10 @@ export const api = {
     request<ReferenceStatus>("/api/reference-data/names/sync", { method: "POST" }),
   contentUrl: (assetId: string) => `/api/assets/${assetId}/content`,
   mediaUrl: (assetId: string) => `/api/assets/${assetId}/media`,
+  entityPreviewUrl: (sourceId: string, entityId: string, scale = 4) => {
+    const params = new URLSearchParams({ scale: String(scale) });
+    return `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}/preview.png?${params}`;
+  },
   previewUrl: (assetId: string, frame: number, paletteId: string, scale = 4) => {
     const params = new URLSearchParams({ frame: String(frame), scale: String(scale) });
     if (paletteId) params.set("palette_id", paletteId);

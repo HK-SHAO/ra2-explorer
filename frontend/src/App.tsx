@@ -5,6 +5,9 @@ import {
   Asset,
   AssetMetadata,
   DiscoveryResult,
+  EntityKind,
+  EntitySummary,
+  GameEntity,
   GameInstallation,
   ReferenceStatus,
   Source,
@@ -27,7 +30,8 @@ type IconName =
   | "search"
   | "settings"
   | "spark"
-  | "swatch";
+  | "swatch"
+  | "unit";
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
@@ -46,6 +50,7 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 9 19.37a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-1.55-1.03H3v-4h.08A1.7 1.7 0 0 0 4.63 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63a1.7 1.7 0 0 0 1-1.55V3h4v.08A1.7 1.7 0 0 0 15 4.63a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9a1.7 1.7 0 0 0 1.55 1.03H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z" /></>,
     spark: <><path d="m12 3 1.1 4.2L17 9l-3.9 1.8L12 15l-1.1-4.2L7 9l3.9-1.8z" /><path d="m19 15 .6 2.4L22 18.5l-2.4 1.1L19 22l-.6-2.4-2.4-1.1 2.4-1.1z" /></>,
     swatch: <><path d="M4 4h6v16H4zM10 7h5v13h-5zM15 10h5v10h-5z" /><path d="M7 16h.01M12.5 16h.01M17.5 16h.01" /></>,
+    unit: <><path d="M5 10h11l3 3v4H5z" /><path d="M8 10V7h6l2 3M14 7l3-2M4 17h16" /><circle cx="8" cy="18" r="2" /><circle cx="17" cy="18" r="2" /></>,
   };
   return (
     <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -75,6 +80,39 @@ const formatLabels: Record<string, string> = {
   video: "过场视频",
   binary: "二进制",
   unknown: "其他",
+};
+
+const entityKindLabels: Record<EntityKind, string> = {
+  vehicle: "载具",
+  infantry: "步兵",
+  aircraft: "航空器",
+  building: "建筑",
+};
+
+const componentRoleLabels: Record<string, string> = {
+  body: "主体",
+  body_hva: "主体动画",
+  turret: "炮塔",
+  turret_hva: "炮塔动画",
+  barrel: "炮管",
+  barrel_hva: "炮管动画",
+  cameo: "建造图标",
+  alt_cameo: "升级图标",
+};
+
+const ruleLabels: Record<string, string> = {
+  cost: "造价",
+  strength: "生命值",
+  armor: "装甲",
+  speed: "速度",
+  sight: "视野",
+  tech_level: "科技等级",
+  category: "分类",
+  owner: "阵营",
+  prerequisite: "前置建筑",
+  primary: "主武器",
+  secondary: "副武器",
+  movement_zone: "移动区域",
 };
 
 function formatBytes(value: number) {
@@ -111,6 +149,7 @@ function assetIcon(format: string): IconName {
 }
 
 function App() {
+  const [view, setView] = useState<"assets" | "entities">("assets");
   const [sources, setSources] = useState<Source[]>([]);
   const [sourceId, setSourceId] = useState("");
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -119,6 +158,13 @@ function App() {
   const [palettes, setPalettes] = useState<Asset[]>([]);
   const [query, setQuery] = useState("");
   const [format, setFormat] = useState("");
+  const [entities, setEntities] = useState<EntitySummary[]>([]);
+  const [entityTotal, setEntityTotal] = useState(0);
+  const [entityKinds, setEntityKinds] = useState<Array<{ kind: EntityKind; count: number }>>([]);
+  const [entityKind, setEntityKind] = useState<EntityKind | "">("vehicle");
+  const [selectedEntityId, setSelectedEntityId] = useState("");
+  const [selectedEntity, setSelectedEntity] = useState<GameEntity | null>(null);
+  const [entityLoading, setEntityLoading] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [selected, setSelected] = useState<Asset | null>(null);
   const [metadata, setMetadata] = useState<AssetMetadata | null>(null);
@@ -163,20 +209,33 @@ function App() {
   useEffect(() => {
     if (!sourceId) {
       setAssets([]);
+      setEntities([]);
       setStats({ total_assets: 0, formats: [] });
       setPalettes([]);
       setSelectedId("");
+      setSelectedEntityId("");
       return;
     }
     let cancelled = false;
+    Promise.all([api.stats(sourceId), api.palettes(sourceId)])
+      .then(([nextStats, nextPalettes]) => {
+        if (cancelled) return;
+        setStats(nextStats);
+        setPalettes(nextPalettes);
+      })
+      .catch((reason: Error) => !cancelled && setError(reason.message));
+    return () => { cancelled = true; };
+  }, [sourceId]);
+
+  useEffect(() => {
+    if (!sourceId || view !== "assets") return;
+    let cancelled = false;
     const timer = window.setTimeout(() => {
-      Promise.all([api.assets(sourceId, query, format), api.stats(sourceId), api.palettes(sourceId)])
-        .then(([page, nextStats, nextPalettes]) => {
+      api.assets(sourceId, query, format)
+        .then((page) => {
           if (cancelled) return;
           setAssets(page.items);
           setTotal(page.total);
-          setStats(nextStats);
-          setPalettes(nextPalettes);
           setSelectedId((current) =>
             page.items.some((asset) => asset.id === current)
               ? current
@@ -189,7 +248,45 @@ function App() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [sourceId, query, format]);
+  }, [sourceId, query, format, view]);
+
+  useEffect(() => {
+    if (!sourceId || view !== "entities") return;
+    let cancelled = false;
+    setEntityLoading(true);
+    const timer = window.setTimeout(() => {
+      api.entities(sourceId, query, entityKind)
+        .then((page) => {
+          if (cancelled) return;
+          setEntities(page.items);
+          setEntityTotal(page.total);
+          setEntityKinds(page.kinds);
+          setSelectedEntityId((current) =>
+            page.items.some((entity) => entity.id === current)
+              ? current
+              : page.items.find((entity) => entity.renderable)?.id || page.items[0]?.id || "",
+          );
+        })
+        .catch((reason: Error) => !cancelled && setError(reason.message))
+        .finally(() => !cancelled && setEntityLoading(false));
+    }, query ? 180 : 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [sourceId, query, entityKind, view]);
+
+  useEffect(() => {
+    if (!sourceId || !selectedEntityId || view !== "entities") {
+      setSelectedEntity(null);
+      return;
+    }
+    let cancelled = false;
+    api.entity(sourceId, selectedEntityId)
+      .then((entity) => !cancelled && setSelectedEntity(entity))
+      .catch((reason: Error) => !cancelled && setError(reason.message));
+    return () => { cancelled = true; };
+  }, [sourceId, selectedEntityId, view]);
 
   useEffect(() => {
     setFrame(0);
@@ -324,14 +421,26 @@ function App() {
               <div><strong>{activeSource?.archive_count.toLocaleString("zh-CN")}</strong><span>归档</span></div>
             </section>
 
-            <nav className="format-nav" aria-label="资产格式">
+            <div className="view-switch" role="group" aria-label="浏览方式">
+              <button className={view === "assets" ? "active" : ""} onClick={() => { setView("assets"); setQuery(""); }}><Icon name="archive" size={15} />资源文件</button>
+              <button className={view === "entities" ? "active" : ""} onClick={() => { setView("entities"); setQuery(""); }}><Icon name="unit" size={16} />游戏单位</button>
+            </div>
+
+            {view === "assets" ? <nav className="format-nav" aria-label="资产格式">
               <button className={!format ? "active" : ""} onClick={() => setFormat("")}><span><Icon name="archive" />全部资产</span><em>{stats.total_assets}</em></button>
               {stats.formats.map((item) => (
                 <button key={item.format} className={format === item.format ? "active" : ""} onClick={() => setFormat(item.format)}>
                   <span><Icon name={assetIcon(item.format)} />{formatLabels[item.format] || item.format.toUpperCase()}</span><em>{item.count}</em>
                 </button>
               ))}
-            </nav>
+            </nav> : <nav className="format-nav entity-kind-nav" aria-label="单位类型">
+              <button className={!entityKind ? "active" : ""} onClick={() => setEntityKind("")}><span><Icon name="unit" />全部单位</span><em>{entityKinds.reduce((sum, item) => sum + item.count, 0)}</em></button>
+              {entityKinds.map((item) => (
+                <button key={item.kind} className={entityKind === item.kind ? "active" : ""} onClick={() => setEntityKind(item.kind)}>
+                  <span><Icon name="unit" />{entityKindLabels[item.kind]}</span><em>{item.count}</em>
+                </button>
+              ))}
+            </nav>}
 
             <section className="reference-card">
               <div className="reference-title"><Icon name="settings" /><span>文件名识别库</span></div>
@@ -340,7 +449,7 @@ function App() {
             </section>
           </aside>
 
-          <section className="asset-panel panel">
+          {view === "assets" ? <><section className="asset-panel panel">
             <div className="asset-toolbar">
               <label className="search-box"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、路径或 CRC…" aria-label="搜索资产" />{query && <button onClick={() => setQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</label>
               <span className="result-count">显示 {assets.length} / {total}</span>
@@ -375,6 +484,18 @@ function App() {
             setPaletteId={setPaletteId}
             previewUrl={previewUrl}
           />
+          </> : <>
+            <EntityListPanel
+              entities={entities}
+              total={entityTotal}
+              loading={entityLoading}
+              query={query}
+              setQuery={setQuery}
+              selectedId={selectedEntityId}
+              setSelectedId={setSelectedEntityId}
+            />
+            <EntityDetailPanel sourceId={sourceId} entity={selectedEntity} />
+          </>}
         </main>
       )}
 
@@ -409,6 +530,82 @@ function EmptyLibrary({ busy, discoveries, onDemo, onAdd, onImport }: {
       </div>
       <div className="feature-strip"><span><b>01</b>本地只读索引</span><span><b>02</b>13 种资源识别</span><span><b>03</b>真实格式预览</span></div>
     </main>
+  );
+}
+
+function EntityListPanel({ entities, total, loading, query, setQuery, selectedId, setSelectedId }: {
+  entities: EntitySummary[];
+  total: number;
+  loading: boolean;
+  query: string;
+  setQuery: (value: string) => void;
+  selectedId: string;
+  setSelectedId: (id: string) => void;
+}) {
+  return (
+    <section className="asset-panel entity-panel panel">
+      <div className="asset-toolbar">
+        <label className="search-box"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索中文名、单位 ID、武器或阵营…" aria-label="搜索游戏单位" />{query && <button onClick={() => setQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</label>
+        <span className="result-count">显示 {entities.length} / {total}</span>
+      </div>
+      <div className="list-heading entity-list-heading"><span>游戏单位</span><span>类型</span><span>数值</span></div>
+      <div className="asset-list">
+        {entities.map((entity) => (
+          <button key={entity.id} className={`asset-row entity-row ${selectedId === entity.id ? "selected" : ""}`} onClick={() => setSelectedId(entity.id)}>
+            <span className={`file-icon entity-icon ${entity.renderable ? "ready" : "missing"}`}><Icon name="unit" /></span>
+            <span className="asset-main"><strong>{entity.display_name}</strong><small>{entity.id} → {entity.image}{entity.internal_name !== entity.display_name ? ` · ${entity.internal_name}` : ""}</small></span>
+            <span className="entity-kind">{entityKindLabels[entity.kind]}</span>
+            <span className="entity-stats"><strong>{entity.cost ? `$${entity.cost}` : "—"}</strong><small>{entity.strength ? `${entity.strength} HP` : entity.renderable ? `${entity.component_count} 个组件` : "缺少主体"}</small></span>
+            <Icon name="chevron" size={15} />
+          </button>
+        ))}
+        {loading && entities.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在解析规则实体…</strong></div>}
+        {!loading && entities.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的单位</strong><span>尝试清除关键词或切换单位类型。</span><button onClick={() => setQuery("")}>清除搜索</button></div>}
+      </div>
+    </section>
+  );
+}
+
+function EntityDetailPanel({ sourceId, entity }: { sourceId: string; entity: GameEntity | null }) {
+  if (!entity) return <aside className="detail-panel panel empty-detail"><div className="empty-detail-icon"><Icon name="unit" size={30} /></div><strong>选择一个游戏单位</strong><span>查看组合预览、规则和实际组件</span></aside>;
+  const rules = Object.entries(entity.rules).filter(([key]) => ruleLabels[key]);
+  return (
+    <aside className="detail-panel entity-detail panel">
+      <div className="detail-title"><div><span className="format-pill">{entityKindLabels[entity.kind]}</span><h2 title={entity.display_name}>{entity.display_name}</h2><small>{entity.id} · {entity.internal_name}</small></div></div>
+
+      {entity.renderable ? <div className="preview-block entity-preview">
+        <div className={`preview-stage ${entity.voxel ? "vxl" : "shp"}`}><div className="preview-rulers horizontal" /><div className="preview-rulers vertical" /><img src={api.entityPreviewUrl(sourceId, entity.id, 4)} alt={`${entity.display_name} 组合预览`} /></div>
+      </div> : <div className="unsupported-preview"><Icon name="unit" size={34} /><strong>缺少主体资产</strong><span>可在组件列表核对期望文件名。</span></div>}
+
+      <div className="entity-identity">
+        <span>规则映射</span>
+        <strong><code>{entity.id}</code><i>→</i><code>{entity.image}</code></strong>
+        <small>{entity.voxel ? "VXL 多部件单位" : "SHP 帧动画单位"} · {entity.component_count} 个已关联组件</small>
+      </div>
+
+      <div className="metadata entity-rules">
+        <h3>规则属性</h3>
+        <dl>
+          {rules.map(([key, value]) => <div key={key}><dt>{ruleLabels[key]}</dt><dd>{value}</dd></div>)}
+        </dl>
+      </div>
+
+      <div className="entity-components">
+        <h3>实际组件</h3>
+        <div>
+          {entity.components.map((component) => component.asset ? <a key={component.role} href={api.contentUrl(component.asset.id)} title={component.asset.virtual_path}>
+            <span className={`file-icon format-${component.asset.format}`}><Icon name={assetIcon(component.asset.format)} size={15} /></span>
+            <span><strong>{componentRoleLabels[component.role] || component.role}</strong><small>{component.asset.display_name}</small></span>
+            <em>{formatBytes(component.asset.size)}</em>
+            <Icon name="download" size={14} />
+          </a> : <div className="missing-component" key={component.role}>
+            <span className="file-icon"><Icon name="file" size={15} /></span>
+            <span><strong>{componentRoleLabels[component.role] || component.role}</strong><small>{component.expected_name}</small></span>
+            <em>未找到</em>
+          </div>)}
+        </div>
+      </div>
+    </aside>
   );
 }
 

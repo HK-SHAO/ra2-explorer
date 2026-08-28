@@ -407,15 +407,25 @@ def _select_palette(
         "des": "des",
         "ubn": "ubn",
         "lun": "lun",
-    }.get(extension, "tem")
-    uses_iso_palette = asset.get("format") == "tmp" or extension in {
-        "tem",
-        "sno",
-        "urb",
-        "ubn",
-        "lun",
-        "des",
-    }
+    }.get(extension)
+    virtual_path = str(asset.get("virtual_path") or "").casefold()
+    if theater is None:
+        theater = next(
+            (
+                code
+                for marker, code in (
+                    ("snow.mix", "sno"),
+                    ("urbann.mix", "ubn"),
+                    ("urban.mix", "urb"),
+                    ("lunar.mix", "lun"),
+                    ("desert.mix", "des"),
+                    ("temperat.mix", "tem"),
+                )
+                if marker in virtual_path
+            ),
+            "tem",
+        )
+    uses_iso_palette = asset.get("format") == "tmp"
     preferred = (
         [f"iso{theater}.pal", "isotem.pal", f"unit{theater}.pal", "unittem.pal"]
         if uses_iso_palette

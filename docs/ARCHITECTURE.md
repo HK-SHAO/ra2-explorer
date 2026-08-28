@@ -52,7 +52,11 @@ Python 服务是唯一的数据访问入口。CLI 和 HTTP API 都调用 `Source
 
 实体来自 `VehicleTypes`、`InfantryTypes`、`AircraftTypes` 和 `BuildingTypes`，经规则 `Image`、ART `Image` 与 `Voxel/NewTheater` 解析到真实文件。VXL 单位会关联主体、HVA、`TUR` 炮塔、`BARL` 炮管与 Cameo；SHP 单位会按剧场扩展选择主体。组合预览把每个 VXL 部件的边界、比例和 HVA 帧变换投影到同一个世界坐标系，不再把部件分别居中。
 
+调色板按资源语义选择：TMP 使用 `iso*.pal`，SHP/VXL 使用 `unit*.pal`；具体 TEM/SNO/URB/UBN/LUN/DES 变体优先从资产所在剧场归档判断。建筑 SHP 即使来自 `SNOW.MIX` 也使用 `unitsno.pal`，不能因其等距布局误用 `isosno.pal`。
+
 语义目录当前是扫描索引上的可重建内存视图，不复制游戏内容，也不写回 RULES/ART。它已经支持单位检索、规则/艺术参数核对、组件溯源与静态组合预览；阵营换色、完整覆盖 Profile、武器依赖图和 HVA 时间轴播放仍是后续能力。
+
+Web UI 在现有三栏工作台中复用来源、搜索和详情交互：“游戏单位”默认显示载具，可切换步兵、航空器、建筑或全部实体；详情中的每个组件都能直接导出原始字节。
 
 ## MIX 名称与加密
 
