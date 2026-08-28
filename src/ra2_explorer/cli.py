@@ -17,7 +17,6 @@ from ra2_explorer.background import (
     uninstall_autostart,
 )
 from ra2_explorer.config import DEFAULT_HOST, DEFAULT_PORT, load_settings
-from ra2_explorer.demo import create_demo_installation
 from ra2_explorer.discovery import discover_installations
 from ra2_explorer.reference_data import sync_known_names
 from ra2_explorer.semantic import ENTITY_KINDS
@@ -47,13 +46,23 @@ def build_parser() -> argparse.ArgumentParser:
     scan = subcommands.add_parser("scan", help="重新扫描已注册目录")
     scan.add_argument("source_id")
 
-    demo = subcommands.add_parser("demo", help="创建并导入合成演示资源")
-    demo.add_argument("--path", type=Path)
+    remove_source = subcommands.add_parser("remove-source", help="从索引移除资源目录")
+    remove_source.add_argument("source_id")
 
     sync = subcommands.add_parser("sync-names", help="同步固定版本的 RA2 文件名库")
     sync.add_argument("--timeout", type=float, default=30.0)
 
     subcommands.add_parser("discover", help="发现 Steam、EA App 与旧版合法安装目录")
+
+    subcommands.add_parser("sources", help="列出已注册资源目录")
+
+    stats = subcommands.add_parser("stats", help="显示资源格式统计")
+    stats.add_argument("source_id")
+
+    extract = subcommands.add_parser("extract", help="将资产按需解出到 RA2MD-Ext")
+    extract.add_argument("source_id")
+    extract.add_argument("--format", action="append")
+    extract.add_argument("--limit", type=int, default=500)
 
     verify = subcommands.add_parser("verify", help="按格式抽样验证真实资源目录")
     verify.add_argument("source_id")
@@ -135,10 +144,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(source, ensure_ascii=False, indent=2))
         return 0
 
-    if args.command == "demo":
-        target = args.path or settings.data_dir / "demo-ra2"
-        create_demo_installation(target)
-        source = services.library.import_source(target, "RA2 Explorer 演示库")
+    if args.command == "remove-source":
+        source = services.database.delete_source(args.source_id)
         print(json.dumps(source, ensure_ascii=False, indent=2))
         return 0
 
@@ -149,6 +156,49 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "discover":
         print(json.dumps(discover_installations(), ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "sources":
+        for source in services.database.list_sources():
+            print(
+                f"{source['id']}  {source['state']:<17}  "
+                f"{source['asset_count']:>6}  {source['name']}"
+            )
+        return 0
+
+    if args.command == "stats":
+        print(
+            json.dumps(
+                services.database.stats(args.source_id),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+
+    if args.command == "extract":
+        page = services.database.list_assets(
+            source_id=args.source_id,
+            asset_formats=tuple(args.format or ()),
+            limit=max(1, min(args.limit, 50_000)),
+        )
+        extracted_bytes = 0
+        for asset in page["items"]:
+            _, data = services.reader.read(str(asset["id"]))
+            extracted_bytes += len(data)
+        print(
+            json.dumps(
+                {
+                    "source_id": args.source_id,
+                    "extracted": len(page["items"]),
+                    "available": page["total"],
+                    "bytes": extracted_bytes,
+                    "derived_root": str(settings.derived_root),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
 
     if args.command == "verify":

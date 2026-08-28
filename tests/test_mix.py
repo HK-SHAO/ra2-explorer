@@ -20,20 +20,22 @@ def test_encrypted_ra2_mix_round_trip() -> None:
     key_source_hash = hashlib.sha256(b"cnc-formats-test-keysource").digest()
     key_source = key_source_hash + key_source_hash + key_source_hash[:16]
     archive = build_mix(
-        [("demo.shp", b"sprite"), ("rules.ini", b"[General]\n")],
+        [("fixture.shp", b"sprite"), ("rules.ini", b"[General]\n")],
         hash_type=MixHashType.RA2,
         encrypted=True,
         key_source=key_source,
     )
 
     index = parse_mix(archive)
-    names = ("demo.shp", "rules.ini")
+    names = ("fixture.shp", "rules.ini")
     hash_type, resolved = resolve_mix_names(index.entries, names)
 
     assert index.encrypted is True
     assert hash_type is MixHashType.RA2
     assert set(resolved.values()) == set(names)
-    sprite_entry = next(entry for entry in index.entries if entry.crc == ra2_mix_hash("demo.shp"))
+    sprite_entry = next(
+        entry for entry in index.entries if entry.crc == ra2_mix_hash("fixture.shp")
+    )
     assert bytes(index.payload(archive, sprite_entry)) == b"sprite"
 
 

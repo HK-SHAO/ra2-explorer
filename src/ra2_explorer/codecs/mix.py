@@ -274,7 +274,7 @@ def build_mix(
     encrypted: bool = False,
     key_source: bytes | None = None,
 ) -> bytes:
-    """Build a deterministic MIX used by the local demo and synthetic fixtures."""
+    """Build a deterministic MIX used by synthetic test fixtures."""
     materialized = list(files)
     hash_fn = ra2_mix_hash if hash_type is MixHashType.RA2 else classic_mix_hash
     data_size = sum(len(payload) for _, payload in materialized)

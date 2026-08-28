@@ -14,7 +14,13 @@ from ra2_explorer.codecs.hva import parse_hva
 from ra2_explorer.codecs.pal import Palette, grayscale_palette
 from ra2_explorer.codecs.shp import parse_shp
 from ra2_explorer.codecs.text import parse_ini
-from ra2_explorer.codecs.vxl import VxlRenderPart, parse_vxl, render_vxl_composite
+from ra2_explorer.codecs.vxl import (
+    VxlRenderPart,
+    VxlScene,
+    build_vxl_scene,
+    parse_vxl,
+    render_vxl_composite,
+)
 from ra2_explorer.errors import AssetNotFoundError, InvalidFormatError, Ra2ExplorerError
 from ra2_explorer.library import AssetReader
 from ra2_explorer.storage import Database
@@ -360,21 +366,7 @@ class SemanticLibrary:
         if body is None:
             raise InvalidFormatError("该单位没有可渲染的主体资产")
         if body["format"] == "vxl":
-            parts = []
-            for role, animation_role in (
-                ("body", "body_hva"),
-                ("turret", "turret_hva"),
-                ("barrel", "barrel_hva"),
-            ):
-                asset = entity.component(role)
-                if not asset:
-                    continue
-                model = self._parse_asset(asset, parse_vxl)
-                animation_asset = entity.component(animation_role)
-                animation = None
-                if animation_asset:
-                    animation = self._parse_asset(animation_asset, parse_hva)
-                parts.append(VxlRenderPart(model, animation))
+            parts = self._voxel_parts(entity)
             return entity, render_vxl_composite(
                 parts,
                 palette=palette,
@@ -394,6 +386,44 @@ class SemanticLibrary:
             active_palette,
             scale=scale,
         )
+
+    def model_scene(
+        self,
+        source_id: str,
+        entity_id: str,
+        *,
+        palette: Palette | None,
+        frame: int,
+        player_color: str | None,
+    ) -> tuple[GameEntity, VxlScene]:
+        entity = self.catalog(source_id).get(entity_id)
+        body = entity.component("body")
+        if body is None or body["format"] != "vxl":
+            raise InvalidFormatError("该单位不是可交互的 VXL 模型")
+        return entity, build_vxl_scene(
+            self._voxel_parts(entity),
+            palette=palette,
+            frame=frame,
+            player_color=player_color,
+        )
+
+    def _voxel_parts(self, entity: GameEntity) -> tuple[VxlRenderPart, ...]:
+        parts = []
+        for role, animation_role in (
+            ("body", "body_hva"),
+            ("turret", "turret_hva"),
+            ("barrel", "barrel_hva"),
+        ):
+            asset = entity.component(role)
+            if not asset:
+                continue
+            model = self._parse_asset(asset, parse_vxl)
+            animation_asset = entity.component(animation_role)
+            animation = None
+            if animation_asset:
+                animation = self._parse_asset(animation_asset, parse_hva)
+            parts.append(VxlRenderPart(model, animation))
+        return tuple(parts)
 
     def _preview_info(self, entity: GameEntity) -> dict[str, object]:
         body = entity.component("body")

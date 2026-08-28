@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, lazy, ReactNode, Suspense, useEffect, useMemo, useState } from "react";
 
 import {
   api,
@@ -11,12 +11,17 @@ import {
   GameEntity,
   GameInstallation,
   PlayerColor,
-  ReferenceStatus,
   SemanticDiagnostics,
   Source,
   Stats,
   TextAsset,
 } from "./api";
+
+const VoxelViewer = lazy(async () => ({ default: (await import("./VoxelViewer")).VoxelViewer }));
+
+function VoxelPreview({ url, label }: { url: string; label: string }) {
+  return <Suspense fallback={<div className="voxel-viewer"><div className="voxel-status">正在载入三维视图…</div></div>}><VoxelViewer url={url} label={label} /></Suspense>;
+}
 
 type IconName =
   | "archive"
@@ -25,8 +30,10 @@ type IconName =
   | "download"
   | "file"
   | "folder"
+  | "grid"
   | "image"
   | "info"
+  | "list"
   | "pause"
   | "play"
   | "refresh"
@@ -44,8 +51,10 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     download: <><path d="M12 3v12m0 0 4-4m-4 4-4-4" /><path d="M5 20h14" /></>,
     file: <><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /></>,
     folder: <path d="M3 6h7l2 2h9v11H3z" />,
+    grid: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
     image: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="m4 17 5-4 4 3 3-2 4 3" /></>,
     info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10h.01" /></>,
+    list: <><path d="M8 6h13M8 12h13M8 18h13" /><path d="M3 6h.01M3 12h.01M3 18h.01" /></>,
     pause: <><path d="M9 7v10M15 7v10" /></>,
     play: <path d="m9 7 8 5-8 5z" />,
     refresh: <><path d="M20 11a8 8 0 0 0-14.8-4L3 10" /><path d="M3 5v5h5M4 13a8 8 0 0 0 14.8 4L21 14" /><path d="M21 19v-5h-5" /></>,
@@ -75,6 +84,7 @@ const formatLabels: Record<string, string> = {
   map: "地图配置",
   text: "文本",
   wav: "WAV 音频",
+  bag_audio: "游戏语音",
   aud: "AUD 音效",
   bag: "音频包",
   idx: "音频索引",
@@ -201,8 +211,52 @@ function assetIcon(format: string): IconName {
   if (["shp", "tmp", "vxl", "pcx"].includes(format)) return "image";
   if (format === "pal") return "swatch";
   if (format === "mix") return "archive";
-  if (["wav", "aud"].includes(format)) return "play";
+  if (["wav", "aud", "bag_audio"].includes(format)) return "play";
   return "file";
+}
+
+type LayoutMode = "list" | "grid";
+
+const audioFormats = ["bag_audio", "wav", "aud"];
+const imageFormats = ["shp", "tmp", "pcx", "pal"];
+const defaultVisibleFormats = [
+  "vxl", "shp", "video", "map", "bag_audio", "wav", "aud", "tmp", "pcx", "ini", "csf", "text",
+];
+const assetCategories: Array<{
+  id: string;
+  label: string;
+  formats: string[];
+  icon: IconName;
+}> = [
+  { id: "core", label: "核心素材", formats: ["vxl", "shp", "video", "map", ...audioFormats], icon: "spark" },
+  { id: "models", label: "单位模型", formats: ["vxl"], icon: "unit" },
+  { id: "voices", label: "游戏语音", formats: ["bag_audio"], icon: "play" },
+  { id: "sounds", label: "游戏音效", formats: ["wav", "aud"], icon: "play" },
+  { id: "animations", label: "动画", formats: ["shp", "video"], icon: "image" },
+  { id: "maps", label: "地图", formats: ["map"], icon: "grid" },
+  { id: "images", label: "图像", formats: ["pcx"], icon: "image" },
+  { id: "terrain", label: "地形素材", formats: ["tmp"], icon: "image" },
+  { id: "rules", label: "规则文本", formats: ["ini", "csf", "text"], icon: "file" },
+  { id: "all", label: "全部资源", formats: [], icon: "archive" },
+];
+
+function initialVisibleFormats() {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem("ra2exp-visible-formats") || "null");
+    if (Array.isArray(stored) && stored.every((item) => typeof item === "string")) return stored as string[];
+  } catch {
+    // Ignore invalid local preferences and use the product defaults.
+  }
+  return defaultVisibleFormats;
+}
+
+function categoryCount(stats: Stats, formats: string[]) {
+  if (!formats.length) return stats.total_assets;
+  const selected = new Set(formats);
+  return stats.formats.reduce(
+    (total, item) => total + (selected.has(item.format) ? item.count : 0),
+    0,
+  );
 }
 
 function App() {
@@ -210,12 +264,17 @@ function App() {
   const [sources, setSources] = useState<Source[]>([]);
   const [sourceId, setSourceId] = useState("");
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [assetPageLoading, setAssetPageLoading] = useState(false);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<Stats>({ total_assets: 0, formats: [] });
   const [palettes, setPalettes] = useState<Asset[]>([]);
   const [playerColors, setPlayerColors] = useState<PlayerColor[]>([]);
   const [assetQuery, setAssetQuery] = useState("");
-  const [format, setFormat] = useState("");
+  const [assetCategory, setAssetCategory] = useState("core");
+  const [enabledFormats, setEnabledFormats] = useState<string[]>(initialVisibleFormats);
+  const [layout, setLayout] = useState<LayoutMode>(() =>
+    window.localStorage.getItem("ra2exp-layout") === "grid" ? "grid" : "list",
+  );
   const [entities, setEntities] = useState<EntitySummary[]>([]);
   const [entityTotal, setEntityTotal] = useState(0);
   const [entityKinds, setEntityKinds] = useState<Array<{ kind: EntityKind; count: number }>>([]);
@@ -240,11 +299,26 @@ function App() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [addOpen, setAddOpen] = useState(false);
-  const [reference, setReference] = useState<ReferenceStatus | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [discovery, setDiscovery] = useState<DiscoveryResult>({ candidates: [], checked_locations: [], official_sources: [] });
 
   const activeSource = sources.find((item) => item.id === sourceId) ?? null;
   const sourceRevision = activeSource?.scanned_at || "";
+  const selectedCategory = assetCategories.find((item) => item.id === assetCategory) || assetCategories[0];
+  const assetFormats = (selectedCategory.formats.length ? selectedCategory.formats : enabledFormats)
+    .filter((formatName) => enabledFormats.includes(formatName));
+  const assetFormatKey = assetFormats.join(",");
+
+  function updateLayout(next: LayoutMode) {
+    setLayout(next);
+    window.localStorage.setItem("ra2exp-layout", next);
+  }
+
+  function updateEnabledFormats(next: string[]) {
+    const unique = [...new Set(next)];
+    setEnabledFormats(unique);
+    window.localStorage.setItem("ra2exp-visible-formats", JSON.stringify(unique));
+  }
 
   async function refreshSources(preferredId?: string) {
     const next = await api.sources();
@@ -256,14 +330,12 @@ function App() {
   useEffect(() => {
     Promise.all([
       api.sources(),
-      api.referenceStatus(),
       api.discovery().catch(() => ({ candidates: [], checked_locations: [], official_sources: [] })),
       api.playerColors().catch(() => []),
     ])
-      .then(([nextSources, nextReference, nextDiscovery, nextPlayerColors]) => {
+      .then(([nextSources, nextDiscovery, nextPlayerColors]) => {
         setSources(nextSources);
         setSourceId(nextSources[0]?.id || "");
-        setReference(nextReference);
         setDiscovery(nextDiscovery);
         setPlayerColors(nextPlayerColors);
       })
@@ -308,9 +380,19 @@ function App() {
 
   useEffect(() => {
     if (!sourceId || view !== "assets") return;
+    if (!assetFormats.length) {
+      setAssets([]);
+      setTotal(0);
+      setSelectedId("");
+      setAssetPageLoading(false);
+      return;
+    }
     let cancelled = false;
+    setAssetPageLoading(true);
+    setAssets([]);
+    setTotal(0);
     const timer = window.setTimeout(() => {
-      api.assets(sourceId, assetQuery, format)
+      api.assets(sourceId, assetQuery, assetFormatKey ? assetFormatKey.split(",") : [])
         .then((page) => {
           if (cancelled) return;
           setAssets(page.items);
@@ -318,16 +400,21 @@ function App() {
           setSelectedId((current) =>
             page.items.some((asset) => asset.id === current)
               ? current
-              : page.items.find((asset) => asset.format === "shp")?.id || page.items[0]?.id || "",
+              : page.items.find((asset) => asset.format === "vxl")?.id
+                || page.items.find((asset) => asset.format === "bag_audio")?.id
+                || page.items.find((asset) => asset.format === "shp")?.id
+                || page.items[0]?.id
+                || "",
           );
         })
-        .catch((reason: Error) => !cancelled && setError(reason.message));
+        .catch((reason: Error) => !cancelled && setError(reason.message))
+        .finally(() => !cancelled && setAssetPageLoading(false));
     }, assetQuery ? 180 : 0);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [sourceId, sourceRevision, assetQuery, format, view]);
+  }, [sourceId, sourceRevision, assetQuery, assetFormatKey, view]);
 
   useEffect(() => {
     if (!sourceId || view !== "entities") return;
@@ -426,7 +513,7 @@ function App() {
   }, [notice]);
 
   const previewUrl = useMemo(() => {
-    if (!selected || !["shp", "pal", "vxl", "tmp", "pcx"].includes(selected.format)) return "";
+    if (!selected || !imageFormats.includes(selected.format)) return "";
     const scale = selected.format === "pcx" ? 1 : selected.format === "pal" ? 3 : selected.format === "shp" ? 5 : 4;
     return api.previewUrl(selected.id, frame, paletteId, scale);
   }, [selected, frame, paletteId]);
@@ -445,17 +532,20 @@ function App() {
     }
   }
 
-  async function syncNames() {
-    setBusy(true);
-    setError("");
+  async function loadMoreAssets() {
+    if (assetPageLoading || assets.length >= total || !sourceId || !assetFormats.length) return;
+    setAssetPageLoading(true);
     try {
-      const status = await api.syncNames();
-      setReference({ ...status, available: true, manifest_valid: true });
-      setNotice(`文件名库已同步：${status.name_count?.toLocaleString("zh-CN") || "完成"} 条`);
+      const page = await api.assets(sourceId, assetQuery, assetFormats, assets.length);
+      setAssets((current) => {
+        const known = new Set(current.map((asset) => asset.id));
+        return [...current, ...page.items.filter((asset) => !known.has(asset.id))];
+      });
+      setTotal(page.total);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "同步失败");
+      setError(reason instanceof Error ? reason.message : "载入失败");
     } finally {
-      setBusy(false);
+      setAssetPageLoading(false);
     }
   }
 
@@ -473,6 +563,7 @@ function App() {
         <div className="topbar-actions">
           {activeSource && <span className={`source-status ${activeSource.state}`}><i />{stateLabel(activeSource.state)}</span>}
           <button className="button ghost compact" onClick={() => setAddOpen(true)}><Icon name="folder" />添加目录</button>
+          <button className="button ghost compact settings-button" onClick={() => setSettingsOpen(true)}><Icon name="settings" />素材设置</button>
           <button className="button primary compact" disabled={busy || !activeSource} onClick={() => activeSource && runAction(() => api.scanSource(activeSource.id), "目录索引已更新")}><Icon name="refresh" />重新扫描</button>
         </div>
       </header>
@@ -481,7 +572,6 @@ function App() {
         <EmptyLibrary
           busy={busy}
           discoveries={discovery.candidates}
-          onDemo={() => runAction(api.createDemo, "格式验证资料库已创建")}
           onAdd={() => setAddOpen(true)}
           onImport={(installation) => runAction(
             () => api.addSource(installation.path, installation.name),
@@ -499,7 +589,6 @@ function App() {
                 </select>
                 <Icon name="chevron" size={15} />
               </label>
-              {activeSource && <p className="source-path" title={activeSource.root_path}>{activeSource.root_path}</p>}
             </section>
 
             <section className="summary-grid" aria-label="索引统计">
@@ -517,14 +606,13 @@ function App() {
               <button className={view === "entities" ? "active" : ""} onClick={() => setView("entities")}><Icon name="unit" size={16} />游戏单位</button>
             </div>
 
-            {view === "assets" ? <nav className="format-nav" aria-label="资产格式">
-              <button className={!format ? "active" : ""} onClick={() => setFormat("")}><span><Icon name="archive" />全部资产</span><em>{stats.total_assets}</em></button>
-              {stats.formats.map((item) => (
-                <button key={item.format} className={format === item.format ? "active" : ""} onClick={() => setFormat(item.format)}>
-                  <span><Icon name={assetIcon(item.format)} />{formatLabels[item.format] || item.format.toUpperCase()}</span><em>{item.count}</em>
+            {view === "assets" ? <nav className="format-nav" aria-label="素材分类" tabIndex={0}>
+              {assetCategories.map((item) => (
+                <button key={item.id} className={assetCategory === item.id ? "active" : ""} onClick={() => setAssetCategory(item.id)}>
+                  <span><Icon name={item.icon} />{item.label}</span><em>{categoryCount(stats, (item.formats.length ? item.formats : enabledFormats).filter((formatName) => enabledFormats.includes(formatName)))}</em>
                 </button>
               ))}
-            </nav> : <nav className="format-nav entity-kind-nav" aria-label="单位类型">
+            </nav> : <nav className="format-nav entity-kind-nav" aria-label="单位类型" tabIndex={0}>
               <button className={!entityKind ? "active" : ""} onClick={() => setEntityKind("")}><span><Icon name="unit" />全部单位</span><em>{entityKinds.reduce((sum, item) => sum + item.count, 0)}</em></button>
               {entityKinds.map((item) => (
                 <button key={item.kind} className={entityKind === item.kind ? "active" : ""} onClick={() => setEntityKind(item.kind)}>
@@ -533,11 +621,7 @@ function App() {
               ))}
             </nav>}
 
-            {view === "assets" ? <section className="reference-card">
-              <div className="reference-title"><Icon name="settings" /><span>文件名识别库</span></div>
-              <p>{reference?.available ? `${reference.name_count?.toLocaleString("zh-CN") || "扩展"} 个已知名称` : "当前仅使用内置基础名称"}</p>
-              <button disabled={busy} onClick={syncNames}>{reference?.available ? "重新同步" : "同步成熟名称库"}<Icon name="chevron" size={13} /></button>
-            </section> : <SemanticCoverageCard
+            {view === "entities" && <SemanticCoverageCard
               diagnostics={semanticDiagnostics}
               onShowMissing={() => {
                 setEntityKind("");
@@ -548,21 +632,23 @@ function App() {
 
           {view === "assets" ? <><section className="asset-panel panel">
             <div className="asset-toolbar">
-              <label className="search-box"><Icon name="search" /><input value={assetQuery} onChange={(event) => setAssetQuery(event.target.value)} placeholder="搜索名称、路径或 CRC…" aria-label="搜索资产" />{assetQuery && <button onClick={() => setAssetQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</label>
+              <label className="search-box"><Icon name="search" /><input value={assetQuery} onChange={(event) => setAssetQuery(event.target.value)} placeholder="搜索名称或 CRC…" aria-label="搜索资产" />{assetQuery && <button onClick={() => setAssetQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</label>
               <span className="result-count">显示 {assets.length} / {total}</span>
+              <LayoutToggle layout={layout} onChange={updateLayout} />
             </div>
-            <div className="list-heading"><span>资产</span><span>位置</span><span>大小</span></div>
-            <div className="asset-list">
-              {assets.map((asset) => (
+            {layout === "list" && <div className="list-heading"><span>资产</span><span>大小</span></div>}
+            <div className={`asset-list ${layout === "grid" ? "asset-grid" : ""}`} tabIndex={0} aria-label="资产列表" onScroll={(event) => { const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void loadMoreAssets(); }}>
+              {layout === "list" ? assets.map((asset) => (
                 <button key={asset.id} className={`asset-row ${selectedId === asset.id ? "selected" : ""}`} onClick={() => setSelectedId(asset.id)}>
                   <span className={`file-icon format-${asset.format}`}><Icon name={assetIcon(asset.format)} /></span>
-                  <span className="asset-main"><strong>{asset.display_name}</strong><small>{asset.virtual_path}</small></span>
-                  <span className="asset-location">{asset.storage_kind === "loose" ? "松散文件" : asset.archive_path || "MIX"}</span>
+                  <span className="asset-main"><strong>{asset.display_name}</strong><small>{formatLabels[asset.format] || asset.format.toUpperCase()}</small></span>
                   <span className="asset-size">{formatBytes(asset.size)}</span>
                   <Icon name="chevron" size={15} />
                 </button>
-              ))}
-              {assets.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的资产</strong><span>尝试清除关键词或切换格式。</span><button onClick={() => { setAssetQuery(""); setFormat(""); }}>清除筛选</button></div>}
+              )) : assets.map((asset) => <AssetGridCard key={asset.id} asset={asset} selected={selectedId === asset.id} onSelect={setSelectedId} />)}
+              {assets.length < total && <button className="load-more" disabled={assetPageLoading} onClick={() => void loadMoreAssets()}>{assetPageLoading ? "正在载入…" : `载入更多（剩余 ${(total - assets.length).toLocaleString("zh-CN")}）`}</button>}
+              {assetPageLoading && assets.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在载入资产…</strong></div>}
+              {!assetPageLoading && assets.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的资产</strong><span>尝试清除关键词或切换分类。</span><button onClick={() => { setAssetQuery(""); setAssetCategory("core"); }}>清除筛选</button></div>}
             </div>
           </section>
 
@@ -579,6 +665,7 @@ function App() {
             palettes={palettes}
             paletteId={paletteId}
             setPaletteId={setPaletteId}
+            playerColors={playerColors}
             previewUrl={previewUrl}
           />
           </> : <>
@@ -592,6 +679,9 @@ function App() {
               setAvailability={setEntityAvailability}
               selectedId={selectedEntityId}
               setSelectedId={setSelectedEntityId}
+              sourceId={sourceId}
+              layout={layout}
+              setLayout={updateLayout}
             />
             <EntityDetailPanel
               sourceId={sourceId}
@@ -605,16 +695,16 @@ function App() {
       )}
 
       {addOpen && <AddSourceDialog discoveries={discovery.candidates} busy={busy} onClose={() => setAddOpen(false)} onSubmit={async (path, name) => { await runAction(() => api.addSource(path, name), "资源目录已导入"); setAddOpen(false); }} />}
+      {settingsOpen && <FormatSettingsDialog formats={stats.formats} enabled={enabledFormats} onChange={updateEnabledFormats} onClose={() => setSettingsOpen(false)} />}
       {error && <div className="toast error" role="alert"><Icon name="info" /><span>{error}</span><button onClick={() => setError("")} aria-label="关闭"><Icon name="close" size={15} /></button></div>}
       {notice && <div className="toast success" role="status"><span className="check">✓</span><span>{notice}</span></div>}
     </div>
   );
 }
 
-function EmptyLibrary({ busy, discoveries, onDemo, onAdd, onImport }: {
+function EmptyLibrary({ busy, discoveries, onAdd, onImport }: {
   busy: boolean;
   discoveries: GameInstallation[];
-  onDemo: () => void;
   onAdd: () => void;
   onImport: (installation: GameInstallation) => void;
 }) {
@@ -631,10 +721,32 @@ function EmptyLibrary({ busy, discoveries, onDemo, onAdd, onImport }: {
       </div>}
       <div className="empty-actions">
         <button className="button primary large" onClick={onAdd}><Icon name="folder" />导入游戏目录</button>
-        <button className="button ghost large" disabled={busy} onClick={onDemo}><Icon name="spark" />{busy ? "正在创建…" : "先看格式样本"}</button>
       </div>
-      <div className="feature-strip"><span><b>01</b>本地只读索引</span><span><b>02</b>13 种资源识别</span><span><b>03</b>真实格式预览</span></div>
     </main>
+  );
+}
+
+function LayoutToggle({ layout, onChange }: { layout: LayoutMode; onChange: (layout: LayoutMode) => void }) {
+  return (
+    <div className="layout-toggle" role="group" aria-label="布局方式">
+      <button className={layout === "list" ? "active" : ""} onClick={() => onChange("list")} aria-label="列表视图" title="列表视图"><Icon name="list" size={16} /></button>
+      <button className={layout === "grid" ? "active" : ""} onClick={() => onChange("grid")} aria-label="网格视图" title="网格视图"><Icon name="grid" size={16} /></button>
+    </div>
+  );
+}
+
+function AssetGridCard({ asset, selected, onSelect }: { asset: Asset; selected: boolean; onSelect: (id: string) => void }) {
+  const hasThumbnail = ["shp", "vxl", "tmp", "pcx", "pal"].includes(asset.format);
+  const isAudio = audioFormats.includes(asset.format);
+  return (
+    <button className={`asset-card ${selected ? "selected" : ""}`} onClick={() => onSelect(asset.id)}>
+      <span className={`asset-card-preview format-${asset.format}`}>
+        {hasThumbnail ? <img loading="lazy" src={api.previewUrl(asset.id, 0, "", 3)} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
+          : isAudio ? <span className="audio-glyph" aria-hidden="true">{[4, 11, 7, 17, 12, 20, 9, 14, 5, 10].map((height, index) => <i key={index} style={{ height }} />)}</span>
+            : <Icon name={assetIcon(asset.format)} size={32} />}
+      </span>
+      <span className="asset-card-copy"><strong title={asset.display_name}>{asset.display_name}</strong><small>{formatLabels[asset.format] || asset.format.toUpperCase()} · {formatBytes(asset.size)}</small></span>
+    </button>
   );
 }
 
@@ -658,7 +770,7 @@ function SemanticCoverageCard({ diagnostics, onShowMissing }: {
   );
 }
 
-function EntityListPanel({ entities, total, loading, query, setQuery, availability, setAvailability, selectedId, setSelectedId }: {
+function EntityListPanel({ entities, total, loading, query, setQuery, availability, setAvailability, selectedId, setSelectedId, sourceId, layout, setLayout }: {
   entities: EntitySummary[];
   total: number;
   loading: boolean;
@@ -668,6 +780,9 @@ function EntityListPanel({ entities, total, loading, query, setQuery, availabili
   setAvailability: (value: "" | "true" | "false") => void;
   selectedId: string;
   setSelectedId: (id: string) => void;
+  sourceId: string;
+  layout: LayoutMode;
+  setLayout: (layout: LayoutMode) => void;
 }) {
   return (
     <section className="asset-panel entity-panel panel">
@@ -679,10 +794,11 @@ function EntityListPanel({ entities, total, loading, query, setQuery, availabili
           <option value="false">缺少主体</option>
         </select>
         <span className="result-count">显示 {entities.length} / {total}</span>
+        <LayoutToggle layout={layout} onChange={setLayout} />
       </div>
-      <div className="list-heading entity-list-heading"><span>游戏单位</span><span>类型</span><span>数值</span></div>
-      <div className="asset-list">
-        {entities.map((entity) => (
+      {layout === "list" && <div className="list-heading entity-list-heading"><span>游戏单位</span><span>类型</span><span>数值</span></div>}
+      <div className={`asset-list ${layout === "grid" ? "asset-grid entity-grid" : ""}`} tabIndex={0} aria-label="游戏单位列表">
+        {layout === "list" ? entities.map((entity) => (
           <button key={entity.id} className={`asset-row entity-row ${selectedId === entity.id ? "selected" : ""}`} onClick={() => setSelectedId(entity.id)}>
             <span className={`file-icon entity-icon ${entity.renderable ? "ready" : "missing"}`}><Icon name="unit" /></span>
             <span className="asset-main"><strong>{entity.display_name}</strong><small>{entity.id} → {entity.image}{entity.internal_name !== entity.display_name ? ` · ${entity.internal_name}` : ""}</small></span>
@@ -690,11 +806,22 @@ function EntityListPanel({ entities, total, loading, query, setQuery, availabili
             <span className="entity-stats"><strong>{entity.cost ? `$${entity.cost}` : "—"}</strong><small>{entity.strength ? `${entity.strength} HP` : entity.renderable ? `${entity.component_count} 个组件` : "缺少主体"}</small></span>
             <Icon name="chevron" size={15} />
           </button>
-        ))}
+        )) : entities.map((entity) => <EntityGridCard key={entity.id} entity={entity} sourceId={sourceId} selected={selectedId === entity.id} onSelect={setSelectedId} />)}
         {loading && entities.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在解析规则实体…</strong></div>}
         {!loading && entities.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的单位</strong><span>尝试清除关键词或预览状态。</span><button onClick={() => { setQuery(""); setAvailability(""); }}>清除筛选</button></div>}
       </div>
     </section>
+  );
+}
+
+function EntityGridCard({ entity, sourceId, selected, onSelect }: { entity: EntitySummary; sourceId: string; selected: boolean; onSelect: (id: string) => void }) {
+  return (
+    <button className={`asset-card entity-card ${selected ? "selected" : ""}`} onClick={() => onSelect(entity.id)}>
+      <span className={`asset-card-preview entity-card-preview ${entity.renderable ? "ready" : "missing"}`}>
+        {entity.renderable ? <img loading="lazy" src={api.entityPreviewUrl(sourceId, entity.id, { scale: 3 })} alt="" onError={(event) => { event.currentTarget.hidden = true; }} /> : <Icon name="unit" size={34} />}
+      </span>
+      <span className="asset-card-copy"><strong title={entity.display_name}>{entity.display_name}</strong><small>{entityKindLabels[entity.kind]} · {entity.cost ? `$${entity.cost}` : entity.component_count ? `${entity.component_count} 个组件` : "缺少主体"}</small></span>
+    </button>
   );
 }
 
@@ -724,9 +851,9 @@ function EntityDetailPanel({ sourceId, entity, loading, palettes, playerColors }
 
   useEffect(() => {
     if (!playing || frameCount < 2) return;
-    const timer = window.setInterval(() => setFrame((current) => (current + 1) % frameCount), 160);
+    const timer = window.setInterval(() => setFrame((current) => (current + 1) % frameCount), entity?.voxel ? 500 : 160);
     return () => window.clearInterval(timer);
-  }, [playing, frameCount]);
+  }, [playing, frameCount, entity?.voxel]);
 
   const previewUrl = useMemo(() => entity?.renderable ? api.entityPreviewUrl(
     sourceId,
@@ -744,14 +871,16 @@ function EntityDetailPanel({ sourceId, entity, loading, palettes, playerColors }
       <div className="detail-title"><div><span className="format-pill">{entityKindLabels[entity.kind]}</span><h2 title={entity.display_name}>{entity.display_name}</h2><small>{entity.id} · {entity.internal_name}</small></div></div>
 
       {entity.renderable ? <div className="preview-block entity-preview">
-        <div className={`preview-stage ${entity.voxel ? "vxl" : "shp"}`}><div className="preview-rulers horizontal" /><div className="preview-rulers vertical" />{previewFailed ? <div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong><span>切换帧或调色板后可重试。</span></div> : <img key={previewUrl} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} />}</div>
+        {entity.voxel
+          ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor, paletteId })} label={entity.display_name} />
+          : <div className="preview-stage shp"><div className="preview-rulers horizontal" /><div className="preview-rulers vertical" />{previewFailed ? <div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div> : <img key={previewUrl} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} />}</div>}
         {frameCount > 1 && <div className="frame-controls">
           <button className="play-button" onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : "play"} size={16} /></button>
           <input type="range" min="0" max={frameCount - 1} value={Math.min(frame, frameCount - 1)} onChange={(event) => setFrame(Number(event.target.value))} aria-label="当前动画帧" />
           <span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(frameCount).padStart(2, "0")}</span>
         </div>}
         <div className="entity-render-options">
-          {entity.preview.supports_facing && <label><span>朝向</span><select value={facing} onChange={(event) => setFacing(Number(event.target.value))}>{Array.from({ length: 8 }, (_, index) => <option key={index} value={index}>{index * 45}°</option>)}</select></label>}
+          {!entity.voxel && entity.preview.supports_facing && <label><span>朝向</span><select value={facing} onChange={(event) => setFacing(Number(event.target.value))}>{Array.from({ length: 8 }, (_, index) => <option key={index} value={index}>{index * 45}°</option>)}</select></label>}
           {entity.preview.supports_player_color && <label><span>阵营色</span><select value={playerColor} onChange={(event) => setPlayerColor(event.target.value)}><option value="">原始色</option>{playerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
           {palettes.length > 0 && <label><span>调色板</span><select value={paletteId} onChange={(event) => setPaletteId(event.target.value)}><option value="">自动</option>{palettes.map((palette) => <option key={palette.id} value={palette.id}>{palette.display_name}</option>)}</select></label>}
         </div>
@@ -785,7 +914,7 @@ function EntityDetailPanel({ sourceId, entity, loading, palettes, playerColors }
       <div className="entity-components">
         <h3>实际组件</h3>
         <div>
-          {entity.components.map((component) => component.asset ? <a key={component.role} href={api.contentUrl(component.asset.id)} title={component.asset.virtual_path}>
+          {entity.components.map((component) => component.asset ? <a key={component.role} href={api.contentUrl(component.asset.id)}>
             <span className={`file-icon format-${component.asset.format}`}><Icon name={assetIcon(component.asset.format)} size={15} /></span>
             <span><strong>{componentRoleLabels[component.role] || component.role}</strong><small>{component.asset.display_name}</small></span>
             <em>{formatBytes(component.asset.size)}</em>
@@ -801,7 +930,7 @@ function EntityDetailPanel({ sourceId, entity, loading, palettes, playerColors }
   );
 }
 
-function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, frame, setFrame, playing, setPlaying, palettes, paletteId, setPaletteId, previewUrl }: {
+function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, frame, setFrame, playing, setPlaying, palettes, paletteId, setPaletteId, playerColors, previewUrl }: {
   asset: Asset | null;
   metadata: AssetMetadata | null;
   textAsset: TextAsset | null;
@@ -814,19 +943,25 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   palettes: Asset[];
   paletteId: string;
   setPaletteId: (id: string) => void;
+  playerColors: PlayerColor[];
   previewUrl: string;
 }) {
+  const [playerColor, setPlayerColor] = useState("");
+  useEffect(() => setPlayerColor(""), [asset?.id]);
   if (!asset) return <aside className="detail-panel panel empty-detail"><div className="empty-detail-icon"><Icon name="image" size={30} /></div><strong>选择一个资产</strong><span>在这里查看预览与技术信息</span></aside>;
-  const canPreview = ["shp", "pal", "vxl", "tmp", "pcx"].includes(asset.format);
+  const canPreview = imageFormats.includes(asset.format);
   const isText = ["ini", "map", "text", "csf"].includes(asset.format);
+  const isAudio = audioFormats.includes(asset.format);
   const frameCount = metadata?.frame_count || 1;
   const activeFrame = metadata?.frames?.[frame];
   const activeLimb = metadata?.limbs?.[frame];
-  const hasFrameControl = ["shp", "vxl", "tmp"].includes(asset.format) && frameCount > 1;
+  const hasFrameControl = ["shp", "tmp"].includes(asset.format) && frameCount > 1;
   const canChoosePalette = ["shp", "vxl", "tmp"].includes(asset.format) && palettes.length > 0;
   return (
     <aside className="detail-panel panel">
       <div className="detail-title"><div><span className="format-pill">{formatLabels[asset.format] || asset.format.toUpperCase()}</span><h2 title={asset.display_name}>{asset.display_name}</h2></div><a className="icon-button" href={api.contentUrl(asset.id)} title="导出原始文件" aria-label="导出原始文件"><Icon name="download" /></a></div>
+
+      {asset.format === "vxl" && <div className="preview-block"><VoxelPreview url={api.assetModelUrl(asset.id, playerColor, paletteId)} label={asset.display_name} /></div>}
 
       {canPreview && (
         <div className="preview-block">
@@ -839,7 +974,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
         </div>
       )}
 
-      {asset.format === "wav" && <div className="audio-preview"><div><Icon name="play" size={25} /><span><strong>本地音频预览</strong><small>{metadata?.audio_format === 17 ? "IMA ADPCM → PCM16 实时转码" : "原始 PCM WAV"}</small></span></div><audio controls preload="metadata" src={api.mediaUrl(asset.id)}>浏览器不支持音频播放。</audio></div>}
+      {isAudio && <div className="audio-preview"><div><Icon name="play" size={25} /><span><strong>音频预览</strong><small>{metadata?.audio_codec || (metadata?.audio_format === 17 ? "IMA ADPCM → PCM16" : "PCM 音频")}</small></span></div><audio controls preload="metadata" src={api.mediaUrl(asset.id)}>浏览器不支持音频播放。</audio></div>}
 
       {isText && <div className="text-preview">
         <label><Icon name="search" size={14} /><input value={textQuery} onChange={(event) => setTextQuery(event.target.value)} placeholder="在当前文件中筛选…" /></label>
@@ -847,9 +982,12 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
         {textAsset && <small>显示 {textAsset.returned_lines} / {textAsset.line_count} 行{textAsset.truncated ? " · 已截断" : ""}</small>}
       </div>}
 
-      {!canPreview && !isText && asset.format !== "wav" && <div className="unsupported-preview"><Icon name={assetIcon(asset.format)} size={34} /><strong>{asset.format === "hva" ? "动画矩阵已解析" : "当前提供结构检查与原始导出"}</strong><span>{asset.format === "hva" ? "可在下方核对帧数和 VXL 部件名称。" : "该格式尚无浏览器内渲染器。"}</span></div>}
+      {!canPreview && !isText && !isAudio && asset.format !== "vxl" && <div className="unsupported-preview"><Icon name={assetIcon(asset.format)} size={34} /><strong>{formatLabels[asset.format] || asset.format.toUpperCase()}</strong></div>}
 
-      {canChoosePalette && <label className="palette-select"><span>渲染调色板</span><select value={paletteId} onChange={(event) => setPaletteId(event.target.value)}><option value="">按剧场自动选择</option>{palettes.map((palette) => <option key={palette.id} value={palette.id}>{palette.display_name}</option>)}</select></label>}
+      {(canChoosePalette || asset.format === "vxl") && <div className="entity-render-options asset-render-options">
+        {asset.format === "vxl" && <label><span>阵营色</span><select value={playerColor} onChange={(event) => setPlayerColor(event.target.value)}><option value="">原始色</option>{playerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
+        {canChoosePalette && <label><span>调色板</span><select value={paletteId} onChange={(event) => setPaletteId(event.target.value)}><option value="">自动</option>{palettes.map((palette) => <option key={palette.id} value={palette.id}>{palette.display_name}</option>)}</select></label>}
+      </div>}
 
       <div className="metadata">
         <h3>资产信息</h3>
@@ -866,14 +1004,54 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
           {metadata?.entry_count !== undefined && <div><dt>配置结构</dt><dd>{metadata.section_count} 节 · {metadata.entry_count} 项</dd></div>}
           {metadata?.encoding && <div><dt>文本编码</dt><dd>{metadata.encoding}</dd></div>}
           {metadata?.duration_seconds !== undefined && <div><dt>音频</dt><dd>{formatDuration(metadata.duration_seconds)} · {metadata.sample_rate?.toLocaleString("zh-CN")} Hz · {metadata.bits_per_sample} bit</dd></div>}
-          <div><dt>来源</dt><dd>{asset.storage_kind === "loose" ? "松散文件" : "MIX 归档"}</dd></div>
-          <div><dt>CRC</dt><dd className="mono">{crcLabel(asset.crc)}</dd></div>
-          <div><dt>识别</dt><dd>{asset.confidence === "name" ? "名称库匹配" : asset.confidence === "content" ? "内容探测" : asset.confidence === "filename" ? "文件名" : "未知"}</dd></div>
+          <div><dt>来源</dt><dd>{asset.storage_kind === "loose" ? "松散文件" : asset.storage_kind === "bag" ? "音频包" : "MIX 归档"}</dd></div>
+          {asset.crc !== null && <div><dt>CRC</dt><dd className="mono">{crcLabel(asset.crc)}</dd></div>}
+          <div><dt>识别</dt><dd>{asset.confidence === "name" ? "名称库匹配" : asset.confidence === "content" ? "内容探测" : asset.confidence === "filename" ? "文件名" : asset.confidence === "index" ? "音频索引" : "未知"}</dd></div>
         </dl>
       </div>
-      <div className="path-card"><span>虚拟路径</span><code title={asset.virtual_path}>{asset.virtual_path}</code></div>
       <a className="button export-button" href={api.contentUrl(asset.id)}><Icon name="download" />导出原始资产</a>
     </aside>
+  );
+}
+
+function FormatSettingsDialog({ formats, enabled, onChange, onClose }: {
+  formats: Stats["formats"];
+  enabled: string[];
+  onChange: (formats: string[]) => void;
+  onClose: () => void;
+}) {
+  const enabledSet = new Set(enabled);
+  const available = formats.map((item) => item.format);
+  function toggle(formatName: string) {
+    onChange(enabledSet.has(formatName)
+      ? enabled.filter((item) => item !== formatName)
+      : [...enabled, formatName]);
+  }
+  useEffect(() => {
+    const close = (event: KeyboardEvent) => event.key === "Escape" && onClose();
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [onClose]);
+  return (
+    <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="dialog format-settings" role="dialog" aria-modal="true" aria-labelledby="format-settings-title">
+        <div className="dialog-header"><div className="dialog-icon"><Icon name="settings" /></div><div><span className="eyebrow">素材范围</span><h2 id="format-settings-title">显示与载入</h2></div><button type="button" onClick={onClose} aria-label="关闭"><Icon name="close" /></button></div>
+        <p>仅载入已启用格式的资产列表。</p>
+        <div className="format-settings-actions">
+          <button type="button" onClick={() => onChange(available.filter((item) => defaultVisibleFormats.includes(item)))}>常用素材</button>
+          <button type="button" onClick={() => onChange(available)}>全部启用</button>
+        </div>
+        <div className="format-checks">
+          {formats.map((item) => <label key={item.format} className={enabledSet.has(item.format) ? "checked" : ""}>
+            <input type="checkbox" checked={enabledSet.has(item.format)} onChange={() => toggle(item.format)} />
+            <span className={`file-icon format-${item.format}`}><Icon name={assetIcon(item.format)} size={15} /></span>
+            <strong>{formatLabels[item.format] || item.format.toUpperCase()}</strong>
+            <em>{item.count.toLocaleString("zh-CN")}</em>
+          </label>)}
+        </div>
+        <div className="dialog-actions"><button type="button" className="button primary" onClick={onClose}>完成</button></div>
+      </section>
+    </div>
   );
 }
 

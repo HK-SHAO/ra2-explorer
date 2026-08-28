@@ -7,14 +7,15 @@ RA2 Explorer 是一个本地优先的《命令与征服：红色警戒 2》资�
 - 扫描本地目录中的松散资产和 MIX / MMX / YRO；
 - 读取基础、扩展和 Blowfish 加密 MIX，并递归索引已知的嵌套 MIX；
 - 同时解析 RA2/TS CRC32 与早期 Westwood 文件名哈希；
-- 预览 PAL、RA2/TS SHP、VXL 体素部件、TMP 地块和 PCX；
-- 读取 HVA 矩阵、CSF/INI/MAP 文本，并在浏览器播放 PCM 或 IMA ADPCM WAV；
+- 预览 PAL、RA2/TS SHP、TMP 和 PCX，并用 Three.js/WebGL 交互查看 VXL/HVA 三维组合；
+- 读取 CSF/INI/MAP 文本，解码 AUD 与 AUDIO.IDX/BAG，并把 Westwood/IMA ADPCM 转为浏览器可播放 WAV；
 - 叠加 RULES/ART/CSF 建立单位目录，解析武器、弹体、弹头依赖，并组合车辆主体、炮塔、炮管 VXL/HVA；
-- 对组合 VXL/HVA 预览选择时间帧、8 向朝向和 8 种阵营色，对语义覆盖生成可追踪诊断；
+- 对组合 VXL/HVA 选择时间帧、阵营色和调色板，并用鼠标旋转、缩放和平移三维模型；
 - 自动发现项目内 `.runtime\RA2MD`、Steam App 2229850、EA App/Origin 与兼容旧版安装；
 - 对真实来源按格式均匀抽样，执行解析和首帧渲染验证；
 - 通过 SQLite、HTTP API、CLI 和浏览器界面访问同一份索引；
-- 生成不包含 EA 内容的本地演示资产库。
+- 在 list/grid 之间无损切换，按模型、地图、动画、语音、音效等用途浏览，并在设置中控制实际载入格式；
+- 把索引、按需解包、解析元数据、PNG、WAV 与模型 JSON 持久化到 `.runtime\RA2MD-Ext`。
 
 项目不会附带或自动上传商业游戏文件。当前官方 PC 版本是 Steam / EA App 中的 *Command & Conquer Red Alert 2 and Yuri's Revenge*；导入前需要由用户在相应平台合法安装。
 
@@ -26,7 +27,7 @@ RA2 Explorer 是一个本地优先的《命令与征服：红色警戒 2》资�
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -e .[dev]
 .venv\Scripts\ra2exp.exe sync-names
-.venv\Scripts\ra2exp.exe demo
+.venv\Scripts\ra2exp.exe import .runtime\RA2MD --name RA2MD-官方安装
 cd frontend
 npm ci
 npm run build
@@ -34,9 +35,9 @@ cd ..
 .venv\Scripts\ra2exp.exe background install
 ```
 
-服务在 `http://127.0.0.1:46120` 无窗口后台运行，并登记为当前 Windows 用户的登录自启项。构建后的页面由 Python 服务从 `frontend\dist` 提供；运行时不需要 Node，也不会加载 CDN。首次可直接浏览合成格式样本，再从页面添加自己的合法游戏目录。扫描和预览只读取文件字节，不会启动游戏目录中的 EXE。
+服务在 `http://127.0.0.1:46120` 无窗口后台运行，并登记为当前 Windows 用户的登录自启项。构建后的页面由 Python 服务从 `frontend\dist` 提供；运行时不需要 Node，也不会加载 CDN。`.runtime\RA2MD` 始终只读，应用不会启动其中的 EXE；所有派生结果进入独立的 `.runtime\RA2MD-Ext`。
 
-页面左侧可在“资源文件”和“游戏单位”之间切换，两种视图分别保留搜索条件。单位视图支持中文名、内部 ID、武器、弹体、弹头和阵营检索，也可筛出缺少主体的规则实体；右侧可播放 HVA/SHP 帧、旋转 VXL 朝向、切换阵营色或调色板，并显示规则数值、战斗依赖以及每个 VXL/HVA/SHP/Cameo 的实际归档来源。重扫后页面会按新的 source revision 刷新列表与详情。
+页面左侧可在“资源文件”和“游戏单位”之间切换。资产默认突出单位模型、地图、动画、语音和音效；设置可以启用底层格式，list/grid 共用查询、选中与增量分页状态。详情根据类型切换为三维模型、帧动画、图像、音频播放器、地图/配置文本或结构信息，不展示重复位置列和无操作价值的完整路径。重扫后页面按新的 source revision 刷新并隔离旧派生产物。
 
 只开发 API 时可以不构建前端，接口文档位于 `http://127.0.0.1:46120/api/docs`。前端热更新使用 `cd frontend` 后运行 `npm run dev`。后台管理命令为：
 
@@ -59,11 +60,14 @@ cd ..
 .venv\Scripts\ra2exp.exe entity <source-id> APOC
 .venv\Scripts\ra2exp.exe entities <source-id> --missing
 .venv\Scripts\ra2exp.exe semantic-check <source-id>
+.venv\Scripts\ra2exp.exe sources
+.venv\Scripts\ra2exp.exe stats <source-id>
+.venv\Scripts\ra2exp.exe extract <source-id> --format vxl --limit 20
 cd frontend
 npm run build
 ```
 
-真实 RA2 文件只用于本地 smoke test，不进入仓库。架构与导入边界见 [v0.2 架构](docs/ARCHITECTURE.md)，合法游戏来源、本机导入和无游戏文件时的格式样本方案见 [获取与导入游戏文件](docs/GAME_FILES.md)。
+真实 RA2 文件只用于本地 smoke test，不进入仓库。架构与数据边界见 [当前架构](docs/ARCHITECTURE.md)，合法游戏来源和本机导入见 [获取与导入游戏文件](docs/GAME_FILES.md)。
 
 ## 权利边界
 

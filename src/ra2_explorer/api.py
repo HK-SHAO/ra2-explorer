@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from ra2_explorer import __version__
@@ -26,10 +27,10 @@ from ra2_explorer.codecs.pal import PLAYER_COLOR_PRESETS, grayscale_palette, par
 from ra2_explorer.codecs.shp import parse_shp
 from ra2_explorer.codecs.text import decode_legacy_text, parse_ini, text_excerpt
 from ra2_explorer.codecs.tmp import parse_tmp
-from ra2_explorer.codecs.vxl import parse_vxl
+from ra2_explorer.codecs.vxl import VxlRenderPart, build_vxl_scene, parse_vxl
 from ra2_explorer.codecs.wav import parse_wav, wav_for_browser
 from ra2_explorer.config import Settings, load_settings
-from ra2_explorer.demo import create_demo_installation
+from ra2_explorer.derived import DerivedStore
 from ra2_explorer.discovery import discover_installations
 from ra2_explorer.errors import AssetNotFoundError, InvalidFormatError, Ra2ExplorerError
 from ra2_explorer.library import AssetReader, SourceLibrary
@@ -51,17 +52,20 @@ class Services:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.database = Database(settings.database_path)
+        self.derived = DerivedStore(settings.derived_root)
         self.library = SourceLibrary(
             self.database,
             load_known_names(settings.known_names_path),
+            (settings.derived_root,),
         )
-        self.reader = AssetReader(self.database)
+        self.reader = AssetReader(self.database, self.derived)
         self.semantic = SemanticLibrary(self.database, self.reader)
 
     def reload_names(self) -> None:
         self.library = SourceLibrary(
             self.database,
             load_known_names(self.settings.known_names_path),
+            (self.settings.derived_root,),
         )
 
 
@@ -75,6 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/api/openapi.json",
     )
     app.state.services = services
+    app.add_middleware(GZipMiddleware, minimum_size=1_024)
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"],
@@ -83,7 +88,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
         allow_credentials=False,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["Content-Type"],
     )
 
@@ -124,28 +129,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def scan_source(source_id: str) -> dict[str, object]:
         return await run_in_threadpool(services.library.scan, source_id)
 
-    @app.post("/api/demo", status_code=201)
-    async def create_demo() -> dict[str, object]:
-        target = current_settings.data_dir / "demo-ra2"
-        await run_in_threadpool(create_demo_installation, target)
-        return await run_in_threadpool(
-            services.library.import_source,
-            target,
-            "RA2 Explorer 演示库",
-        )
+    @app.delete("/api/sources/{source_id}")
+    def delete_source(source_id: str) -> dict[str, object]:
+        return services.database.delete_source(source_id)
 
     @app.get("/api/assets")
     def assets(
         source_id: str | None = None,
         q: str | None = Query(default=None, max_length=200),
         format: str | None = Query(default=None, max_length=24),
+        formats: str | None = Query(default=None, max_length=240),
         limit: int = Query(default=100, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, object]:
+        selected_formats = tuple(
+            item.strip().casefold()
+            for item in (formats or "").split(",")
+            if item.strip()
+        )
+        if len(selected_formats) > 20 or any(
+            not item.replace("_", "").isalnum() for item in selected_formats
+        ):
+            raise HTTPException(status_code=422, detail="资源格式筛选无效")
         return services.database.list_assets(
             source_id=source_id,
             query=q,
             asset_format=format,
+            asset_formats=selected_formats,
             limit=limit,
             offset=offset,
         )
@@ -201,6 +211,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail="该单位没有可渲染的主体资产")
         palette = _select_palette(services, body, palette_id)
         player_color = _validated_player_color(player_color)
+        artifact_path = _source_artifact_path(
+            services,
+            "previews",
+            source_id,
+            entity_id,
+            f"frame-{frame}",
+            f"facing-{facing}",
+            f"color-{player_color or 'original'}",
+            f"palette-{palette_id or 'auto'}",
+            f"scale-{scale}",
+            extension="png",
+        )
+        cached = services.derived.read_bytes(artifact_path)
+        if cached is not None:
+            return Response(
+                content=cached,
+                media_type="image/png",
+                headers={"Cache-Control": "private, max-age=3600"},
+            )
         _, image = services.semantic.render(
             source_id,
             entity_id,
@@ -212,20 +241,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         output = io.BytesIO()
         image.save(output, format="PNG")
+        rendered = output.getvalue()
+        services.derived.write_bytes(artifact_path, rendered)
         return Response(
-            content=output.getvalue(),
+            content=rendered,
             media_type="image/png",
-            headers={"Cache-Control": "no-store"},
+            headers={"Cache-Control": "private, max-age=3600"},
         )
+
+    @app.get("/api/entities/{source_id}/{entity_id}/model.json")
+    def entity_model(
+        source_id: str,
+        entity_id: str,
+        frame: int = Query(default=0, ge=0),
+        player_color: str | None = Query(default=None, max_length=24),
+        palette_id: str | None = None,
+    ) -> dict[str, object]:
+        semantic_entity = services.semantic.catalog(source_id).get(entity_id)
+        body = semantic_entity.component("body")
+        if body is None or body["format"] != "vxl":
+            raise HTTPException(status_code=409, detail="该单位不是 VXL 模型")
+        palette = _select_palette(services, body, palette_id)
+        player_color = _validated_player_color(player_color)
+        artifact_path = _source_artifact_path(
+            services,
+            "models",
+            source_id,
+            entity_id,
+            f"frame-{frame}",
+            f"color-{player_color or 'original'}",
+            f"palette-{palette_id or 'auto'}",
+            extension="json",
+        )
+        cached = services.derived.read_json(artifact_path)
+        if cached is not None:
+            return cached
+        _, scene = services.semantic.model_scene(
+            source_id,
+            entity_id,
+            palette=palette,
+            frame=frame,
+            player_color=player_color,
+        )
+        result = scene.as_dict()
+        services.derived.write_json(artifact_path, result)
+        return result
 
     @app.get("/api/assets/{asset_id}/content")
     def asset_content(asset_id: str) -> StreamingResponse:
-        asset_record, data = services.reader.read(asset_id)
+        asset_record = services.database.get_asset(asset_id)
         safe_name = Path(asset_record["display_name"]).name or "asset.bin"
         media_type = "application/octet-stream"
         if asset_record["format"] == "bag_audio":
-            data = bag_audio_for_browser(data, _bag_entry_from_asset(asset_record))
+            asset_record, data, _ = _browser_audio(services, asset_id)
             media_type = "audio/wav"
+        else:
+            asset_record, data = services.reader.read(asset_id)
         disposition = f"attachment; filename*=UTF-8''{quote(safe_name)}"
         return StreamingResponse(
             io.BytesIO(data),
@@ -256,10 +327,55 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ],
         }
 
+    @app.get("/api/assets/{asset_id}/model.json")
+    def asset_model(
+        asset_id: str,
+        player_color: str | None = Query(default=None, max_length=24),
+        palette_id: str | None = None,
+    ) -> dict[str, object]:
+        asset_record = services.database.get_asset(asset_id)
+        if asset_record["format"] != "vxl":
+            raise HTTPException(status_code=409, detail="该资产不是 VXL 模型")
+        palette = _select_palette(services, asset_record, palette_id)
+        player_color = _validated_player_color(player_color)
+        artifact_path = _asset_artifact_path(
+            services,
+            "models",
+            asset_record,
+            f"color-{player_color or 'original'}",
+            f"palette-{palette_id or 'auto'}",
+            extension="json",
+        )
+        cached = services.derived.read_json(artifact_path)
+        if cached is not None:
+            return cached
+        asset_record, data = services.reader.read(asset_id)
+        scene = build_vxl_scene(
+            (VxlRenderPart(parse_vxl(data)),),
+            palette=palette,
+            player_color=player_color,
+        )
+        result = scene.as_dict()
+        services.derived.write_json(artifact_path, result)
+        return result
+
     @app.get("/api/assets/{asset_id}/metadata")
     def asset_metadata(asset_id: str) -> dict[str, object]:
+        asset_record = services.database.get_asset(asset_id)
+        artifact_path = _asset_artifact_path(
+            services,
+            "metadata",
+            asset_record,
+            "inspection",
+            extension="json",
+        )
+        cached = services.derived.read_json(artifact_path)
+        if cached is not None:
+            return cached
         asset_record, data = services.reader.read(asset_id)
-        return _inspect_asset(asset_record, data)
+        result = _inspect_asset(asset_record, data)
+        services.derived.write_json(artifact_path, result)
+        return result
 
     @app.get("/api/assets/{asset_id}/text")
     def asset_text(
@@ -305,8 +421,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         palette_id: str | None = None,
         scale: int = Query(default=4, ge=1, le=16),
     ) -> Response:
-        asset_record, data = services.reader.read(asset_id)
+        asset_record = services.database.get_asset(asset_id)
         player_color = _validated_player_color(player_color)
+        if asset_record["format"] not in {"pal", "shp", "vxl", "tmp", "pcx"}:
+            raise HTTPException(status_code=409, detail="该格式没有图像预览")
+        artifact_path = _asset_artifact_path(
+            services,
+            "previews",
+            asset_record,
+            f"frame-{frame}",
+            f"color-{player_color or 'original'}",
+            f"palette-{palette_id or 'auto'}",
+            f"scale-{scale}",
+            extension="png",
+        )
+        cached = services.derived.read_bytes(artifact_path)
+        if cached is not None:
+            return Response(
+                content=cached,
+                media_type="image/png",
+                headers={"Cache-Control": "private, max-age=3600"},
+            )
+        asset_record, data = services.reader.read(asset_id)
         if asset_record["format"] == "pal":
             image = parse_palette(data).preview(cell_size=max(4, scale * 3))
         elif asset_record["format"] == "shp":
@@ -354,27 +490,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail="该格式没有图像预览")
         output = io.BytesIO()
         image.save(output, format="PNG")
+        rendered = output.getvalue()
+        services.derived.write_bytes(artifact_path, rendered)
         return Response(
-            content=output.getvalue(),
+            content=rendered,
             media_type="image/png",
-            headers={"Cache-Control": "no-store"},
+            headers={"Cache-Control": "private, max-age=3600"},
         )
 
     @app.get("/api/assets/{asset_id}/media")
     def asset_media(asset_id: str) -> Response:
-        asset_record, data = services.reader.read(asset_id)
-        asset_format = str(asset_record["format"])
-        transcoded = False
-        if asset_format == "wav":
-            playable_data, transcoded = wav_for_browser(data)
-        elif asset_format == "aud":
-            playable_data = aud_for_browser(data)
-            transcoded = True
-        elif asset_format == "bag_audio":
-            playable_data = bag_audio_for_browser(data, _bag_entry_from_asset(asset_record))
-            transcoded = str(asset_record["codec"]) == "ima_adpcm"
-        else:
-            raise HTTPException(status_code=409, detail="该格式不能直接在浏览器中播放")
+        _, playable_data, transcoded = _browser_audio(services, asset_id)
         headers = {"Cache-Control": "private, max-age=3600"}
         if transcoded:
             headers["X-RA2-Transcoded"] = "source-audio-to-pcm"
@@ -456,6 +582,67 @@ def _bag_entry_from_asset(asset: dict[str, object]) -> BagAudioEntry:
     )
 
 
+def _asset_artifact_path(
+    services: Services,
+    kind: str,
+    asset: dict[str, object],
+    *identity: object,
+    extension: str,
+) -> Path:
+    source = services.database.get_source(str(asset["source_id"]))
+    return services.derived.artifact_path(
+        kind,
+        source_id=source["id"],
+        revision=source.get("scanned_at") or source["created_at"],
+        identity=(asset["id"], *identity),
+        extension=extension,
+    )
+
+
+def _source_artifact_path(
+    services: Services,
+    kind: str,
+    source_id: str,
+    *identity: object,
+    extension: str,
+) -> Path:
+    source = services.database.get_source(source_id)
+    return services.derived.artifact_path(
+        kind,
+        source_id=source["id"],
+        revision=source.get("scanned_at") or source["created_at"],
+        identity=identity,
+        extension=extension,
+    )
+
+
+def _browser_audio(
+    services: Services,
+    asset_id: str,
+) -> tuple[dict[str, object], bytes, bool]:
+    asset = services.database.get_asset(asset_id)
+    if asset["format"] == "bag_audio":
+        asset = {**asset, **services.database.get_asset_segment(asset_id)}
+    if asset["format"] not in {"wav", "aud", "bag_audio"}:
+        raise HTTPException(status_code=409, detail="该格式不能直接在浏览器中播放")
+    path = _asset_artifact_path(services, "audio", asset, "browser-pcm", extension="wav")
+    cached = services.derived.read_bytes(path)
+    transcoded = asset["format"] == "aud" or (
+        asset["format"] == "bag_audio" and str(asset["codec"]) == "ima_adpcm"
+    )
+    if cached is not None:
+        return asset, cached, transcoded
+    _, data = services.reader.read(asset_id)
+    if asset["format"] == "wav":
+        playable_data, transcoded = wav_for_browser(data)
+    elif asset["format"] == "aud":
+        playable_data = aud_for_browser(data)
+    else:
+        playable_data = bag_audio_for_browser(data, _bag_entry_from_asset(asset))
+    services.derived.write_bytes(path, playable_data)
+    return asset, playable_data, transcoded
+
+
 def _select_palette(
     services: Services,
     asset: dict[str, object],
@@ -506,7 +693,6 @@ def _select_palette(
         if uses_iso_palette
         else [f"unit{theater}.pal", "unittem.pal", f"iso{theater}.pal", "isotem.pal"]
     )
-    preferred.append("demo.pal")
     priority = {name: index for index, name in enumerate(preferred)}
     palette_asset = min(
         palettes,

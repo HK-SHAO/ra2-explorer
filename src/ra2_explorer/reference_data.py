@@ -43,13 +43,6 @@ BUILTIN_NAMES = (
     "apoctur.hva",
     "apocbarl.hva",
     "gaweap.shp",
-    "demo.pal",
-    "demo.shp",
-    "demo.csf",
-    "demo.hva",
-    "demo.tem",
-    "demo.vxl",
-    "demo.wav",
 )
 
 

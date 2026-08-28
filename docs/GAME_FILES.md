@@ -16,7 +16,7 @@
 
 当前项目已经由用户提供一份官方安装，位置为 `.runtime\RA2MD`。自动发现确认该目录同时包含 `ra2.mix` 与 `ra2md.mix`，因此覆盖《红色警戒 2》原版和《尤里的复仇》。应用只对目录做静态、只读解析；不会启动其中任何 EXE。
 
-2026-08-29 的实际扫描结果为 `ready`：64 个归档、13,382 个资产。主要分类是 5,536 个 TMP、5,354 个 SHP、1,277 个 WAV、254 个 PCX、221 个 VXL、221 个 HVA、204 个 MAP、123 个 PAL 和 92 个 INI；其余为 MIX、AUD、FNT、CSF、BAG、IDX、VPL、文本和视频。零售版中的 5 字节 `CLASS` MIX 占位符会保留为归档记录，不再被误报为损坏文件；`.TEM/.SNO/.URB/.UBN/.LUN/.DES` 等同名战区扩展会先按内容区分 TMP 与 SHP。
+2026-08-29 的实际扫描结果为 `ready`：64 个归档、16,820 个资产。主要分类是 5,536 个 TMP、5,354 个 SHP、3,438 条 AUDIO.IDX/BAG 语音、1,277 个 WAV、254 个 PCX、221 个 VXL、221 个 HVA、204 个 MAP、123 个 PAL、92 个 INI 和 23 个 AUD；其余为 MIX、FNT、CSF、BAG、IDX、VPL、文本和视频。零售版中的 5 字节 `CLASS` MIX 占位符会保留为归档记录，不再被误报为损坏文件；`.TEM/.SNO/.URB/.UBN/.LUN/.DES` 等同名战区扩展会先按内容区分 TMP 与 SHP。
 
 如果数据库被重建，页面会把 `.runtime\RA2MD` 显示为“项目本地官方安装”候选，也可以重新执行：
 
@@ -38,7 +38,7 @@ Steam 常见路径示例：
 D:\SteamLibrary\steamapps\common\Command & Conquer Red Alert II
 ```
 
-实际路径由 Steam 库位置决定，不要假定一定在系统盘。导入后源文件保持只读；应用自己的索引位于项目 `.runtime` 目录。
+实际路径由 Steam 库位置决定，不要假定一定在系统盘。导入后源文件保持只读；索引、解包缓存、解析元数据、PNG、WAV 和三维场景 JSON 统一位于 `.runtime\RA2MD-Ext`，扫描器不会把该目录重新当成游戏源。
 
 导入后可执行确定性的按格式抽样验证。验证会读取解析结果，并对可视格式实际渲染首个可用帧或地块；它不会运行游戏：
 
@@ -46,7 +46,7 @@ D:\SteamLibrary\steamapps\common\Command & Conquer Red Alert II
 .venv\Scripts\ra2exp.exe verify f48bb468-297b-404f-952e-055adda2d1b7 --samples-per-format 20
 ```
 
-当前官方安装已按上述参数验证 188 个真实资产，覆盖 11 类已支持格式，结果为 188 通过、0 失败。
+当前官方安装已验证原有 11 类真实资产 188/188，通过全部 23 个 AUD，并对 AUDIO.BAG 语音抽样 100/100 通过。迁移到 `RA2MD-Ext` 后又以 VXL 与 BAG 各 2 条做了读回资格验证，结果 4/4。
 
 可以从规则层核对单位与真实资产关系。例如下面两条命令会先定位“天启坦克”，再显示 `APOC → MTNK` 及主体、炮塔、炮管、HVA、Cameo 的来源归档：
 
@@ -54,16 +54,6 @@ D:\SteamLibrary\steamapps\common\Command & Conquer Red Alert II
 .venv\Scripts\ra2exp.exe entities f48bb468-297b-404f-952e-055adda2d1b7 --query APOC
 .venv\Scripts\ra2exp.exe entity f48bb468-297b-404f-952e-055adda2d1b7 APOC
 ```
-
-## 无游戏文件时
-
-下面的格式验证资料库由项目现场生成，包含一个加密根 MIX、一个嵌套 MIX，以及 PAL、六帧 SHP、VXL/HVA、TMP、CSF、INI 和 WAV，不含任何 EA 图像、声音或文本：
-
-```bat
-.venv\Scripts\ra2exp.exe demo
-```
-
-浏览器空状态中的“先看格式样本”执行相同操作。它用于确认安装、加密索引、嵌套读取、搜索、真实格式解析、预览、播放和导出链路；它不是用来替代真实游戏目录的展示 Demo。
 
 ## 成熟的可解析参考数据
 

@@ -189,6 +189,12 @@ class Database:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def delete_source(self, source_id: str) -> dict[str, Any]:
+        source = self.get_source(source_id)
+        with self.connect() as connection:
+            connection.execute("DELETE FROM sources WHERE id = ?", (source_id,))
+        return source
+
     def set_source_state(self, source_id: str, state: str, error: str | None = None) -> None:
         with self.connect() as connection:
             connection.execute(
@@ -273,6 +279,7 @@ class Database:
         source_id: str | None = None,
         query: str | None = None,
         asset_format: str | None = None,
+        asset_formats: tuple[str, ...] = (),
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, Any]:
@@ -283,12 +290,16 @@ class Database:
             parameters.append(source_id)
         if query:
             clauses.append(
-                "(lower(assets.display_name) LIKE ? OR lower(assets.virtual_path) LIKE ? "
+                "(lower(assets.display_name) LIKE ? "
                 "OR printf('%08X', assets.crc) LIKE upper(?))"
             )
             pattern = f"%{query.lower()}%"
-            parameters.extend((pattern, pattern, f"%{query}%"))
-        if asset_format:
+            parameters.extend((pattern, f"%{query}%"))
+        if asset_formats:
+            placeholders = ", ".join("?" for _ in asset_formats)
+            clauses.append(f"assets.format IN ({placeholders})")
+            parameters.extend(asset_formats)
+        elif asset_format:
             clauses.append("assets.format = ?")
             parameters.append(asset_format)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""

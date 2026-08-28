@@ -13,21 +13,26 @@ from ra2_explorer.codecs.pal import parse_palette
 from ra2_explorer.codecs.sniff import sniff_format
 from ra2_explorer.codecs.text import parse_ini
 from ra2_explorer.codecs.tmp import parse_tmp
-from ra2_explorer.codecs.vxl import VxlRenderPart, parse_vxl, render_vxl_composite
+from ra2_explorer.codecs.vxl import (
+    VxlRenderPart,
+    build_vxl_scene,
+    parse_vxl,
+    render_vxl_composite,
+)
 from ra2_explorer.codecs.wav import parse_wav, wav_for_browser
-from ra2_explorer.demo import (
-    _build_demo_csf,
-    _build_demo_hva,
-    _build_demo_palette,
-    _build_demo_shp,
-    _build_demo_tmp,
-    _build_demo_vxl,
-    _build_demo_wav,
+from tests.ra2_fixtures import (
+    _build_fixture_csf,
+    _build_fixture_hva,
+    _build_fixture_palette,
+    _build_fixture_shp,
+    _build_fixture_tmp,
+    _build_fixture_vxl,
+    _build_fixture_wav,
 )
 
 
 def test_csf_decodes_inverted_utf16_and_extra_value() -> None:
-    data = _build_demo_csf()
+    data = _build_fixture_csf()
     strings = parse_csf(data)
 
     assert sniff_format(data) == "csf"
@@ -37,7 +42,7 @@ def test_csf_decodes_inverted_utf16_and_extra_value() -> None:
 
 
 def test_vxl_decodes_columns_and_renders_embedded_palette() -> None:
-    data = _build_demo_vxl(_build_demo_palette())
+    data = _build_fixture_vxl(_build_fixture_palette())
     model = parse_vxl(data)
 
     assert sniff_format(data) == "vxl"
@@ -51,7 +56,7 @@ def test_vxl_decodes_columns_and_renders_embedded_palette() -> None:
 
 
 def test_palette_player_remap_preserves_unrelated_colors() -> None:
-    palette = parse_palette(_build_demo_palette())
+    palette = parse_palette(_build_fixture_palette())
 
     remapped = palette.with_player_color("blue")
 
@@ -62,7 +67,7 @@ def test_palette_player_remap_preserves_unrelated_colors() -> None:
 
 
 def test_hva_reads_frame_section_matrices() -> None:
-    data = _build_demo_hva()
+    data = _build_fixture_hva()
     animation = parse_hva(data)
 
     assert sniff_format(data) == "hva"
@@ -72,8 +77,8 @@ def test_hva_reads_frame_section_matrices() -> None:
 
 
 def test_vxl_composite_applies_hva_facing_and_player_color() -> None:
-    model = parse_vxl(_build_demo_vxl(_build_demo_palette()))
-    animation = parse_hva(_build_demo_hva())
+    model = parse_vxl(_build_fixture_vxl(_build_fixture_palette()))
+    animation = parse_hva(_build_fixture_hva())
     part = VxlRenderPart(model, animation)
 
     front = render_vxl_composite([part], frame=0, facing=0, scale=2)
@@ -91,6 +96,13 @@ def test_vxl_composite_applies_hva_facing_and_player_color() -> None:
     assert front.size != moved.size or front.tobytes() != moved.tobytes()
     assert front.tobytes() != blue.tobytes()
 
+    scene = build_vxl_scene([part], frame=3, player_color="blue").as_dict()
+    assert scene["frame"] == 3
+    assert scene["frame_count"] == 4
+    assert scene["voxel_count"] == model.voxel_count
+    assert len(scene["voxels"]) == model.voxel_count
+    assert scene["bounds"]["max"][2] > scene["bounds"]["min"][2]
+
 
 def test_ini_accepts_retail_section_headers_with_inline_comments() -> None:
     parsed = parse_ini(b"[MTNK] ; Apocalypse tank\r\nVoxel=yes\r\n")
@@ -101,7 +113,7 @@ def test_ini_accepts_retail_section_headers_with_inline_comments() -> None:
 
 
 def test_tmp_reads_real_ts_ra2_layout_and_renders_diamond() -> None:
-    data = _build_demo_tmp()
+    data = _build_fixture_tmp()
     template = parse_tmp(data)
 
     assert sniff_format(data) == "tmp"
@@ -113,11 +125,11 @@ def test_tmp_reads_real_ts_ra2_layout_and_renders_diamond() -> None:
     assert preview.getbbox() is not None
     assert sniff_format(b"", "NEWTILE.UBN") == "tmp"
     assert sniff_format(b"", "MOONTILE.LUN") == "tmp"
-    assert sniff_format(_build_demo_shp(), "GEM07.DES") == "shp"
+    assert sniff_format(_build_fixture_shp(), "GEM07.DES") == "shp"
 
 
 def test_wav_reads_riff_metadata_without_requiring_pcm_codec() -> None:
-    audio = parse_wav(_build_demo_wav())
+    audio = parse_wav(_build_fixture_wav())
 
     assert audio.audio_format == 1
     assert audio.channels == 1

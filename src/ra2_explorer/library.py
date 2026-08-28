@@ -20,6 +20,7 @@ from ra2_explorer.codecs.sniff import (
     format_from_name,
     sniff_format,
 )
+from ra2_explorer.derived import DerivedStore
 from ra2_explorer.errors import AssetNotFoundError, Ra2ExplorerError
 from ra2_explorer.storage import (
     ArchiveRecord,
@@ -69,9 +70,15 @@ class ScanResult:
 
 
 class SourceLibrary:
-    def __init__(self, database: Database, known_names: tuple[str, ...]):
+    def __init__(
+        self,
+        database: Database,
+        known_names: tuple[str, ...],
+        excluded_roots: tuple[Path, ...] = (),
+    ):
         self.database = database
         self.names = NameResolver(known_names)
+        self.excluded_roots = tuple(path.resolve() for path in excluded_roots)
 
     def import_source(self, root_path: Path, name: str | None = None) -> dict[str, object]:
         try:
@@ -142,6 +149,7 @@ class SourceLibrary:
                 directory
                 for directory in directories
                 if not (Path(current_root) / directory).is_symlink()
+                and not self._is_excluded(Path(current_root) / directory)
             ]
             current_path = Path(current_root)
             for filename in filenames:
@@ -189,6 +197,13 @@ class SourceLibrary:
                     )
                 )
         return sorted(archive_paths, key=str.casefold)
+
+    def _is_excluded(self, path: Path) -> bool:
+        candidate = path.resolve()
+        return any(
+            candidate == root or candidate.is_relative_to(root)
+            for root in self.excluded_roots
+        )
 
     def _index_archive(
         self,
@@ -407,27 +422,36 @@ class SourceLibrary:
 
 
 class AssetReader:
-    def __init__(self, database: Database):
+    def __init__(self, database: Database, derived: DerivedStore | None = None):
         self.database = database
+        self.derived = derived
 
     def read(self, asset_id: str) -> tuple[dict[str, object], bytes]:
         asset = self.database.get_asset(asset_id)
         if asset["storage_kind"] == "bag":
             segment = self.database.get_asset_segment(asset_id)
+            asset = {**asset, **segment}
+        source = self.database.get_source(asset["source_id"])
+        cache_path = self._cache_path(asset, source)
+        if cache_path is not None:
+            cached = self.derived.read_bytes(cache_path)
+            if cached is not None and len(cached) == int(asset["size"]):
+                return asset, cached
+
+        if asset["storage_kind"] == "bag":
             _, container_data = self.read(str(segment["container_asset_id"]))
             start = int(segment["data_offset"])
             end = start + int(segment["data_size"])
             if start < 0 or end > len(container_data):
                 raise Ra2ExplorerError("AUDIO.BAG 已变化，请重新扫描")
-            return {**asset, **segment}, container_data[start:end]
-        source = self.database.get_source(asset["source_id"])
+            return asset, self._store(cache_path, container_data[start:end])
         root = Path(source["root_path"])
         if asset["storage_kind"] == "loose":
             path = SourceLibrary._safe_source_path(root, asset["loose_relative_path"])
             data = path.read_bytes()
             if len(data) != asset["size"]:
                 raise Ra2ExplorerError("源文件已变化，请重新扫描")
-            return asset, data
+            return asset, self._store(cache_path, data)
 
         archive = self.database.get_archive(asset["archive_id"])
         root_archive_path = SourceLibrary._safe_source_path(root, archive["root_relative_path"])
@@ -447,7 +471,30 @@ class AssetReader:
             raise Ra2ExplorerError("源归档已变化，请重新扫描") from error
         if entry.crc != asset["crc"] or entry.size != asset["size"]:
             raise Ra2ExplorerError("源归档已变化，请重新扫描")
-        return asset, bytes(index.payload(data, entry))
+        return asset, self._store(cache_path, bytes(index.payload(data, entry)))
+
+    def _cache_path(
+        self,
+        asset: dict[str, object],
+        source: dict[str, object],
+    ) -> Path | None:
+        if self.derived is None:
+            return None
+        extension = "bagseg" if asset["storage_kind"] == "bag" else str(
+            asset.get("extension") or "bin"
+        )
+        return self.derived.artifact_path(
+            "extracted",
+            source_id=source["id"],
+            revision=source.get("scanned_at") or source["created_at"],
+            identity=(asset["id"], asset["display_name"]),
+            extension=extension,
+        )
+
+    def _store(self, path: Path | None, data: bytes) -> bytes:
+        if path is not None and self.derived is not None:
+            self.derived.write_bytes(path, data)
+        return data
 
 
 __all__ = ["AssetReader", "NameResolver", "SourceLibrary"]

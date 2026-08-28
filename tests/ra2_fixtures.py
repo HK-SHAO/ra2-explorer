@@ -8,19 +8,32 @@ from pathlib import Path
 
 from ra2_explorer.codecs.mix import MixHashType, build_mix
 
+FIXTURE_NAMES = (
+    "conquer.mix",
+    "fixture.pal",
+    "fixture.shp",
+    "rules.ini",
+    "art.ini",
+    "fixture.csf",
+    "fixture.vxl",
+    "fixture.hva",
+    "fixture.tem",
+    "fixture.wav",
+)
 
-def create_demo_installation(target: Path) -> Path:
+
+def create_fixture_installation(target: Path) -> Path:
     target = target.resolve()
     target.mkdir(parents=True, exist_ok=True)
-    palette = _build_demo_palette()
-    sprite = _build_demo_shp()
+    palette = _build_fixture_palette()
+    sprite = _build_fixture_shp()
     rules = (
         b"[VehicleTypes]\r\n"
         b"0=DemoVehicle\r\n"
         b"\r\n[DemoVehicle]\r\n"
         b"UIName=UNIT:DemoVehicle\r\n"
         b"Name=Explorer Test Vehicle\r\n"
-        b"Image=DEMO\r\n"
+        b"Image=FIXTURE\r\n"
         b"Primary=DemoCannon\r\n"
         b"Secondary=none\r\n"
         b"Strength=400\r\n"
@@ -40,22 +53,22 @@ def create_demo_installation(target: Path) -> Path:
         b"Wall=yes\r\n"
     )
     art = (
-        b"[DEMO]\r\n"
+        b"[FIXTURE]\r\n"
         b"Voxel=yes\r\n"
         b"Remapable=yes\r\n"
-        b"Cameo=DEMO\r\n"
+        b"Cameo=FIXTURE\r\n"
     )
     nested = build_mix(
         [
-            ("demo.pal", palette),
-            ("demo.shp", sprite),
+            ("fixture.pal", palette),
+            ("fixture.shp", sprite),
             ("rules.ini", rules),
             ("art.ini", art),
-            ("demo.csf", _build_demo_csf()),
-            ("demo.vxl", _build_demo_vxl(palette)),
-            ("demo.hva", _build_demo_hva()),
-            ("demo.tem", _build_demo_tmp()),
-            ("demo.wav", _build_demo_wav()),
+            ("fixture.csf", _build_fixture_csf()),
+            ("fixture.vxl", _build_fixture_vxl(palette)),
+            ("fixture.hva", _build_fixture_hva()),
+            ("fixture.tem", _build_fixture_tmp()),
+            ("fixture.wav", _build_fixture_wav()),
         ],
         hash_type=MixHashType.RA2,
     )
@@ -67,14 +80,14 @@ def create_demo_installation(target: Path) -> Path:
         key_source=key_source,
     )
     (target / "ra2.mix").write_bytes(root)
-    (target / "demo-notes.ini").write_text(
+    (target / "fixture-notes.ini").write_text(
         "[Demo]\nDescription=Freely generated synthetic RA2 format sample\n",
         encoding="utf-8",
     )
     return target
 
 
-def _build_demo_palette() -> bytes:
+def _build_fixture_palette() -> bytes:
     colors = bytearray()
     for index in range(256):
         if index == 0:
@@ -91,7 +104,7 @@ def _build_demo_palette() -> bytes:
     return bytes(colors)
 
 
-def _build_demo_shp() -> bytes:
+def _build_fixture_shp() -> bytes:
     width, height = 80, 56
     frames = []
     for frame_index in range(6):
@@ -111,7 +124,7 @@ def _build_demo_shp() -> bytes:
     return _encode_shp(width, height, frames)
 
 
-def _build_demo_csf() -> bytes:
+def _build_fixture_csf() -> bytes:
     labels = (
         ("UI:ExplorerTitle", "RA2 Explorer format sample", None),
         ("VOX:ExplorerReady", "Asset pipeline ready.", "explorer-ready"),
@@ -135,7 +148,7 @@ def _build_demo_csf() -> bytes:
     return bytes(output)
 
 
-def _build_demo_vxl(palette: bytes) -> bytes:
+def _build_fixture_vxl(palette: bytes) -> bytes:
     size_x, size_y, size_z = 12, 8, 7
     columns: dict[tuple[int, int], list[tuple[int, int, int]]] = {}
 
@@ -217,8 +230,8 @@ def _write_vxl_run(
     return run[-1][0] + 1
 
 
-def _build_demo_hva() -> bytes:
-    output = bytearray(b"demo.hva" + b"\0" * 8)
+def _build_fixture_hva() -> bytes:
+    output = bytearray(b"fixture.hva" + b"\0" * 5)
     output.extend(struct.pack("<II", 4, 1))
     output.extend(b"BODY" + b"\0" * 12)
     for frame in range(4):
@@ -240,7 +253,7 @@ def _build_demo_hva() -> bytes:
     return bytes(output)
 
 
-def _build_demo_tmp() -> bytes:
+def _build_fixture_tmp() -> bytes:
     tile_width, tile_height = 60, 30
     iso_size = tile_width * tile_height // 2
     colors = bytearray()
@@ -258,7 +271,7 @@ def _build_demo_tmp() -> bytes:
     return bytes(output)
 
 
-def _build_demo_wav() -> bytes:
+def _build_fixture_wav() -> bytes:
     sample_rate = 11_025
     frame_count = sample_rate // 3
     frames = bytearray()
@@ -340,4 +353,4 @@ def _encode_rle_frame(pixels: bytes, width: int, height: int) -> bytes:
     return bytes(output)
 
 
-__all__ = ["create_demo_installation"]
+__all__ = ["FIXTURE_NAMES", "create_fixture_installation"]

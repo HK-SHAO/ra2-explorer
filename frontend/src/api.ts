@@ -26,7 +26,7 @@ export interface Asset {
   format: string;
   extension: string;
   confidence: string;
-  storage_kind: "mix" | "loose";
+  storage_kind: "mix" | "loose" | "bag";
   loose_relative_path: string | null;
 }
 
@@ -87,6 +87,8 @@ export interface AssetMetadata {
   duration_seconds?: number;
   audio_format?: number;
   playback_transcodes_to_pcm?: boolean;
+  audio_codec?: string;
+  chunk_count?: number;
   color_count?: number;
   mode?: string;
 }
@@ -142,7 +144,7 @@ export interface EntityComponentAsset {
   format: string;
   virtual_path: string;
   size: number;
-  storage_kind: "mix" | "loose";
+  storage_kind: "mix" | "loose" | "bag";
 }
 
 export interface EntityComponent {
@@ -256,12 +258,15 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path, name: name || null }),
     }),
-  createDemo: () => request<Source>("/api/demo", { method: "POST" }),
   scanSource: (id: string) => request<Source>(`/api/sources/${id}/scan`, { method: "POST" }),
-  assets: (sourceId: string, query: string, format: string) => {
-    const params = new URLSearchParams({ source_id: sourceId, limit: "500" });
+  assets: (sourceId: string, query: string, formats: string[], offset = 0, limit = 500) => {
+    const params = new URLSearchParams({
+      source_id: sourceId,
+      limit: String(limit),
+      offset: String(offset),
+    });
     if (query.trim()) params.set("q", query.trim());
-    if (format) params.set("format", format);
+    if (formats.length) params.set("formats", formats.join(","));
     return request<AssetPage>(`/api/assets?${params}`);
   },
   entities: (
@@ -314,6 +319,22 @@ export const api = {
     if (options.playerColor) params.set("player_color", options.playerColor);
     if (options.paletteId) params.set("palette_id", options.paletteId);
     return `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}/preview.png?${params}`;
+  },
+  entityModelUrl: (
+    sourceId: string,
+    entityId: string,
+    options: EntityPreviewOptions = {},
+  ) => {
+    const params = new URLSearchParams({ frame: String(options.frame ?? 0) });
+    if (options.playerColor) params.set("player_color", options.playerColor);
+    if (options.paletteId) params.set("palette_id", options.paletteId);
+    return `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}/model.json?${params}`;
+  },
+  assetModelUrl: (assetId: string, playerColor = "", paletteId = "") => {
+    const params = new URLSearchParams();
+    if (playerColor) params.set("player_color", playerColor);
+    if (paletteId) params.set("palette_id", paletteId);
+    return `/api/assets/${assetId}/model.json?${params}`;
   },
   previewUrl: (assetId: string, frame: number, paletteId: string, scale = 4) => {
     const params = new URLSearchParams({ frame: String(frame), scale: String(scale) });

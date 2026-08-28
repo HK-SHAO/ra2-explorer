@@ -160,6 +160,101 @@ class _WorldVoxel:
     palette: Palette
 
 
+@dataclass(frozen=True, slots=True)
+class VxlSceneVoxel:
+    x: float
+    y: float
+    z: float
+    size: float
+    red: int
+    green: int
+    blue: int
+
+
+@dataclass(frozen=True, slots=True)
+class VxlScene:
+    voxels: tuple[VxlSceneVoxel, ...]
+    frame: int
+    frame_count: int
+    part_count: int
+
+    def as_dict(self) -> dict[str, object]:
+        if self.voxels:
+            minimum = [
+                min(getattr(voxel, axis) - voxel.size / 2 for voxel in self.voxels)
+                for axis in ("x", "y", "z")
+            ]
+            maximum = [
+                max(getattr(voxel, axis) + voxel.size / 2 for voxel in self.voxels)
+                for axis in ("x", "y", "z")
+            ]
+        else:
+            minimum = [0.0, 0.0, 0.0]
+            maximum = [0.0, 0.0, 0.0]
+        return {
+            "version": 1,
+            "frame": self.frame,
+            "frame_count": self.frame_count,
+            "part_count": self.part_count,
+            "voxel_count": len(self.voxels),
+            "bounds": {
+                "min": [round(value, 6) for value in minimum],
+                "max": [round(value, 6) for value in maximum],
+            },
+            "voxels": [
+                [
+                    round(voxel.x, 6),
+                    round(voxel.y, 6),
+                    round(voxel.z, 6),
+                    round(voxel.size, 6),
+                    voxel.red,
+                    voxel.green,
+                    voxel.blue,
+                ]
+                for voxel in self.voxels
+            ],
+        }
+
+
+def build_vxl_scene(
+    parts: Sequence[VxlRenderPart],
+    *,
+    palette: Palette | None = None,
+    frame: int = 0,
+    player_color: str | None = None,
+) -> VxlScene:
+    world_voxels = _collect_world_voxels(
+        parts,
+        palette=palette,
+        frame=frame,
+        facing=0,
+        player_color=player_color,
+    )
+    voxels = []
+    for voxel in world_voxels:
+        red, green, blue, _ = voxel.palette.rgba(voxel.color, transparent_zero=False)
+        voxels.append(
+            VxlSceneVoxel(
+                voxel.x,
+                voxel.y,
+                voxel.z,
+                voxel.size,
+                red,
+                green,
+                blue,
+            )
+        )
+    frame_count = max(
+        (
+            part.animation.frame_count
+            for part in parts
+            if part.animation is not None and part.animation.frame_count
+        ),
+        default=1,
+    )
+    return VxlScene(tuple(voxels), frame % frame_count, frame_count, len(parts))
+
+
 def render_vxl_composite(
     parts: Sequence[VxlRenderPart],
     *,
@@ -169,47 +264,13 @@ def render_vxl_composite(
     player_color: str | None = None,
     scale: int = 4,
 ) -> Image.Image:
-    if not 0 <= facing <= 7:
-        raise ValueError("facing must be between 0 and 7")
-    angle = math.radians(facing * 45)
-    cosine = math.cos(angle)
-    sine = math.sin(angle)
-    world_voxels = []
-    for part in parts:
-        animation = part.animation
-        for limb_index, limb in enumerate(part.model.limbs):
-            if len(world_voxels) + len(limb.voxels) > MAX_RENDER_VOXELS:
-                raise InvalidFormatError(
-                    f"VXL: composite has too many voxels to preview ({MAX_RENDER_VOXELS:,} max)"
-                )
-            transform = _hva_transform(animation, limb, limb_index, frame)
-            active_palette = palette or part.model.palette
-            if player_color:
-                active_palette = active_palette.with_player_color(
-                    player_color,
-                    start=part.model.remap_start,
-                    end=part.model.remap_end,
-                )
-            for voxel in limb.voxels:
-                local_x, local_y, local_z = _apply_transform(
-                    transform,
-                    float(voxel.x),
-                    float(voxel.y),
-                    float(voxel.z),
-                    limb,
-                )
-                world_x = (local_x + limb.min_bounds[0]) * limb.scale
-                world_y = -(local_y + limb.min_bounds[1]) * limb.scale
-                world_voxels.append(
-                    _WorldVoxel(
-                        world_x * cosine - world_y * sine,
-                        world_x * sine + world_y * cosine,
-                        (local_z + limb.min_bounds[2]) * limb.scale,
-                        limb.scale,
-                        voxel.color,
-                        active_palette,
-                    )
-                )
+    world_voxels = _collect_world_voxels(
+        parts,
+        palette=palette,
+        frame=frame,
+        facing=facing,
+        player_color=player_color,
+    )
     if not world_voxels:
         return Image.new("RGBA", (320, 180), (0, 0, 0, 0))
 
@@ -291,6 +352,58 @@ def render_vxl_composite(
     return image
 
 
+def _collect_world_voxels(
+    parts: Sequence[VxlRenderPart],
+    *,
+    palette: Palette | None,
+    frame: int,
+    facing: int,
+    player_color: str | None,
+) -> list[_WorldVoxel]:
+    if not 0 <= facing <= 7:
+        raise ValueError("facing must be between 0 and 7")
+    angle = math.radians(facing * 45)
+    cosine = math.cos(angle)
+    sine = math.sin(angle)
+    world_voxels: list[_WorldVoxel] = []
+    for part in parts:
+        animation = part.animation
+        for limb_index, limb in enumerate(part.model.limbs):
+            if len(world_voxels) + len(limb.voxels) > MAX_RENDER_VOXELS:
+                raise InvalidFormatError(
+                    f"VXL: composite has too many voxels to preview ({MAX_RENDER_VOXELS:,} max)"
+                )
+            transform = _hva_transform(animation, limb, limb_index, frame)
+            active_palette = palette or part.model.palette
+            if player_color:
+                active_palette = active_palette.with_player_color(
+                    player_color,
+                    start=part.model.remap_start,
+                    end=part.model.remap_end,
+                )
+            for voxel in limb.voxels:
+                local_x, local_y, local_z = _apply_transform(
+                    transform,
+                    float(voxel.x),
+                    float(voxel.y),
+                    float(voxel.z),
+                    limb,
+                )
+                world_x = (local_x + limb.min_bounds[0]) * limb.scale
+                world_y = -(local_y + limb.min_bounds[1]) * limb.scale
+                world_voxels.append(
+                    _WorldVoxel(
+                        world_x * cosine - world_y * sine,
+                        world_x * sine + world_y * cosine,
+                        (local_z + limb.min_bounds[2]) * limb.scale,
+                        limb.scale,
+                        voxel.color,
+                        active_palette,
+                    )
+                )
+    return world_voxels
+
+
 def _hva_transform(
     animation: HvaFile | None,
     limb: VxlLimb,
@@ -298,7 +411,7 @@ def _hva_transform(
     frame: int,
 ) -> tuple[float, ...] | None:
     if animation is None or not animation.frame_count or not animation.section_names:
-        return None
+        return limb.transform
     section_lookup = {name.casefold(): index for index, name in enumerate(animation.section_names)}
     section = section_lookup.get(limb.name.casefold())
     if section is None:
@@ -547,6 +660,9 @@ __all__ = [
     "VxlFile",
     "VxlLimb",
     "VxlRenderPart",
+    "VxlScene",
+    "VxlSceneVoxel",
+    "build_vxl_scene",
     "parse_vxl",
     "render_vxl_composite",
 ]
