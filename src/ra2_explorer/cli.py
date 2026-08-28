@@ -20,6 +20,7 @@ from ra2_explorer.config import DEFAULT_HOST, DEFAULT_PORT, load_settings
 from ra2_explorer.demo import create_demo_installation
 from ra2_explorer.discovery import discover_installations
 from ra2_explorer.reference_data import sync_known_names
+from ra2_explorer.validation import VALIDATED_FORMATS, validate_source
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -52,6 +53,11 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--timeout", type=float, default=30.0)
 
     subcommands.add_parser("discover", help="发现 Steam、EA App 与旧版合法安装目录")
+
+    verify = subcommands.add_parser("verify", help="按格式抽样验证真实资源目录")
+    verify.add_argument("source_id")
+    verify.add_argument("--samples-per-format", type=int, default=12)
+    verify.add_argument("--format", action="append", choices=VALIDATED_FORMATS)
 
     list_command = subcommands.add_parser("list", help="列出索引中的资产")
     list_command.add_argument("--source-id")
@@ -123,6 +129,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "discover":
         print(json.dumps(discover_installations(), ensure_ascii=False, indent=2))
         return 0
+
+    if args.command == "verify":
+        result = validate_source(
+            services.database,
+            services.reader,
+            args.source_id,
+            samples_per_format=max(1, min(args.samples_per_format, 100)),
+            formats=tuple(args.format) if args.format else VALIDATED_FORMATS,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result["status"] == "passed" else 1
 
     if args.command == "list":
         result = services.database.list_assets(

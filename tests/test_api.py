@@ -86,6 +86,27 @@ def test_api_rejects_untrusted_host(tmp_path: Path) -> None:
     assert response.status_code == 400
 
 
+def test_retail_class_markers_do_not_fail_a_source(tmp_path: Path) -> None:
+    source_dir = tmp_path / "retail"
+    source_dir.mkdir()
+    (source_dir / "thememd.mix").write_bytes(b"CLASS")
+    data_dir = tmp_path / "runtime"
+    settings = Settings(
+        data_dir=data_dir,
+        database_path=data_dir / "library.db",
+        frontend_dir=tmp_path / "missing-frontend",
+        known_names_path=data_dir / "reference" / "known_names_ra2.txt",
+    )
+    settings.prepare()
+    client = TestClient(create_app(settings))
+
+    response = client.post("/api/sources", json={"path": str(source_dir)})
+
+    assert response.status_code == 201
+    assert response.json()["state"] == "ready"
+    assert response.json()["archive_count"] == 1
+
+
 def test_serve_defaults_do_not_open_external_programs() -> None:
     from ra2_explorer.cli import build_parser
     from ra2_explorer.config import DEFAULT_PORT

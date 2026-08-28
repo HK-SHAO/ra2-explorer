@@ -13,7 +13,12 @@ from ra2_explorer.codecs.mix import (
     parse_mix,
     ra2_mix_hash,
 )
-from ra2_explorer.codecs.sniff import KNOWN_FORMATS, format_from_name, sniff_format
+from ra2_explorer.codecs.sniff import (
+    AMBIGUOUS_EXTENSIONS,
+    KNOWN_FORMATS,
+    format_from_name,
+    sniff_format,
+)
 from ra2_explorer.errors import AssetNotFoundError, Ra2ExplorerError
 from ra2_explorer.storage import ArchiveRecord, AssetRecord, Database
 
@@ -148,6 +153,14 @@ class SourceLibrary:
                 asset_format = KNOWN_FORMATS.get(extension)
                 if not asset_format:
                     continue
+                confidence = "filename"
+                if extension in AMBIGUOUS_EXTENSIONS and size <= MAX_SNIFF_BYTES:
+                    try:
+                        asset_format = sniff_format(path.read_bytes(), filename)
+                    except OSError as error:
+                        result.errors.append(f"{relative}: 无法探测格式（{error}）")
+                        continue
+                    confidence = "content"
                 virtual_path = f"loose::{relative}"
                 result.assets.append(
                     AssetRecord(
@@ -162,7 +175,7 @@ class SourceLibrary:
                         size=size,
                         format=asset_format,
                         extension=extension.lstrip("."),
-                        confidence="filename",
+                        confidence=confidence,
                         storage_kind="loose",
                         loose_relative_path=relative,
                     )
@@ -185,6 +198,29 @@ class SourceLibrary:
         archive_id = str(uuid.uuid5(source_uuid, f"archive:{virtual_path.casefold()}"))
         if len(result.archives) >= MAX_ARCHIVES_PER_SOURCE:
             result.errors.append("嵌套归档数量超过 4096 个")
+            return
+        if data == b"CLASS":
+            # Some retail RA2/YR layouts contain five-byte CD-class marker
+            # files with a .mix suffix (notably thememd.mix/movmd03.mix).
+            # Keep them visible in archive accounting without reporting a
+            # valid installation as damaged.
+            result.archives.append(
+                ArchiveRecord(
+                    id=archive_id,
+                    source_id=source_id,
+                    parent_archive_id=parent_archive_id,
+                    virtual_path=virtual_path,
+                    root_relative_path=root_relative_path,
+                    entry_chain=json.dumps(entry_chain),
+                    file_size=len(data),
+                    data_offset=None,
+                    data_size=0,
+                    encrypted=0,
+                    hash_type="class-marker",
+                    entry_count=0,
+                    error=None,
+                )
+            )
             return
         try:
             index = parse_mix(data)

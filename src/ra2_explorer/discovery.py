@@ -24,7 +24,9 @@ class GameInstallation:
 
 
 def discover_installations() -> dict[str, object]:
-    search_roots: list[tuple[Path, str, int]] = []
+    search_roots: list[tuple[Path, str, int]] = [
+        (Path.cwd() / ".runtime" / "RA2MD", "项目本地官方安装", 1),
+    ]
     for library in _steam_libraries():
         install = _steam_app_install(library)
         if install:

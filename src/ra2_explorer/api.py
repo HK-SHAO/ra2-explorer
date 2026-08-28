@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import os
-import wave
 from pathlib import Path
 from urllib.parse import quote
 
@@ -22,6 +21,7 @@ from ra2_explorer.codecs.shp import parse_shp
 from ra2_explorer.codecs.text import decode_legacy_text, parse_ini, text_excerpt
 from ra2_explorer.codecs.tmp import parse_tmp
 from ra2_explorer.codecs.vxl import parse_vxl
+from ra2_explorer.codecs.wav import parse_wav, wav_for_browser
 from ra2_explorer.config import Settings, load_settings
 from ra2_explorer.demo import create_demo_installation
 from ra2_explorer.discovery import discover_installations
@@ -280,10 +280,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         asset_record, data = services.reader.read(asset_id)
         if asset_record["format"] != "wav":
             raise HTTPException(status_code=409, detail="该格式不能直接在浏览器中播放")
+        playable_data, transcoded = wav_for_browser(data)
+        headers = {"Cache-Control": "private, max-age=3600"}
+        if transcoded:
+            headers["X-RA2-Transcoded"] = "ima-adpcm-to-pcm16"
         return Response(
-            content=data,
+            content=playable_data,
             media_type="audio/wav",
-            headers={"Cache-Control": "private, max-age=3600"},
+            headers=headers,
         )
 
     @app.get("/api/palettes")
@@ -347,6 +351,8 @@ def _select_palette(
         "urb": "urb",
         "sno": "sno",
         "des": "des",
+        "ubn": "ubn",
+        "lun": "lun",
     }.get(extension, "tem")
     preferred = [
         f"iso{theater}.pal",
@@ -481,21 +487,20 @@ def _inspect_asset(asset: dict[str, object], data: bytes) -> dict[str, object]:
             "line_count": len(decoded.text.splitlines()),
         }
     if asset_format == "wav":
-        try:
-            with wave.open(io.BytesIO(data), "rb") as audio:
-                frames = audio.getnframes()
-                rate = audio.getframerate()
-                channels = audio.getnchannels()
-                sample_width = audio.getsampwidth()
-        except (EOFError, wave.Error) as error:
-            raise InvalidFormatError("WAV 文件无法解码") from error
+        audio = parse_wav(data)
         return {
             **base,
-            "channels": channels,
-            "sample_rate": rate,
-            "sample_width": sample_width,
-            "sample_frames": frames,
-            "duration_seconds": frames / rate if rate else 0,
+            "audio_format": audio.audio_format,
+            "channels": audio.channels,
+            "sample_rate": audio.sample_rate,
+            "bits_per_sample": audio.bits_per_sample,
+            "block_align": audio.block_align,
+            "data_size": audio.data_size,
+            "samples_per_block": audio.samples_per_block,
+            "sample_count": audio.sample_count,
+            "duration_seconds": audio.duration_seconds,
+            "browser_playable": audio.browser_playable,
+            "playback_transcodes_to_pcm": audio.audio_format == 17,
         }
     if asset_format == "pcx":
         from PIL import Image, UnidentifiedImageError

@@ -25,6 +25,15 @@ class ShpFrame:
     compression: int
     data_offset: int
 
+    @property
+    def empty(self) -> bool:
+        return (
+            self.width == 0
+            or self.height == 0
+            or self.data_offset in {0, 0xCCCCCCCC}
+            or self.compression == 4
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ShpFile:
@@ -38,7 +47,7 @@ class ShpFile:
             frame = self.frames[frame_index]
         except IndexError as error:
             raise IndexError("SHP frame index is out of range") from error
-        if frame.width == 0 or frame.height == 0 or frame.data_offset == 0:
+        if frame.empty:
             return bytes(frame.width * frame.height)
 
         cursor = frame.data_offset
@@ -107,6 +116,14 @@ class ShpFile:
             raise ValueError("scale must be between 1 and 16")
         frame = self.frames[frame_index]
         frame_pixels = self.pixels(frame_index)
+        if frame.empty:
+            canvas = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
+            if scale != 1:
+                canvas = canvas.resize(
+                    (self.width * scale, self.height * scale),
+                    Image.Resampling.NEAREST,
+                )
+            return canvas
         selected_palette = palette or grayscale_palette()
         rgba = bytearray(frame.width * frame.height * 4)
         for pixel_index, palette_index in enumerate(frame_pixels):
@@ -147,10 +164,17 @@ def parse_shp(data: bytes | bytearray | memoryview) -> ShpFile:
             raise InvalidFormatError(f"SHP frame {index} crop exceeds the canvas")
         if frame_width * frame_height > MAX_FRAME_PIXELS:
             raise InvalidFormatError(f"SHP frame {index} is too large")
-        if compression > 3:
+        empty = (
+            frame_width == 0
+            or frame_height == 0
+            or data_offset in {0, 0xCCCCCCCC}
+            or compression == 4
+        )
+        if compression > 3 and not empty:
             raise UnsupportedFormatError(f"SHP frame {index} uses compression {compression}")
         if (
-            frame_width
+            not empty
+            and frame_width
             and frame_height
             and data_offset
             and (data_offset < headers_end or data_offset >= len(raw))

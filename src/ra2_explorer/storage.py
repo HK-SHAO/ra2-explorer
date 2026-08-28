@@ -131,6 +131,14 @@ class Database:
                 "SELECT * FROM sources WHERE root_path = ?", (normalized,)
             ).fetchone()
             if existing:
+                if name and name != existing["name"]:
+                    connection.execute(
+                        "UPDATE sources SET name = ? WHERE id = ?",
+                        (name, existing["id"]),
+                    )
+                    existing = connection.execute(
+                        "SELECT * FROM sources WHERE id = ?", (existing["id"],)
+                    ).fetchone()
                 return dict(existing)
             source_id = str(uuid.uuid4())
             connection.execute(
@@ -301,6 +309,52 @@ class Database:
                 (source_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def sample_assets(
+        self,
+        source_id: str,
+        formats: tuple[str, ...],
+        *,
+        per_format: int,
+    ) -> dict[str, list[dict[str, Any]]]:
+        per_format = max(1, min(per_format, 100))
+        samples: dict[str, list[dict[str, Any]]] = {}
+        with self.connect() as connection:
+            for asset_format in formats:
+                total = connection.execute(
+                    "SELECT COUNT(*) FROM assets WHERE source_id = ? AND format = ?",
+                    (source_id, asset_format),
+                ).fetchone()[0]
+                if not total:
+                    continue
+                if total <= per_format:
+                    offsets = range(total)
+                elif per_format == 1:
+                    offsets = (0,)
+                else:
+                    offsets = sorted(
+                        {
+                            round(index * (total - 1) / (per_format - 1))
+                            for index in range(per_format)
+                        }
+                    )
+                rows = []
+                for offset in offsets:
+                    row = connection.execute(
+                        """
+                        SELECT assets.*, archives.virtual_path AS archive_path
+                        FROM assets
+                        LEFT JOIN archives ON archives.id = assets.archive_id
+                        WHERE assets.source_id = ? AND assets.format = ?
+                        ORDER BY lower(assets.display_name), assets.virtual_path
+                        LIMIT 1 OFFSET ?
+                        """,
+                        (source_id, asset_format, offset),
+                    ).fetchone()
+                    if row:
+                        rows.append(dict(row))
+                samples[asset_format] = rows
+        return samples
 
     def stats(self, source_id: str | None = None) -> dict[str, Any]:
         where = "WHERE source_id = ?" if source_id else ""

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import struct
 from pathlib import Path
 
 import pytest
@@ -38,3 +39,16 @@ def test_shp_rejects_crop_outside_canvas() -> None:
 
     with pytest.raises(InvalidFormatError, match="crop exceeds"):
         parse_shp(malformed)
+
+
+def test_shp_accepts_retail_cc_filled_null_frames() -> None:
+    data = bytearray(struct.pack("<HHHH", 0, 180, 150, 1))
+    frame = bytearray(b"\xCC" * 24)
+    struct.pack_into("<HHHH", frame, 0, 0, 0, 0, 0)
+    data.extend(frame)
+
+    sprite = parse_shp(data)
+
+    assert sprite.frames[0].empty is True
+    assert sprite.render(0).size == (180, 150)
+    assert sprite.render(0).getbbox() is None

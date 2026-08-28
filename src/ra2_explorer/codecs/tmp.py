@@ -122,7 +122,10 @@ def parse_tmp(data: bytes | bytearray | memoryview) -> TmpFile:
     if not template_width or not template_height:
         raise InvalidFormatError("TMP: template dimensions must be positive")
     if tile_width <= 0 or tile_height <= 0 or tile_width % 4 or tile_height % 2:
-        raise InvalidFormatError("TMP: tile dimensions are invalid")
+        raise InvalidFormatError(
+            "TMP: tile dimensions are invalid "
+            f"({template_width}x{template_height} tiles, {tile_width}x{tile_height} px)"
+        )
     tile_slots = checked_product(
         (template_width, template_height), limit=MAX_TILES, context="TMP tile count"
     )
@@ -172,8 +175,6 @@ def parse_tmp(data: bytes | bytearray | memoryview) -> TmpFile:
             )
             extra_pixels = bytes(reader.read(extra_size, context="extra pixels"))
             extra_depth = bytes(reader.read(extra_size, context="extra depth pixels"))
-        elif extra_width < 0 or extra_height < 0:
-            raise InvalidFormatError(f"TMP: tile {index} has negative extra dimensions")
         tiles.append(
             TmpTile(
                 index,

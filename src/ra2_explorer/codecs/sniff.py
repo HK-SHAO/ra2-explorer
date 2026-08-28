@@ -15,6 +15,7 @@ KNOWN_FORMATS = {
     ".hva": "hva",
     ".idx": "idx",
     ".ini": "ini",
+    ".lun": "tmp",
     ".map": "map",
     ".mix": "mix",
     ".mmx": "mix",
@@ -26,6 +27,7 @@ KNOWN_FORMATS = {
     ".tem": "tmp",
     ".tmp": "tmp",
     ".txt": "text",
+    ".ubn": "tmp",
     ".urb": "tmp",
     ".vqa": "video",
     ".vpl": "vpl",
@@ -34,16 +36,22 @@ KNOWN_FORMATS = {
     ".yro": "mix",
 }
 
+AMBIGUOUS_EXTENSIONS = {".des", ".lun", ".sno", ".tem", ".tmp", ".ubn", ".urb"}
+
 
 def format_from_name(name: str | None) -> str | None:
     if not name:
         return None
-    return KNOWN_FORMATS.get(PurePath(name).suffix.lower())
+    extension = PurePath(name).suffix.lower()
+    if extension in AMBIGUOUS_EXTENSIONS:
+        return None
+    return KNOWN_FORMATS.get(extension)
 
 
 def sniff_format(data: bytes | bytearray | memoryview, name: str | None = None) -> str:
-    named_format = format_from_name(name)
-    if named_format:
+    extension = PurePath(name).suffix.lower() if name else ""
+    named_format = KNOWN_FORMATS.get(extension)
+    if named_format and extension not in AMBIGUOUS_EXTENSIONS:
         return named_format
     view = memoryview(data)
     if len(view) == 768:
@@ -65,7 +73,7 @@ def sniff_format(data: bytes | bytearray | memoryview, name: str | None = None) 
         return "tmp"
     if b"[" in sample and b"]" in sample and b"=" in sample:
         return "ini"
-    return "binary"
+    return named_format or "binary"
 
 
 def _looks_like_hva(data: memoryview) -> bool:
@@ -103,4 +111,4 @@ def _looks_like_tmp(data: memoryview) -> bool:
     return depth_offset == tile_width * tile_height // 2 + 52
 
 
-__all__ = ["KNOWN_FORMATS", "format_from_name", "sniff_format"]
+__all__ = ["AMBIGUOUS_EXTENSIONS", "KNOWN_FORMATS", "format_from_name", "sniff_format"]
