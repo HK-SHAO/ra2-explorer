@@ -24,7 +24,7 @@ def test_demo_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     source = source_response.json()
     assert source["state"] == "ready"
     assert source["archive_count"] == 2
-    assert source["asset_count"] == 10
+    assert source["asset_count"] == 11
 
     assets_response = client.get("/api/assets", params={"source_id": source["id"], "q": "demo.shp"})
     assert assets_response.status_code == 200
@@ -68,6 +68,25 @@ def test_demo_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert media.status_code == 200
     assert media.headers["content-type"] == "audio/wav"
     assert media.content.startswith(b"RIFF")
+
+    entities = client.get("/api/entities", params={"source_id": source["id"]})
+    assert entities.status_code == 200
+    entity_page = entities.json()
+    assert entity_page["total"] == 1
+    assert entity_page["items"][0]["id"] == "DemoVehicle"
+    assert entity_page["items"][0]["display_name"] == "Generated test vehicle"
+    assert entity_page["items"][0]["renderable"] is True
+
+    entity = client.get(f"/api/entities/{source['id']}/DemoVehicle")
+    assert entity.status_code == 200
+    components = {item["role"]: item for item in entity.json()["components"]}
+    assert components["body"]["asset"]["display_name"] == "demo.vxl"
+    assert components["body_hva"]["asset"]["display_name"] == "demo.hva"
+    assert components["cameo"]["asset"]["display_name"] == "demo.shp"
+
+    entity_preview = client.get(f"/api/entities/{source['id']}/DemoVehicle/preview.png")
+    assert entity_preview.status_code == 200
+    assert entity_preview.content.startswith(b"\x89PNG")
 
 
 def test_api_rejects_untrusted_host(tmp_path: Path) -> None:

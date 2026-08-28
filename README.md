@@ -9,6 +9,7 @@ RA2 Explorer 是一个本地优先的《命令与征服：红色警戒 2》资�
 - 同时解析 RA2/TS CRC32 与早期 Westwood 文件名哈希；
 - 预览 PAL、RA2/TS SHP、VXL 体素部件、TMP 地块和 PCX；
 - 读取 HVA 矩阵、CSF/INI/MAP 文本，并在浏览器播放 PCM 或 IMA ADPCM WAV；
+- 叠加 RULES/ART/CSF 建立单位目录，并组合车辆主体、炮塔、炮管 VXL/HVA；
 - 自动发现项目内 `.runtime\RA2MD`、Steam App 2229850、EA App/Origin 与兼容旧版安装；
 - 对真实来源按格式均匀抽样，执行解析和首帧渲染验证；
 - 通过 SQLite、HTTP API、CLI 和浏览器界面访问同一份索引；
@@ -51,6 +52,8 @@ cd ..
 .venv\Scripts\python.exe -m pytest
 .venv\Scripts\python.exe -m ruff check src tests
 .venv\Scripts\ra2exp.exe verify <source-id> --samples-per-format 20
+.venv\Scripts\ra2exp.exe entities <source-id> --query APOC
+.venv\Scripts\ra2exp.exe entity <source-id> APOC
 cd frontend
 npm run build
 ```

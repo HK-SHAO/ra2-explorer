@@ -1,4 +1,4 @@
-# RA2 Explorer v0.2 架构
+# RA2 Explorer v0.3 架构
 
 ## 运行模型
 
@@ -11,7 +11,7 @@ RA2 Explorer 是单机、只读源数据的本地 Web 应用：
 格式层（MIX / SHP / PAL / VXL / HVA / TMP / CSF / INI / WAV / PCX）
           │
           ▼
-SQLite 索引 ── Python Library ── CLI
+SQLite 索引 ── 语义层（RULES / ART / CSF / 组件关联）── CLI
                     │
                  FastAPI
                     │ 回环地址
@@ -46,6 +46,14 @@ Python 服务是唯一的数据访问入口。CLI 和 HTTP API 都调用 `Source
 | AUD / BAG / IDX / VPL / FNT / VQA / BIK | 索引、搜索、原始导出 | 已识别但尚未语义解码 |
 | 未知条目 | CRC、大小、原始导出 | 文件名未知时显示稳定的 `crc_XXXXXXXX` 名称 |
 
+## 单位语义目录
+
+语义层按实际游戏覆盖顺序合并 `rules.ini` / `rulesmd.ini`、`art.ini` / `artmd.ini` 和 CSF。松散文件优先于 MIX，`expandmd##` / `expand##` 优先于基础归档，MD 配置叠加在原版配置之上。缓存键包含来源扫描时间、状态与资产数量，重新扫描后自动失效。
+
+实体来自 `VehicleTypes`、`InfantryTypes`、`AircraftTypes` 和 `BuildingTypes`，经规则 `Image`、ART `Image` 与 `Voxel/NewTheater` 解析到真实文件。VXL 单位会关联主体、HVA、`TUR` 炮塔、`BARL` 炮管与 Cameo；SHP 单位会按剧场扩展选择主体。组合预览把每个 VXL 部件的边界、比例和 HVA 帧变换投影到同一个世界坐标系，不再把部件分别居中。
+
+语义目录当前是扫描索引上的可重建内存视图，不复制游戏内容，也不写回 RULES/ART。它已经支持单位检索、规则/艺术参数核对、组件溯源与静态组合预览；阵营换色、完整覆盖 Profile、武器依赖图和 HVA 时间轴播放仍是后续能力。
+
 ## MIX 名称与加密
 
 RA2/TS 的文件名标识是对大写文件名执行带特殊尾部填充的 CRC32。早期 Westwood 游戏使用 rotate/add 算法；扫描器根据名称命中情况选择哈希类型，而不是假定所有 MIX 相同。
@@ -65,6 +73,9 @@ RA2/TS 的文件名标识是对大写文件名执行带特殊尾部填充的 CRC
 - `GET /api/assets/{id}/text`：预览/检索 CSF、INI、MAP 与 TXT；
 - `GET /api/assets/{id}/shp`、`preview.png`：兼容 SHP 帧接口及统一图像预览；
 - `GET /api/assets/{id}/media`：以正确媒体类型播放 WAV；
+- `GET /api/entities`：按来源、名称、类型和可预览状态检索规则实体；
+- `GET /api/entities/{source}/{entity}`：读取规则、ART 参数和实际组件来源；
+- `GET /api/entities/{source}/{entity}/preview.png`：渲染 VXL 多部件或 SHP 单位预览；
 - `GET /api/palettes`、`GET /api/stats`：辅助浏览；
 - `POST /api/demo`：创建无商业素材的合成资料库；
 - `POST /api/reference-data/names/sync`：同步固定提交的名称数据库。
@@ -81,6 +92,7 @@ OpenAPI 页面在 `/api/docs`。生产端口固定为 `46120`，可通过 `pytho
 - TMP 最多 16384 个槽，CSF 最多 10 万标签/20 万字符串，文本最多 16 MiB；限制用于抵抗损坏或恶意文件。
 - 已在合成的基础/扩展/加密/嵌套 MIX、SHP 压缩和格式有效的 VXL/HVA/TMP/CSF/WAV 样本上验证。
 - 用户提供的官方 RA2/YR 安装已完成全目录索引，并对 PAL、SHP、VXL、HVA、TMP、CSF、INI、MAP、TXT、WAV、PCX 做均匀抽样解析/渲染验证；当前 188 个真实资产全部通过。实测修正了零售空 SHP 帧、战区扩展歧义、TMP 未使用 extra 尺寸和 IMA ADPCM 播放等与合成样本不同的问题。
+- 当前官方安装可建立 559 个规则实体，其中 526 个已有可预览主体；`APOC` 已实测解析为“天启坦克”，并正确组合 `MTNK` 主体、炮塔、炮管及其 HVA 和 Cameo。
 - 真实游戏目录始终作为静态字节源处理；开发、验证与后台服务均不会调用其中的可执行文件。
 
 ## 参考实现与可重复数据

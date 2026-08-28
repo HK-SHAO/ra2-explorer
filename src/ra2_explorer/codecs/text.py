@@ -78,12 +78,15 @@ def parse_ini(data: bytes | bytearray | memoryview) -> IniFile:
         line = raw_line.strip()
         if not line or line.startswith(";") or line.startswith("#"):
             continue
-        if line.startswith("[") and line.endswith("]"):
-            current = line[1:-1].strip()
-            if current not in entries:
-                section_names.append(current)
-                entries[current] = []
-            continue
+        if line.startswith("["):
+            closing = line.find("]", 1)
+            trailer = line[closing + 1 :].strip() if closing >= 0 else ""
+            if closing >= 0 and (not trailer or trailer.startswith((";", "#"))):
+                current = line[1:closing].strip()
+                if current not in entries:
+                    section_names.append(current)
+                    entries[current] = []
+                continue
         if "=" not in raw_line:
             continue
         key, value = raw_line.split("=", 1)

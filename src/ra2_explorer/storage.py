@@ -310,6 +310,27 @@ class Database:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def assets_for_formats(
+        self,
+        source_id: str,
+        formats: tuple[str, ...],
+    ) -> list[dict[str, Any]]:
+        if not formats:
+            return []
+        placeholders = ", ".join("?" for _ in formats)
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT assets.*, archives.virtual_path AS archive_path
+                FROM assets
+                LEFT JOIN archives ON archives.id = assets.archive_id
+                WHERE assets.source_id = ? AND assets.format IN ({placeholders})
+                ORDER BY lower(assets.display_name), assets.virtual_path
+                """,
+                (source_id, *formats),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def sample_assets(
         self,
         source_id: str,

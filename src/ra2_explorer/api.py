@@ -32,6 +32,7 @@ from ra2_explorer.reference_data import (
     reference_status,
     sync_known_names,
 )
+from ra2_explorer.semantic import ENTITY_KINDS, SemanticLibrary
 from ra2_explorer.storage import Database
 
 
@@ -49,6 +50,7 @@ class Services:
             load_known_names(settings.known_names_path),
         )
         self.reader = AssetReader(self.database)
+        self.semantic = SemanticLibrary(self.database, self.reader)
 
     def reload_names(self) -> None:
         self.library = SourceLibrary(
@@ -145,6 +147,58 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/assets/{asset_id}")
     def asset(asset_id: str) -> dict[str, object]:
         return services.database.get_asset(asset_id)
+
+    @app.get("/api/entities")
+    def entities(
+        source_id: str,
+        q: str | None = Query(default=None, max_length=200),
+        kind: str | None = Query(default=None),
+        renderable: bool | None = Query(default=None),
+        limit: int = Query(default=100, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict[str, object]:
+        if kind is not None and kind not in ENTITY_KINDS:
+            raise HTTPException(status_code=422, detail="未知单位类型")
+        return services.semantic.list_entities(
+            source_id,
+            query=q,
+            kind=kind,
+            renderable=renderable,
+            limit=limit,
+            offset=offset,
+        )
+
+    @app.get("/api/entities/{source_id}/{entity_id}")
+    def entity(source_id: str, entity_id: str) -> dict[str, object]:
+        return services.semantic.get_entity(source_id, entity_id)
+
+    @app.get("/api/entities/{source_id}/{entity_id}/preview.png")
+    def entity_preview(
+        source_id: str,
+        entity_id: str,
+        frame: int = Query(default=0, ge=0),
+        palette_id: str | None = None,
+        scale: int = Query(default=4, ge=1, le=12),
+    ) -> Response:
+        semantic_entity = services.semantic.catalog(source_id).get(entity_id)
+        body = semantic_entity.component("body")
+        if body is None:
+            raise HTTPException(status_code=409, detail="该单位没有可渲染的主体资产")
+        palette = _select_palette(services, body, palette_id)
+        _, image = services.semantic.render(
+            source_id,
+            entity_id,
+            palette=palette,
+            frame=frame,
+            scale=scale,
+        )
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+        return Response(
+            content=output.getvalue(),
+            media_type="image/png",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/api/assets/{asset_id}/content")
     def asset_content(asset_id: str) -> StreamingResponse:
@@ -354,13 +408,20 @@ def _select_palette(
         "ubn": "ubn",
         "lun": "lun",
     }.get(extension, "tem")
-    preferred = [
-        f"iso{theater}.pal",
-        f"unit{theater}.pal",
-        "unittem.pal",
-        "isotem.pal",
-        "demo.pal",
-    ]
+    uses_iso_palette = asset.get("format") == "tmp" or extension in {
+        "tem",
+        "sno",
+        "urb",
+        "ubn",
+        "lun",
+        "des",
+    }
+    preferred = (
+        [f"iso{theater}.pal", "isotem.pal", f"unit{theater}.pal", "unittem.pal"]
+        if uses_iso_palette
+        else [f"unit{theater}.pal", "unittem.pal", f"iso{theater}.pal", "isotem.pal"]
+    )
+    preferred.append("demo.pal")
     priority = {name: index for index, name in enumerate(preferred)}
     palette_asset = min(
         palettes,

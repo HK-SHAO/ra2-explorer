@@ -20,6 +20,7 @@ from ra2_explorer.config import DEFAULT_HOST, DEFAULT_PORT, load_settings
 from ra2_explorer.demo import create_demo_installation
 from ra2_explorer.discovery import discover_installations
 from ra2_explorer.reference_data import sync_known_names
+from ra2_explorer.semantic import ENTITY_KINDS
 from ra2_explorer.validation import VALIDATED_FORMATS, validate_source
 
 
@@ -64,6 +65,17 @@ def build_parser() -> argparse.ArgumentParser:
     list_command.add_argument("--query")
     list_command.add_argument("--format")
     list_command.add_argument("--limit", type=int, default=50)
+
+    entities = subcommands.add_parser("entities", help="列出规则文件中的游戏单位")
+    entities.add_argument("source_id")
+    entities.add_argument("--query")
+    entities.add_argument("--kind", choices=ENTITY_KINDS)
+    entities.add_argument("--renderable", action="store_true")
+    entities.add_argument("--limit", type=int, default=50)
+
+    entity = subcommands.add_parser("entity", help="检查单位规则和关联资产")
+    entity.add_argument("source_id")
+    entity.add_argument("entity_id")
     return parser
 
 
@@ -151,6 +163,28 @@ def main(argv: list[str] | None = None) -> int:
         for asset in result["items"]:
             print(f"{asset['id']}  {asset['format']:<7}  {asset['display_name']}")
         print(f"{len(result['items'])}/{result['total']}")
+        return 0
+
+    if args.command == "entities":
+        result = services.semantic.list_entities(
+            args.source_id,
+            query=args.query,
+            kind=args.kind,
+            renderable=True if args.renderable else None,
+            limit=max(1, min(args.limit, 500)),
+        )
+        for entity in result["items"]:
+            renderable = "preview" if entity["renderable"] else "missing"
+            print(
+                f"{entity['id']:<12}  {entity['kind']:<8}  "
+                f"{renderable:<7}  {entity['display_name']}"
+            )
+        print(f"{len(result['items'])}/{result['total']}")
+        return 0
+
+    if args.command == "entity":
+        result = services.semantic.get_entity(args.source_id, args.entity_id)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     return 2
 

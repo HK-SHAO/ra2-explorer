@@ -5,6 +5,7 @@ import struct
 from ra2_explorer.codecs.csf import parse_csf
 from ra2_explorer.codecs.hva import parse_hva
 from ra2_explorer.codecs.sniff import sniff_format
+from ra2_explorer.codecs.text import parse_ini
 from ra2_explorer.codecs.tmp import parse_tmp
 from ra2_explorer.codecs.vxl import parse_vxl
 from ra2_explorer.codecs.wav import parse_wav, wav_for_browser
@@ -51,6 +52,14 @@ def test_hva_reads_frame_section_matrices() -> None:
     assert animation.frame_count == 4
     assert animation.section_names == ("BODY",)
     assert animation.transform(3, 0)[3] > animation.transform(0, 0)[3]
+
+
+def test_ini_accepts_retail_section_headers_with_inline_comments() -> None:
+    parsed = parse_ini(b"[MTNK] ; Apocalypse tank\r\nVoxel=yes\r\n")
+
+    assert parsed.sections[0].name == "MTNK"
+    assert parsed.sections[0].entries[0].key == "Voxel"
+    assert parsed.sections[0].entries[0].value == "yes"
 
 
 def test_tmp_reads_real_ts_ra2_layout_and_renders_diamond() -> None:

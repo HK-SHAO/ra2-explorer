@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from PIL import Image, ImageDraw
 
 from ra2_explorer.codecs.binary import BinaryReader, checked_product
+from ra2_explorer.codecs.hva import HvaFile
 from ra2_explorer.codecs.pal import Palette, grayscale_palette
 from ra2_explorer.errors import InvalidFormatError
 
@@ -132,6 +134,182 @@ class VxlFile:
             draw.polygon(right_points, fill=(*right, 255))
             draw.polygon(top_points, fill=(*top, 255))
         return image
+
+
+@dataclass(frozen=True, slots=True)
+class VxlRenderPart:
+    model: VxlFile
+    animation: HvaFile | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _WorldVoxel:
+    x: float
+    y: float
+    z: float
+    size: float
+    color: int
+    palette: Palette
+
+
+def render_vxl_composite(
+    parts: Sequence[VxlRenderPart],
+    *,
+    palette: Palette | None = None,
+    frame: int = 0,
+    scale: int = 4,
+) -> Image.Image:
+    world_voxels = []
+    for part in parts:
+        animation = part.animation
+        for limb_index, limb in enumerate(part.model.limbs):
+            if len(world_voxels) + len(limb.voxels) > MAX_RENDER_VOXELS:
+                raise InvalidFormatError(
+                    f"VXL: composite has too many voxels to preview ({MAX_RENDER_VOXELS:,} max)"
+                )
+            transform = _hva_transform(animation, limb, limb_index, frame)
+            active_palette = palette or part.model.palette
+            for voxel in limb.voxels:
+                local_x, local_y, local_z = _apply_transform(
+                    transform,
+                    float(voxel.x),
+                    float(voxel.y),
+                    float(voxel.z),
+                    limb,
+                )
+                world_voxels.append(
+                    _WorldVoxel(
+                        (local_x + limb.min_bounds[0]) * limb.scale,
+                        -(local_y + limb.min_bounds[1]) * limb.scale,
+                        (local_z + limb.min_bounds[2]) * limb.scale,
+                        limb.scale,
+                        voxel.color,
+                        active_palette,
+                    )
+                )
+    if not world_voxels:
+        return Image.new("RGBA", (320, 180), (0, 0, 0, 0))
+
+    requested = max(1, min(scale, 12))
+
+    def projected_bounds(pixel_scale: float) -> tuple[float, float, float, float]:
+        bounds = []
+        for voxel in world_voxels:
+            half_width = max(1.0, voxel.size * 24 * pixel_scale)
+            half_height = max(1.0, voxel.size * 12 * pixel_scale)
+            cube_height = max(1.0, voxel.size * 24 * pixel_scale)
+            center_x = (voxel.x - voxel.y) * 24 * pixel_scale
+            center_y = (voxel.x + voxel.y) * 12 * pixel_scale - voxel.z * 24 * pixel_scale
+            bounds.append(
+                (
+                    center_x - half_width,
+                    center_y - cube_height - half_height,
+                    center_x + half_width,
+                    center_y + half_height,
+                )
+            )
+        return (
+            min(item[0] for item in bounds),
+            min(item[1] for item in bounds),
+            max(item[2] for item in bounds),
+            max(item[3] for item in bounds),
+        )
+
+    min_x, min_y, max_x, max_y = projected_bounds(float(requested))
+    fit = min(1.0, 1800 / max(1.0, max_x - min_x), 1800 / max(1.0, max_y - min_y))
+    pixel_scale = requested * fit
+    min_x, min_y, max_x, max_y = projected_bounds(pixel_scale)
+    padding = max(12, round(pixel_scale * 3))
+    width = max(1, round(max_x - min_x) + padding * 2 + 1)
+    height = max(1, round(max_y - min_y) + padding * 2 + 1)
+    image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+
+    ordered = sorted(
+        world_voxels,
+        key=lambda voxel: (voxel.x + voxel.y + voxel.z, voxel.z, voxel.y, voxel.x),
+    )
+    for voxel in ordered:
+        half_width = max(1, round(voxel.size * 24 * pixel_scale))
+        half_height = max(1, round(voxel.size * 12 * pixel_scale))
+        cube_height = max(1, round(voxel.size * 24 * pixel_scale))
+        center_x = round((voxel.x - voxel.y) * 24 * pixel_scale + padding - min_x)
+        center_y = round(
+            (voxel.x + voxel.y) * 12 * pixel_scale
+            - voxel.z * 24 * pixel_scale
+            + padding
+            - min_y
+        )
+        red, green, blue, _ = voxel.palette.rgba(voxel.color, transparent_zero=False)
+        top = _shade((red, green, blue), 1.12)
+        left = _shade((red, green, blue), 0.70)
+        right = _shade((red, green, blue), 0.88)
+        top_points = (
+            (center_x, center_y - cube_height - half_height),
+            (center_x + half_width, center_y - cube_height),
+            (center_x, center_y - cube_height + half_height),
+            (center_x - half_width, center_y - cube_height),
+        )
+        left_points = (
+            top_points[3],
+            top_points[2],
+            (center_x, center_y + half_height),
+            (center_x - half_width, center_y),
+        )
+        right_points = (
+            top_points[1],
+            top_points[2],
+            (center_x, center_y + half_height),
+            (center_x + half_width, center_y),
+        )
+        draw.polygon(left_points, fill=(*left, 255))
+        draw.polygon(right_points, fill=(*right, 255))
+        draw.polygon(top_points, fill=(*top, 255))
+    return image
+
+
+def _hva_transform(
+    animation: HvaFile | None,
+    limb: VxlLimb,
+    limb_index: int,
+    frame: int,
+) -> tuple[float, ...] | None:
+    if animation is None or not animation.frame_count or not animation.section_names:
+        return None
+    section_lookup = {name.casefold(): index for index, name in enumerate(animation.section_names)}
+    section = section_lookup.get(limb.name.casefold())
+    if section is None:
+        section = min(limb_index, len(animation.section_names) - 1)
+    return animation.transform(frame % animation.frame_count, section)
+
+
+def _apply_transform(
+    transform: tuple[float, ...] | None,
+    x: float,
+    y: float,
+    z: float,
+    limb: VxlLimb,
+) -> tuple[float, float, float]:
+    if transform is None:
+        return x, y, z
+    size_x, size_y, size_z = limb.size
+    range_x = limb.max_bounds[0] - limb.min_bounds[0]
+    range_y = limb.max_bounds[1] - limb.min_bounds[1]
+    range_z = limb.max_bounds[2] - limb.min_bounds[2]
+    return (
+        transform[0] * x
+        + transform[1] * y
+        + transform[2] * z
+        + transform[3] * range_x / size_x,
+        transform[4] * x
+        + transform[5] * y
+        + transform[6] * z
+        + transform[7] * range_y / size_y,
+        transform[8] * x
+        + transform[9] * y
+        + transform[10] * z
+        + transform[11] * range_z / size_z,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -341,4 +519,11 @@ def _shade(color: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
     return tuple(min(255, max(0, round(component * factor))) for component in color)  # type: ignore[return-value]
 
 
-__all__ = ["Voxel", "VxlFile", "VxlLimb", "parse_vxl"]
+__all__ = [
+    "Voxel",
+    "VxlFile",
+    "VxlLimb",
+    "VxlRenderPart",
+    "parse_vxl",
+    "render_vxl_composite",
+]

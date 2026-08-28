@@ -15,16 +15,28 @@ def create_demo_installation(target: Path) -> Path:
     palette = _build_demo_palette()
     sprite = _build_demo_shp()
     rules = (
-        b"[DemoVehicle]\r\n"
+        b"[VehicleTypes]\r\n"
+        b"0=DemoVehicle\r\n"
+        b"\r\n[DemoVehicle]\r\n"
+        b"UIName=UNIT:DemoVehicle\r\n"
         b"Name=Explorer Test Vehicle\r\n"
         b"Image=DEMO\r\n"
         b"Primary=DemoCannon\r\n"
+        b"Strength=400\r\n"
+        b"Cost=800\r\n"
+    )
+    art = (
+        b"[DEMO]\r\n"
+        b"Voxel=yes\r\n"
+        b"Remapable=yes\r\n"
+        b"Cameo=DEMO\r\n"
     )
     nested = build_mix(
         [
             ("demo.pal", palette),
             ("demo.shp", sprite),
             ("rules.ini", rules),
+            ("art.ini", art),
             ("demo.csf", _build_demo_csf()),
             ("demo.vxl", _build_demo_vxl(palette)),
             ("demo.hva", _build_demo_hva()),

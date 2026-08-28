@@ -48,6 +48,13 @@ D:\SteamLibrary\steamapps\common\Command & Conquer Red Alert II
 
 当前官方安装已按上述参数验证 188 个真实资产，覆盖 11 类已支持格式，结果为 188 通过、0 失败。
 
+可以从规则层核对单位与真实资产关系。例如下面两条命令会先定位“天启坦克”，再显示 `APOC → MTNK` 及主体、炮塔、炮管、HVA、Cameo 的来源归档：
+
+```bat
+.venv\Scripts\ra2exp.exe entities f48bb468-297b-404f-952e-055adda2d1b7 --query APOC
+.venv\Scripts\ra2exp.exe entity f48bb468-297b-404f-952e-055adda2d1b7 APOC
+```
+
 ## 无游戏文件时
 
 下面的格式验证资料库由项目现场生成，包含一个加密根 MIX、一个嵌套 MIX，以及 PAL、六帧 SHP、VXL/HVA、TMP、CSF、INI 和 WAV，不含任何 EA 图像、声音或文本：
