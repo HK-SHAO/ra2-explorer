@@ -23,13 +23,13 @@ RA2 Explorer 是一个本地优先的《命令与征服：红色警戒 2》资�
 ```bat
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -e .[dev]
-.venv\Scripts\ra2-explorer.exe sync-names
-.venv\Scripts\ra2-explorer.exe demo
+.venv\Scripts\ra2exp.exe sync-names
+.venv\Scripts\ra2exp.exe demo
 cd frontend
 npm ci
 npm run build
 cd ..
-.venv\Scripts\ra2-explorer.exe background install
+.venv\Scripts\ra2exp.exe background install
 ```
 
 服务在 `http://127.0.0.1:46120` 无窗口后台运行，并登记为当前 Windows 用户的登录自启项。构建后的页面由 Python 服务从 `frontend\dist` 提供；运行时不需要 Node，也不会加载 CDN。首次可直接浏览合成格式样本，再从页面添加自己的合法游戏目录。扫描和预览只读取文件字节，不会启动游戏目录中的 EXE。
@@ -37,20 +37,20 @@ cd ..
 只开发 API 时可以不构建前端，接口文档位于 `http://127.0.0.1:46120/api/docs`。前端热更新使用 `cd frontend` 后运行 `npm run dev`。后台管理命令为：
 
 ```bat
-.venv\Scripts\ra2-explorer.exe background status
-.venv\Scripts\ra2-explorer.exe background stop
-.venv\Scripts\ra2-explorer.exe background start
-.venv\Scripts\ra2-explorer.exe background uninstall
+.venv\Scripts\ra2exp.exe background status
+.venv\Scripts\ra2exp.exe background stop
+.venv\Scripts\ra2exp.exe background start
+.venv\Scripts\ra2exp.exe background uninstall
 ```
 
-交互式调试可运行 `.venv\Scripts\ra2-explorer.exe serve`；它默认不会调用 Windows 外部程序。如确实需要自动打开浏览器，显式增加 `--open-browser`。
+安装项目后会生成正式 CLI `.venv\Scripts\ra2exp.exe`。现有 `.venv\Scripts\ra2-explorer.exe` 保留为兼容别名；激活虚拟环境后可以直接省略路径运行 `ra2exp`。交互式调试使用 `ra2exp serve`；它默认不会调用 Windows 外部程序。如确实需要自动打开浏览器，显式增加 `--open-browser`。
 
 ## 验证
 
 ```bat
 .venv\Scripts\python.exe -m pytest
 .venv\Scripts\python.exe -m ruff check src tests
-.venv\Scripts\ra2-explorer.exe verify <source-id> --samples-per-format 20
+.venv\Scripts\ra2exp.exe verify <source-id> --samples-per-format 20
 cd frontend
 npm run build
 ```

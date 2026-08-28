@@ -115,3 +115,9 @@ def test_serve_defaults_do_not_open_external_programs() -> None:
 
     assert args.port == DEFAULT_PORT == 46_120
     assert args.open_browser is False
+
+
+def test_canonical_cli_name_is_ra2exp() -> None:
+    from ra2_explorer.cli import build_parser
+
+    assert build_parser().prog == "ra2exp"

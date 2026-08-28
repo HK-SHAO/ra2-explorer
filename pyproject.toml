@@ -24,6 +24,7 @@ dev = [
 ]
 
 [project.scripts]
+ra2exp = "ra2_explorer.cli:main"
 ra2-explorer = "ra2_explorer.cli:main"
 
 [tool.hatch.build.targets.wheel]

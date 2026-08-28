@@ -24,7 +24,7 @@ from ra2_explorer.validation import VALIDATED_FORMATS, validate_source
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="ra2-explorer")
+    parser = argparse.ArgumentParser(prog="ra2exp")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     serve = subcommands.add_parser("serve", help="启动本地 API 与浏览器界面")

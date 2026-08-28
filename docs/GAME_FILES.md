@@ -21,7 +21,7 @@
 如果数据库被重建，页面会把 `.runtime\RA2MD` 显示为“项目本地官方安装”候选，也可以重新执行：
 
 ```bat
-.venv\Scripts\ra2-explorer.exe import .runtime\RA2MD --name RA2MD-官方安装
+.venv\Scripts\ra2exp.exe import .runtime\RA2MD --name RA2MD-官方安装
 ```
 
 应用还会读取 Steam 库清单、App 2229850 清单、EA/Westwood 安装注册表和常见 EA App/Origin 目录，并只在找到 `ra2.mix` 或 `ra2md.mix` 时给出可导入候选。
@@ -29,7 +29,7 @@
 命令行可先核对发现结果：
 
 ```bat
-.venv\Scripts\ra2-explorer.exe discover
+.venv\Scripts\ra2exp.exe discover
 ```
 
 Steam 常见路径示例：
@@ -43,7 +43,7 @@ D:\SteamLibrary\steamapps\common\Command & Conquer Red Alert II
 导入后可执行确定性的按格式抽样验证。验证会读取解析结果，并对可视格式实际渲染首个可用帧或地块；它不会运行游戏：
 
 ```bat
-.venv\Scripts\ra2-explorer.exe verify f48bb468-297b-404f-952e-055adda2d1b7 --samples-per-format 20
+.venv\Scripts\ra2exp.exe verify f48bb468-297b-404f-952e-055adda2d1b7 --samples-per-format 20
 ```
 
 当前官方安装已按上述参数验证 188 个真实资产，覆盖 11 类已支持格式，结果为 188 通过、0 失败。
@@ -53,7 +53,7 @@ D:\SteamLibrary\steamapps\common\Command & Conquer Red Alert II
 下面的格式验证资料库由项目现场生成，包含一个加密根 MIX、一个嵌套 MIX，以及 PAL、六帧 SHP、VXL/HVA、TMP、CSF、INI 和 WAV，不含任何 EA 图像、声音或文本：
 
 ```bat
-.venv\Scripts\ra2-explorer.exe demo
+.venv\Scripts\ra2exp.exe demo
 ```
 
 浏览器空状态中的“先看格式样本”执行相同操作。它用于确认安装、加密索引、嵌套读取、搜索、真实格式解析、预览、播放和导出链路；它不是用来替代真实游戏目录的展示 Demo。
@@ -63,7 +63,7 @@ D:\SteamLibrary\steamapps\common\Command & Conquer Red Alert II
 项目可以把 `iron-curtain-engine/cnc-formats` 的 RA2 已知文件名数据库下载到本地。下载固定到一个明确提交，并生成来源清单；它只帮助把 MIX CRC 恢复为名称，不含游戏资产：
 
 ```bat
-.venv\Scripts\ra2-explorer.exe sync-names
+.venv\Scripts\ra2exp.exe sync-names
 ```
 
 参考文件保存到 `.runtime\reference`，可安全删除并重新同步。代码实现核对所用的 OpenRA、`cnc-formats` 和 `ra2web-studio` 源码也只作为格式参考，不是可玩的 RA2 发行版。
