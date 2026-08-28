@@ -14,7 +14,17 @@
 
 ## 当前机器状态
 
-如果 Steam 或 EA App 中尚未安装游戏，RA2 Explorer 无法合法代为下载。先在平台客户端购买/领取并完成安装。应用会读取 Steam 库清单、App 2229850 清单、EA/Westwood 安装注册表和常见 EA App/Origin 目录，并只在找到 `ra2.mix` 或 `ra2md.mix` 时给出可导入候选。
+当前项目已经由用户提供一份官方安装，位置为 `.runtime\RA2MD`。自动发现确认该目录同时包含 `ra2.mix` 与 `ra2md.mix`，因此覆盖《红色警戒 2》原版和《尤里的复仇》。应用只对目录做静态、只读解析；不会启动其中任何 EXE。
+
+2026-08-29 的实际扫描结果为 `ready`：64 个归档、13,382 个资产。主要分类是 5,536 个 TMP、5,354 个 SHP、1,277 个 WAV、254 个 PCX、221 个 VXL、221 个 HVA、204 个 MAP、123 个 PAL 和 92 个 INI；其余为 MIX、AUD、FNT、CSF、BAG、IDX、VPL、文本和视频。零售版中的 5 字节 `CLASS` MIX 占位符会保留为归档记录，不再被误报为损坏文件；`.TEM/.SNO/.URB/.UBN/.LUN/.DES` 等同名战区扩展会先按内容区分 TMP 与 SHP。
+
+如果数据库被重建，页面会把 `.runtime\RA2MD` 显示为“项目本地官方安装”候选，也可以重新执行：
+
+```bat
+.venv\Scripts\ra2-explorer.exe import .runtime\RA2MD --name RA2MD-官方安装
+```
+
+应用还会读取 Steam 库清单、App 2229850 清单、EA/Westwood 安装注册表和常见 EA App/Origin 目录，并只在找到 `ra2.mix` 或 `ra2md.mix` 时给出可导入候选。
 
 命令行可先核对发现结果：
 
@@ -29,6 +39,14 @@ D:\SteamLibrary\steamapps\common\Command & Conquer Red Alert II
 ```
 
 实际路径由 Steam 库位置决定，不要假定一定在系统盘。导入后源文件保持只读；应用自己的索引位于项目 `.runtime` 目录。
+
+导入后可执行确定性的按格式抽样验证。验证会读取解析结果，并对可视格式实际渲染首个可用帧或地块；它不会运行游戏：
+
+```bat
+.venv\Scripts\ra2-explorer.exe verify f48bb468-297b-404f-952e-055adda2d1b7 --samples-per-format 20
+```
+
+当前官方安装已按上述参数验证 188 个真实资产，覆盖 11 类已支持格式，结果为 188 通过、0 失败。
 
 ## 无游戏文件时
 

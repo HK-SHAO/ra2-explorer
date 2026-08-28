@@ -1,6 +1,6 @@
 # RA2 Explorer
 
-RA2 Explorer 是一个本地优先的《命令与征服：红色警戒 2》资产浏览器。它只读挂载用户自己的游戏目录，把 MIX 条目、PAL 调色板和 SHP 动画组织成可搜索、可预览、可导出的本地资产库。
+RA2 Explorer 是一个本地优先的《命令与征服：红色警戒 2》资产浏览器。它只读挂载用户自己的游戏目录，把 MIX 中的图像、体素、地形、文本和声音组织成可搜索、可预览、可播放、可导出的本地资产库。
 
 当前可执行边界：
 
@@ -8,8 +8,9 @@ RA2 Explorer 是一个本地优先的《命令与征服：红色警戒 2》资�
 - 读取基础、扩展和 Blowfish 加密 MIX，并递归索引已知的嵌套 MIX；
 - 同时解析 RA2/TS CRC32 与早期 Westwood 文件名哈希；
 - 预览 PAL、RA2/TS SHP、VXL 体素部件、TMP 地块和 PCX；
-- 读取 HVA 矩阵、CSF/INI/MAP 文本，并在浏览器播放 WAV；
-- 自动发现 Steam App 2229850、EA App/Origin 与兼容旧版安装；
+- 读取 HVA 矩阵、CSF/INI/MAP 文本，并在浏览器播放 PCM 或 IMA ADPCM WAV；
+- 自动发现项目内 `.runtime\RA2MD`、Steam App 2229850、EA App/Origin 与兼容旧版安装；
+- 对真实来源按格式均匀抽样，执行解析和首帧渲染验证；
 - 通过 SQLite、HTTP API、CLI 和浏览器界面访问同一份索引；
 - 生成不包含 EA 内容的本地演示资产库。
 
@@ -31,7 +32,7 @@ cd ..
 .venv\Scripts\ra2-explorer.exe background install
 ```
 
-服务在 `http://127.0.0.1:46120` 无窗口后台运行，并登记为当前 Windows 用户的登录自启项。构建后的页面由 Python 服务从 `frontend\dist` 提供；运行时不需要 Node，也不会加载 CDN。首次可直接浏览合成演示，再从页面添加自己的合法游戏目录。
+服务在 `http://127.0.0.1:46120` 无窗口后台运行，并登记为当前 Windows 用户的登录自启项。构建后的页面由 Python 服务从 `frontend\dist` 提供；运行时不需要 Node，也不会加载 CDN。首次可直接浏览合成格式样本，再从页面添加自己的合法游戏目录。扫描和预览只读取文件字节，不会启动游戏目录中的 EXE。
 
 只开发 API 时可以不构建前端，接口文档位于 `http://127.0.0.1:46120/api/docs`。前端热更新使用 `cd frontend` 后运行 `npm run dev`。后台管理命令为：
 
@@ -49,11 +50,12 @@ cd ..
 ```bat
 .venv\Scripts\python.exe -m pytest
 .venv\Scripts\python.exe -m ruff check src tests
+.venv\Scripts\ra2-explorer.exe verify <source-id> --samples-per-format 20
 cd frontend
 npm run build
 ```
 
-真实 RA2 文件只用于本地 smoke test，不进入仓库。架构与导入边界见 [v0.1 架构](docs/ARCHITECTURE.md)，合法游戏来源、本机导入和无游戏文件时的演示方案见 [获取与导入游戏文件](docs/GAME_FILES.md)。
+真实 RA2 文件只用于本地 smoke test，不进入仓库。架构与导入边界见 [v0.2 架构](docs/ARCHITECTURE.md)，合法游戏来源、本机导入和无游戏文件时的格式样本方案见 [获取与导入游戏文件](docs/GAME_FILES.md)。
 
 ## 权利边界
 

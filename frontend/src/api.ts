@@ -61,6 +61,63 @@ export interface ShpMetadata {
   frames: ShpFrame[];
 }
 
+export interface AssetMetadata {
+  format: string;
+  size: number;
+  width?: number;
+  height?: number;
+  frame_count?: number;
+  frames?: ShpFrame[];
+  file_name?: string;
+  limb_count?: number;
+  voxel_count?: number;
+  limbs?: Array<{ index: number; name: string; size: number[]; voxel_count: number; normals_mode: number }>;
+  tile_count?: number;
+  template_width?: number;
+  template_height?: number;
+  section_count?: number;
+  section_names?: string[];
+  entry_count?: number;
+  label_count?: number;
+  string_count?: number;
+  encoding?: string;
+  channels?: number;
+  sample_rate?: number;
+  bits_per_sample?: number;
+  duration_seconds?: number;
+  audio_format?: number;
+  playback_transcodes_to_pcm?: boolean;
+  color_count?: number;
+  mode?: string;
+}
+
+export interface TextAsset {
+  format: string;
+  text: string;
+  line_count: number;
+  returned_lines: number;
+  truncated: boolean;
+  encoding?: string;
+  section_count?: number;
+  entry_count?: number;
+  label_count?: number;
+  string_count?: number;
+}
+
+export interface GameInstallation {
+  path: string;
+  name: string;
+  provider: string;
+  edition: string;
+  markers: string[];
+}
+
+export interface DiscoveryResult {
+  candidates: GameInstallation[];
+  checked_locations: string[];
+  official_sources: Array<{ provider: string; url: string }>;
+}
+
 export interface ReferenceStatus {
   available: boolean;
   manifest_valid?: boolean;
@@ -88,6 +145,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   sources: () => request<Source[]>("/api/sources"),
+  discovery: () => request<DiscoveryResult>("/api/discovery"),
   addSource: (path: string, name?: string) =>
     request<Source>("/api/sources", {
       method: "POST",
@@ -107,10 +165,17 @@ export const api = {
   palettes: (sourceId: string) =>
     request<Asset[]>(`/api/palettes?source_id=${encodeURIComponent(sourceId)}`),
   shp: (assetId: string) => request<ShpMetadata>(`/api/assets/${assetId}/shp`),
+  metadata: (assetId: string) => request<AssetMetadata>(`/api/assets/${assetId}/metadata`),
+  text: (assetId: string, query = "") => {
+    const params = new URLSearchParams({ limit: "400" });
+    if (query.trim()) params.set("q", query.trim());
+    return request<TextAsset>(`/api/assets/${assetId}/text?${params}`);
+  },
   referenceStatus: () => request<ReferenceStatus>("/api/reference-data"),
   syncNames: () =>
     request<ReferenceStatus>("/api/reference-data/names/sync", { method: "POST" }),
   contentUrl: (assetId: string) => `/api/assets/${assetId}/content`,
+  mediaUrl: (assetId: string) => `/api/assets/${assetId}/media`,
   previewUrl: (assetId: string, frame: number, paletteId: string, scale = 4) => {
     const params = new URLSearchParams({ frame: String(frame), scale: String(scale) });
     if (paletteId) params.set("palette_id", paletteId);

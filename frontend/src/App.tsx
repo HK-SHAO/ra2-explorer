@@ -3,10 +3,13 @@ import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import {
   api,
   Asset,
+  AssetMetadata,
+  DiscoveryResult,
+  GameInstallation,
   ReferenceStatus,
-  ShpMetadata,
   Source,
   Stats,
+  TextAsset,
 } from "./api";
 
 type IconName =
@@ -59,7 +62,18 @@ const formatLabels: Record<string, string> = {
   csf: "CSF 文本",
   vxl: "VXL 模型",
   hva: "HVA 动画",
+  tmp: "TMP 地块",
+  pcx: "PCX 图像",
+  map: "地图配置",
+  text: "文本",
   wav: "WAV 音频",
+  aud: "AUD 音效",
+  bag: "音频包",
+  idx: "音频索引",
+  vpl: "VPL 光照",
+  fnt: "游戏字体",
+  video: "过场视频",
+  binary: "二进制",
   unknown: "其他",
 };
 
@@ -67,6 +81,11 @@ function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
   if (value < 1024 ** 2) return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`;
   return `${(value / 1024 ** 2).toFixed(1)} MB`;
+}
+
+function formatDuration(value: number) {
+  const total = Math.max(0, Math.round(value));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
 function crcLabel(value: number | null) {
@@ -84,9 +103,10 @@ function stateLabel(state: Source["state"]) {
 }
 
 function assetIcon(format: string): IconName {
-  if (format === "shp") return "image";
+  if (["shp", "tmp", "vxl", "pcx"].includes(format)) return "image";
   if (format === "pal") return "swatch";
   if (format === "mix") return "archive";
+  if (["wav", "aud"].includes(format)) return "play";
   return "file";
 }
 
@@ -101,7 +121,9 @@ function App() {
   const [format, setFormat] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [selected, setSelected] = useState<Asset | null>(null);
-  const [shp, setShp] = useState<ShpMetadata | null>(null);
+  const [metadata, setMetadata] = useState<AssetMetadata | null>(null);
+  const [textAsset, setTextAsset] = useState<TextAsset | null>(null);
+  const [textQuery, setTextQuery] = useState("");
   const [frame, setFrame] = useState(0);
   const [paletteId, setPaletteId] = useState("");
   const [playing, setPlaying] = useState(false);
@@ -111,6 +133,7 @@ function App() {
   const [notice, setNotice] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [reference, setReference] = useState<ReferenceStatus | null>(null);
+  const [discovery, setDiscovery] = useState<DiscoveryResult>({ candidates: [], checked_locations: [], official_sources: [] });
 
   const activeSource = sources.find((item) => item.id === sourceId) ?? null;
 
@@ -122,11 +145,16 @@ function App() {
   }
 
   useEffect(() => {
-    Promise.all([api.sources(), api.referenceStatus()])
-      .then(([nextSources, nextReference]) => {
+    Promise.all([
+      api.sources(),
+      api.referenceStatus(),
+      api.discovery().catch(() => ({ candidates: [], checked_locations: [], official_sources: [] })),
+    ])
+      .then(([nextSources, nextReference, nextDiscovery]) => {
         setSources(nextSources);
         setSourceId(nextSources[0]?.id || "");
         setReference(nextReference);
+        setDiscovery(nextDiscovery);
       })
       .catch((reason: Error) => setError(reason.message))
       .finally(() => setLoading(false));
@@ -166,30 +194,47 @@ function App() {
   useEffect(() => {
     setFrame(0);
     setPlaying(false);
-    setShp(null);
+    setMetadata(null);
+    setTextAsset(null);
+    setTextQuery("");
     setPaletteId("");
     if (!selectedId) {
       setSelected(null);
       return;
     }
     let cancelled = false;
-    api.asset(selectedId)
-      .then((asset) => {
+    Promise.all([api.asset(selectedId), api.metadata(selectedId)])
+      .then(([asset, nextMetadata]) => {
         if (cancelled) return;
         setSelected(asset);
-        if (asset.format === "shp") {
-          api.shp(asset.id).then((metadata) => !cancelled && setShp(metadata)).catch((reason: Error) => !cancelled && setError(reason.message));
-        }
+        setMetadata(nextMetadata);
       })
       .catch((reason: Error) => !cancelled && setError(reason.message));
     return () => { cancelled = true; };
   }, [selectedId]);
 
   useEffect(() => {
-    if (!playing || !shp || shp.frame_count < 2) return;
-    const timer = window.setInterval(() => setFrame((current) => (current + 1) % shp.frame_count), 140);
+    if (!playing || selected?.format !== "shp" || !metadata?.frame_count || metadata.frame_count < 2) return;
+    const timer = window.setInterval(() => setFrame((current) => (current + 1) % metadata.frame_count!), 140);
     return () => window.clearInterval(timer);
-  }, [playing, shp]);
+  }, [playing, metadata, selected]);
+
+  useEffect(() => {
+    if (!selected || !["ini", "map", "text", "csf"].includes(selected.format)) {
+      setTextAsset(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      api.text(selected.id, textQuery)
+        .then((result) => !cancelled && setTextAsset(result))
+        .catch((reason: Error) => !cancelled && setError(reason.message));
+    }, textQuery ? 180 : 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [selected, textQuery]);
 
   useEffect(() => {
     if (!notice) return;
@@ -198,8 +243,9 @@ function App() {
   }, [notice]);
 
   const previewUrl = useMemo(() => {
-    if (!selected || !["shp", "pal"].includes(selected.format)) return "";
-    return api.previewUrl(selected.id, frame, paletteId, selected.format === "pal" ? 3 : 5);
+    if (!selected || !["shp", "pal", "vxl", "tmp", "pcx"].includes(selected.format)) return "";
+    const scale = selected.format === "pcx" ? 1 : selected.format === "pal" ? 3 : selected.format === "shp" ? 5 : 4;
+    return api.previewUrl(selected.id, frame, paletteId, scale);
   }, [selected, frame, paletteId]);
 
   async function runAction(action: () => Promise<Source>, message: string) {
@@ -249,7 +295,16 @@ function App() {
       </header>
 
       {sources.length === 0 ? (
-        <EmptyLibrary busy={busy} onDemo={() => runAction(api.createDemo, "演示资产库已创建")} onAdd={() => setAddOpen(true)} />
+        <EmptyLibrary
+          busy={busy}
+          discoveries={discovery.candidates}
+          onDemo={() => runAction(api.createDemo, "格式验证资料库已创建")}
+          onAdd={() => setAddOpen(true)}
+          onImport={(installation) => runAction(
+            () => api.addSource(installation.path, installation.name),
+            `${installation.edition} 已导入`,
+          )}
+        />
       ) : (
         <main className="workspace">
           <aside className="source-panel panel">
@@ -305,36 +360,64 @@ function App() {
             </div>
           </section>
 
-          <DetailPanel asset={selected} shp={shp} frame={frame} setFrame={setFrame} playing={playing} setPlaying={setPlaying} palettes={palettes} paletteId={paletteId} setPaletteId={setPaletteId} previewUrl={previewUrl} />
+          <DetailPanel
+            asset={selected}
+            metadata={metadata}
+            textAsset={textAsset}
+            textQuery={textQuery}
+            setTextQuery={setTextQuery}
+            frame={frame}
+            setFrame={setFrame}
+            playing={playing}
+            setPlaying={setPlaying}
+            palettes={palettes}
+            paletteId={paletteId}
+            setPaletteId={setPaletteId}
+            previewUrl={previewUrl}
+          />
         </main>
       )}
 
-      {addOpen && <AddSourceDialog busy={busy} onClose={() => setAddOpen(false)} onSubmit={async (path, name) => { await runAction(() => api.addSource(path, name), "资源目录已导入"); setAddOpen(false); }} />}
+      {addOpen && <AddSourceDialog discoveries={discovery.candidates} busy={busy} onClose={() => setAddOpen(false)} onSubmit={async (path, name) => { await runAction(() => api.addSource(path, name), "资源目录已导入"); setAddOpen(false); }} />}
       {error && <div className="toast error" role="alert"><Icon name="info" /><span>{error}</span><button onClick={() => setError("")} aria-label="关闭"><Icon name="close" size={15} /></button></div>}
       {notice && <div className="toast success" role="status"><span className="check">✓</span><span>{notice}</span></div>}
     </div>
   );
 }
 
-function EmptyLibrary({ busy, onDemo, onAdd }: { busy: boolean; onDemo: () => void; onAdd: () => void }) {
+function EmptyLibrary({ busy, discoveries, onDemo, onAdd, onImport }: {
+  busy: boolean;
+  discoveries: GameInstallation[];
+  onDemo: () => void;
+  onAdd: () => void;
+  onImport: (installation: GameInstallation) => void;
+}) {
   return (
     <main className="empty-library">
       <div className="empty-visual" aria-hidden="true"><div className="disc"><span /><i /><b /></div><div className="scan-line" /></div>
       <span className="eyebrow">欢迎来到本地资料库</span>
       <h1>把尘封的战场资产<br />重新带到眼前</h1>
-      <p>只读扫描你合法安装的《红色警戒 2》目录，浏览 MIX、SHP 与 PAL；游戏文件始终留在本机。</p>
+      <p>只读扫描你合法安装的《红色警戒 2》目录，解析 MIX、SHP、VXL、TMP、CSF 与音频；游戏文件始终留在本机。</p>
+      {discoveries.length > 0 && <div className="detected-installs">
+        {discoveries.slice(0, 2).map((installation) => <button key={installation.path} disabled={busy} onClick={() => onImport(installation)}>
+          <Icon name="folder" /><span><strong>{installation.edition}</strong><small>{installation.path}</small></span><em>导入</em>
+        </button>)}
+      </div>}
       <div className="empty-actions">
         <button className="button primary large" onClick={onAdd}><Icon name="folder" />导入游戏目录</button>
-        <button className="button ghost large" disabled={busy} onClick={onDemo}><Icon name="spark" />{busy ? "正在创建…" : "先看合成演示"}</button>
+        <button className="button ghost large" disabled={busy} onClick={onDemo}><Icon name="spark" />{busy ? "正在创建…" : "先看格式样本"}</button>
       </div>
-      <div className="feature-strip"><span><b>01</b>本地只读索引</span><span><b>02</b>嵌套 MIX 解析</span><span><b>03</b>SHP 逐帧预览</span></div>
+      <div className="feature-strip"><span><b>01</b>本地只读索引</span><span><b>02</b>13 种资源识别</span><span><b>03</b>真实格式预览</span></div>
     </main>
   );
 }
 
-function DetailPanel({ asset, shp, frame, setFrame, playing, setPlaying, palettes, paletteId, setPaletteId, previewUrl }: {
+function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, frame, setFrame, playing, setPlaying, palettes, paletteId, setPaletteId, previewUrl }: {
   asset: Asset | null;
-  shp: ShpMetadata | null;
+  metadata: AssetMetadata | null;
+  textAsset: TextAsset | null;
+  textQuery: string;
+  setTextQuery: (value: string) => void;
   frame: number;
   setFrame: (frame: number | ((current: number) => number)) => void;
   playing: boolean;
@@ -345,34 +428,55 @@ function DetailPanel({ asset, shp, frame, setFrame, playing, setPlaying, palette
   previewUrl: string;
 }) {
   if (!asset) return <aside className="detail-panel panel empty-detail"><div className="empty-detail-icon"><Icon name="image" size={30} /></div><strong>选择一个资产</strong><span>在这里查看预览与技术信息</span></aside>;
-  const canPreview = asset.format === "shp" || asset.format === "pal";
-  const activeFrame = shp?.frames[frame];
+  const canPreview = ["shp", "pal", "vxl", "tmp", "pcx"].includes(asset.format);
+  const isText = ["ini", "map", "text", "csf"].includes(asset.format);
+  const frameCount = metadata?.frame_count || 1;
+  const activeFrame = metadata?.frames?.[frame];
+  const activeLimb = metadata?.limbs?.[frame];
+  const hasFrameControl = ["shp", "vxl", "tmp"].includes(asset.format) && frameCount > 1;
+  const canChoosePalette = ["shp", "vxl", "tmp"].includes(asset.format) && palettes.length > 0;
   return (
     <aside className="detail-panel panel">
       <div className="detail-title"><div><span className="format-pill">{formatLabels[asset.format] || asset.format.toUpperCase()}</span><h2 title={asset.display_name}>{asset.display_name}</h2></div><a className="icon-button" href={api.contentUrl(asset.id)} title="导出原始文件" aria-label="导出原始文件"><Icon name="download" /></a></div>
-      {canPreview ? (
+
+      {canPreview && (
         <div className="preview-block">
           <div className={`preview-stage ${asset.format}`}><div className="preview-rulers horizontal" /><div className="preview-rulers vertical" /><img key={previewUrl} src={previewUrl} alt={`${asset.display_name} 预览`} /></div>
-          {asset.format === "shp" && (
-            <div className="frame-controls">
-              <button className="play-button" disabled={!shp || shp.frame_count < 2} onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : "play"} size={16} /></button>
-              <input type="range" min="0" max={Math.max(0, (shp?.frame_count || 1) - 1)} value={frame} onChange={(event) => setFrame(Number(event.target.value))} aria-label="当前帧" />
-              <span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(shp?.frame_count || 1).padStart(2, "0")}</span>
-            </div>
-          )}
+          {hasFrameControl && <div className="frame-controls">
+            <button className="play-button" disabled={asset.format !== "shp"} onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : assetIcon(asset.format)} size={16} /></button>
+            <input type="range" min="0" max={Math.max(0, frameCount - 1)} value={Math.min(frame, frameCount - 1)} onChange={(event) => setFrame(Number(event.target.value))} aria-label={asset.format === "vxl" ? "当前部件" : asset.format === "tmp" ? "当前地块" : "当前帧"} />
+            <span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(frameCount).padStart(2, "0")}</span>
+          </div>}
         </div>
-      ) : <div className="unsupported-preview"><Icon name={assetIcon(asset.format)} size={34} /><strong>首版暂不渲染此格式</strong><span>仍可核对索引信息并导出原始文件。</span></div>}
-
-      {asset.format === "shp" && palettes.length > 0 && (
-        <label className="palette-select"><span>渲染调色板</span><select value={paletteId} onChange={(event) => setPaletteId(event.target.value)}><option value="">自动选择</option>{palettes.map((palette) => <option key={palette.id} value={palette.id}>{palette.display_name}</option>)}</select></label>
       )}
+
+      {asset.format === "wav" && <div className="audio-preview"><div><Icon name="play" size={25} /><span><strong>本地音频预览</strong><small>{metadata?.audio_format === 17 ? "IMA ADPCM → PCM16 实时转码" : "原始 PCM WAV"}</small></span></div><audio controls preload="metadata" src={api.mediaUrl(asset.id)}>浏览器不支持音频播放。</audio></div>}
+
+      {isText && <div className="text-preview">
+        <label><Icon name="search" size={14} /><input value={textQuery} onChange={(event) => setTextQuery(event.target.value)} placeholder="在当前文件中筛选…" /></label>
+        <pre>{textAsset?.text || "正在读取文本…"}</pre>
+        {textAsset && <small>显示 {textAsset.returned_lines} / {textAsset.line_count} 行{textAsset.truncated ? " · 已截断" : ""}</small>}
+      </div>}
+
+      {!canPreview && !isText && asset.format !== "wav" && <div className="unsupported-preview"><Icon name={assetIcon(asset.format)} size={34} /><strong>{asset.format === "hva" ? "动画矩阵已解析" : "当前提供结构检查与原始导出"}</strong><span>{asset.format === "hva" ? "可在下方核对帧数和 VXL 部件名称。" : "该格式尚无浏览器内渲染器。"}</span></div>}
+
+      {canChoosePalette && <label className="palette-select"><span>渲染调色板</span><select value={paletteId} onChange={(event) => setPaletteId(event.target.value)}><option value="">按剧场自动选择</option>{palettes.map((palette) => <option key={palette.id} value={palette.id}>{palette.display_name}</option>)}</select></label>}
 
       <div className="metadata">
         <h3>资产信息</h3>
         <dl>
-          <div><dt>尺寸</dt><dd>{shp ? `${shp.width} × ${shp.height} px` : formatBytes(asset.size)}</dd></div>
-          {shp && <div><dt>帧数</dt><dd>{shp.frame_count}</dd></div>}
+          <div><dt>文件大小</dt><dd>{formatBytes(asset.size)}</dd></div>
+          {metadata?.width !== undefined && metadata?.height !== undefined && <div><dt>画布 / 地块</dt><dd>{metadata.width} × {metadata.height} px</dd></div>}
+          {metadata?.template_width !== undefined && <div><dt>模板网格</dt><dd>{metadata.template_width} × {metadata.template_height} · {metadata.tile_count} 个地块</dd></div>}
+          {metadata?.frame_count !== undefined && <div><dt>{asset.format === "vxl" ? "部件数" : "帧 / 槽位"}</dt><dd>{metadata.frame_count}</dd></div>}
           {activeFrame && <div><dt>当前帧</dt><dd>{activeFrame.width} × {activeFrame.height} · 压缩 {activeFrame.compression}</dd></div>}
+          {activeLimb && <div><dt>当前部件</dt><dd>{activeLimb.name} · {activeLimb.size.join("×")} · {activeLimb.voxel_count.toLocaleString("zh-CN")} 体素</dd></div>}
+          {metadata?.voxel_count !== undefined && <div><dt>总体素</dt><dd>{metadata.voxel_count.toLocaleString("zh-CN")}</dd></div>}
+          {metadata?.section_count !== undefined && <div><dt>节 / 段</dt><dd>{metadata.section_count}{metadata.section_names?.length ? ` · ${metadata.section_names.slice(0, 3).join(", ")}` : ""}</dd></div>}
+          {metadata?.label_count !== undefined && <div><dt>CSF 文本</dt><dd>{metadata.label_count} 标签 · {metadata.string_count} 字符串</dd></div>}
+          {metadata?.entry_count !== undefined && <div><dt>配置结构</dt><dd>{metadata.section_count} 节 · {metadata.entry_count} 项</dd></div>}
+          {metadata?.encoding && <div><dt>文本编码</dt><dd>{metadata.encoding}</dd></div>}
+          {metadata?.duration_seconds !== undefined && <div><dt>音频</dt><dd>{formatDuration(metadata.duration_seconds)} · {metadata.sample_rate?.toLocaleString("zh-CN")} Hz · {metadata.bits_per_sample} bit</dd></div>}
           <div><dt>来源</dt><dd>{asset.storage_kind === "loose" ? "松散文件" : "MIX 归档"}</dd></div>
           <div><dt>CRC</dt><dd className="mono">{crcLabel(asset.crc)}</dd></div>
           <div><dt>识别</dt><dd>{asset.confidence === "name" ? "名称库匹配" : asset.confidence === "content" ? "内容探测" : asset.confidence === "filename" ? "文件名" : "未知"}</dd></div>
@@ -384,7 +488,7 @@ function DetailPanel({ asset, shp, frame, setFrame, playing, setPlaying, palette
   );
 }
 
-function AddSourceDialog({ busy, onClose, onSubmit }: { busy: boolean; onClose: () => void; onSubmit: (path: string, name: string) => Promise<void> }) {
+function AddSourceDialog({ discoveries, busy, onClose, onSubmit }: { discoveries: GameInstallation[]; busy: boolean; onClose: () => void; onSubmit: (path: string, name: string) => Promise<void> }) {
   const [path, setPath] = useState("");
   const [name, setName] = useState("");
   function submit(event: FormEvent) { event.preventDefault(); if (path.trim()) void onSubmit(path.trim(), name.trim()); }
@@ -398,6 +502,7 @@ function AddSourceDialog({ busy, onClose, onSubmit }: { busy: boolean; onClose: 
       <form className="dialog" onSubmit={submit}>
         <div className="dialog-header"><div className="dialog-icon"><Icon name="folder" /></div><div><span className="eyebrow">只读扫描</span><h2>添加资源目录</h2></div><button type="button" onClick={onClose} disabled={busy} aria-label="关闭"><Icon name="close" /></button></div>
         <p>粘贴 Steam、EA App 或 Mod 的本机目录。扫描只会读取文件并将索引写入 RA2 Explorer 自己的数据目录。</p>
+        {discoveries.length > 0 && <div className="dialog-discoveries"><span>自动发现</span>{discoveries.map((installation) => <button type="button" key={installation.path} onClick={() => { setPath(installation.path); setName(installation.name); }}><Icon name="folder" size={15} /><span><strong>{installation.edition}</strong><small>{installation.provider} · {installation.path}</small></span><em>选择</em></button>)}</div>}
         <label><span>目录路径 <b>必填</b></span><input autoFocus value={path} onChange={(event) => setPath(event.target.value)} placeholder="例如 D:\SteamLibrary\steamapps\common\Command & Conquer Red Alert II" /></label>
         <label><span>显示名称 <em>可选</em></span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="例如 Steam 原版" /></label>
         <div className="dialog-note"><Icon name="info" size={16} /><span>RA2 Explorer 不包含商业游戏文件；请先通过 Steam 或 EA App 合法安装。</span></div>
