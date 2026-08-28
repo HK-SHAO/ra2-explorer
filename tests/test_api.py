@@ -79,14 +79,42 @@ def test_demo_library_is_browsable_and_previewable(tmp_path: Path) -> None:
 
     entity = client.get(f"/api/entities/{source['id']}/DemoVehicle")
     assert entity.status_code == 200
-    components = {item["role"]: item for item in entity.json()["components"]}
+    entity_body = entity.json()
+    components = {item["role"]: item for item in entity_body["components"]}
     assert components["body"]["asset"]["display_name"] == "demo.vxl"
     assert components["body_hva"]["asset"]["display_name"] == "demo.hva"
     assert components["cameo"]["asset"]["display_name"] == "demo.shp"
+    assert entity_body["preview"]["frame_count"] == 4
+    assert entity_body["preview"]["supports_facing"] is True
+    dependencies = {(item["kind"], item["id"]): item for item in entity_body["dependencies"]}
+    assert len(entity_body["dependencies"]) == 3
+    assert dependencies[("weapon", "DemoCannon")]["properties"]["damage"] == "75"
+    assert dependencies[("projectile", "DemoShell")]["resolved"] is True
+    assert dependencies[("warhead", "DemoWarhead")]["resolved"] is True
 
-    entity_preview = client.get(f"/api/entities/{source['id']}/DemoVehicle/preview.png")
+    entity_preview = client.get(
+        f"/api/entities/{source['id']}/DemoVehicle/preview.png",
+        params={"frame": 3, "facing": 2, "player_color": "blue"},
+    )
     assert entity_preview.status_code == 200
     assert entity_preview.content.startswith(b"\x89PNG")
+
+    diagnostics = client.get(f"/api/semantic/{source['id']}/diagnostics")
+    assert diagnostics.status_code == 200
+    diagnostic_body = diagnostics.json()
+    assert diagnostic_body["status"] == "ready"
+    assert diagnostic_body["entity_count"] == 1
+    assert diagnostic_body["renderable_percent"] == 100.0
+    assert diagnostic_body["unresolved_dependency_count"] == 0
+
+    colors = client.get("/api/player-colors")
+    assert colors.status_code == 200
+    assert {item["id"] for item in colors.json()} >= {"red", "blue", "green"}
+    invalid_color = client.get(
+        f"/api/entities/{source['id']}/DemoVehicle/preview.png",
+        params={"player_color": "transparent"},
+    )
+    assert invalid_color.status_code == 422
 
 
 def test_api_rejects_untrusted_host(tmp_path: Path) -> None:

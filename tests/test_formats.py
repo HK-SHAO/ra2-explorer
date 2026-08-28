@@ -4,10 +4,11 @@ import struct
 
 from ra2_explorer.codecs.csf import parse_csf
 from ra2_explorer.codecs.hva import parse_hva
+from ra2_explorer.codecs.pal import parse_palette
 from ra2_explorer.codecs.sniff import sniff_format
 from ra2_explorer.codecs.text import parse_ini
 from ra2_explorer.codecs.tmp import parse_tmp
-from ra2_explorer.codecs.vxl import parse_vxl
+from ra2_explorer.codecs.vxl import VxlRenderPart, parse_vxl, render_vxl_composite
 from ra2_explorer.codecs.wav import parse_wav, wav_for_browser
 from ra2_explorer.demo import (
     _build_demo_csf,
@@ -44,6 +45,17 @@ def test_vxl_decodes_columns_and_renders_embedded_palette() -> None:
     assert preview.getbbox() is not None
 
 
+def test_palette_player_remap_preserves_unrelated_colors() -> None:
+    palette = parse_palette(_build_demo_palette())
+
+    remapped = palette.with_player_color("blue")
+
+    assert remapped.colors[:16] == palette.colors[:16]
+    assert remapped.colors[32:] == palette.colors[32:]
+    assert remapped.colors[16:32] != palette.colors[16:32]
+    assert remapped.colors[31][2] > remapped.colors[31][0]
+
+
 def test_hva_reads_frame_section_matrices() -> None:
     data = _build_demo_hva()
     animation = parse_hva(data)
@@ -52,6 +64,27 @@ def test_hva_reads_frame_section_matrices() -> None:
     assert animation.frame_count == 4
     assert animation.section_names == ("BODY",)
     assert animation.transform(3, 0)[3] > animation.transform(0, 0)[3]
+
+
+def test_vxl_composite_applies_hva_facing_and_player_color() -> None:
+    model = parse_vxl(_build_demo_vxl(_build_demo_palette()))
+    animation = parse_hva(_build_demo_hva())
+    part = VxlRenderPart(model, animation)
+
+    front = render_vxl_composite([part], frame=0, facing=0, scale=2)
+    moved = render_vxl_composite([part], frame=3, facing=2, scale=2)
+    blue = render_vxl_composite(
+        [part],
+        frame=0,
+        facing=0,
+        player_color="blue",
+        scale=2,
+    )
+
+    assert front.getbbox() is not None
+    assert moved.getbbox() is not None
+    assert front.size != moved.size or front.tobytes() != moved.tobytes()
+    assert front.tobytes() != blue.tobytes()
 
 
 def test_ini_accepts_retail_section_headers_with_inline_comments() -> None:

@@ -22,8 +22,22 @@ def create_demo_installation(target: Path) -> Path:
         b"Name=Explorer Test Vehicle\r\n"
         b"Image=DEMO\r\n"
         b"Primary=DemoCannon\r\n"
+        b"Secondary=none\r\n"
         b"Strength=400\r\n"
         b"Cost=800\r\n"
+        b"\r\n[DemoCannon]\r\n"
+        b"Damage=75\r\n"
+        b"ROF=50\r\n"
+        b"Range=6\r\n"
+        b"Projectile=DemoShell\r\n"
+        b"Warhead=DemoWarhead\r\n"
+        b"Report=DemoCannonFire\r\n"
+        b"\r\n[DemoShell]\r\n"
+        b"Arcing=yes\r\n"
+        b"Image=120MM\r\n"
+        b"\r\n[DemoWarhead]\r\n"
+        b"Verses=100%,80%,60%\r\n"
+        b"Wall=yes\r\n"
     )
     art = (
         b"[DEMO]\r\n"
@@ -174,7 +188,7 @@ def _build_demo_vxl(palette: bytes) -> bytes:
     embedded_palette = bytes(min(255, component * 4) for component in palette)
     output = bytearray(b"Voxel Animation\0")
     output.extend(struct.pack("<IIII", 1, 1, 1, len(body)))
-    output.extend((0, 0))
+    output.extend((16, 31))
     output.extend(embedded_palette)
     output.extend(b"BODY" + b"\0" * 12)
     output.extend(struct.pack("<III", 0, 0, 0))

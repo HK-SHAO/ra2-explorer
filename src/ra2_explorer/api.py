@@ -16,7 +16,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from ra2_explorer import __version__
 from ra2_explorer.codecs.csf import parse_csf
 from ra2_explorer.codecs.hva import parse_hva
-from ra2_explorer.codecs.pal import parse_palette
+from ra2_explorer.codecs.pal import PLAYER_COLOR_PRESETS, grayscale_palette, parse_palette
 from ra2_explorer.codecs.shp import parse_shp
 from ra2_explorer.codecs.text import decode_legacy_text, parse_ini, text_excerpt
 from ra2_explorer.codecs.tmp import parse_tmp
@@ -168,6 +168,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             offset=offset,
         )
 
+    @app.get("/api/semantic/{source_id}/diagnostics")
+    def semantic_diagnostics(
+        source_id: str,
+        limit: int = Query(default=20, ge=1, le=100),
+    ) -> dict[str, object]:
+        return services.semantic.diagnostics(source_id, limit=limit)
+
     @app.get("/api/entities/{source_id}/{entity_id}")
     def entity(source_id: str, entity_id: str) -> dict[str, object]:
         return services.semantic.get_entity(source_id, entity_id)
@@ -177,6 +184,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         source_id: str,
         entity_id: str,
         frame: int = Query(default=0, ge=0),
+        facing: int = Query(default=0, ge=0, le=7),
+        player_color: str | None = Query(default=None, max_length=24),
         palette_id: str | None = None,
         scale: int = Query(default=4, ge=1, le=12),
     ) -> Response:
@@ -185,11 +194,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if body is None:
             raise HTTPException(status_code=409, detail="该单位没有可渲染的主体资产")
         palette = _select_palette(services, body, palette_id)
+        player_color = _validated_player_color(player_color)
         _, image = services.semantic.render(
             source_id,
             entity_id,
             palette=palette,
             frame=frame,
+            facing=facing,
+            player_color=player_color,
             scale=scale,
         )
         output = io.BytesIO()
@@ -279,10 +291,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def asset_preview(
         asset_id: str,
         frame: int = Query(default=0, ge=0),
+        player_color: str | None = Query(default=None, max_length=24),
         palette_id: str | None = None,
         scale: int = Query(default=4, ge=1, le=16),
     ) -> Response:
         asset_record, data = services.reader.read(asset_id)
+        player_color = _validated_player_color(player_color)
         if asset_record["format"] == "pal":
             image = parse_palette(data).preview(cell_size=max(4, scale * 3))
         elif asset_record["format"] == "shp":
@@ -290,13 +304,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if frame >= len(sprite.frames):
                 raise HTTPException(status_code=416, detail="帧编号超出范围")
             palette = _select_palette(services, asset_record, palette_id)
+            if player_color:
+                palette = (palette or grayscale_palette()).with_player_color(player_color)
             image = sprite.render(frame, palette, scale=scale)
         elif asset_record["format"] == "vxl":
             model = parse_vxl(data)
             if frame >= len(model.limbs):
                 raise HTTPException(status_code=416, detail="部件编号超出范围")
             palette = _select_palette(services, asset_record, palette_id)
-            image = model.render(frame, palette=palette, scale=scale)
+            image = model.render(
+                frame,
+                palette=palette,
+                player_color=player_color,
+                scale=scale,
+            )
         elif asset_record["format"] == "tmp":
             template = parse_tmp(data)
             if frame >= len(template.tiles):
@@ -348,6 +369,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def palettes(source_id: str) -> list[dict[str, object]]:
         return services.database.palette_assets(source_id)
 
+    @app.get("/api/player-colors")
+    def player_colors() -> list[dict[str, object]]:
+        return [
+            {
+                "id": name,
+                "rgb": list(color),
+                "hex": "#" + "".join(f"{component:02x}" for component in color),
+            }
+            for name, color in PLAYER_COLOR_PRESETS.items()
+        ]
+
     @app.get("/api/stats")
     def stats(source_id: str | None = None) -> dict[str, object]:
         return services.database.stats(source_id)
@@ -379,6 +411,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
 
     return app
+
+
+def _validated_player_color(player_color: str | None) -> str | None:
+    if player_color is None:
+        return None
+    normalized = player_color.casefold()
+    if normalized not in PLAYER_COLOR_PRESETS:
+        raise HTTPException(status_code=422, detail="未知阵营颜色")
+    return normalized
 
 
 def _select_palette(

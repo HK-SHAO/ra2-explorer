@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import colorsys
 from dataclasses import dataclass
 
 from PIL import Image
@@ -8,6 +9,16 @@ from ra2_explorer.errors import InvalidFormatError
 
 PALETTE_COLORS = 256
 PALETTE_BYTES = PALETTE_COLORS * 3
+PLAYER_COLOR_PRESETS = {
+    "red": (214, 59, 52),
+    "blue": (61, 111, 198),
+    "green": (65, 150, 91),
+    "yellow": (224, 184, 54),
+    "orange": (220, 120, 45),
+    "purple": (143, 82, 181),
+    "cyan": (55, 165, 180),
+    "gray": (150, 154, 162),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +44,59 @@ class Palette:
                     pixels[x, y] = color
         return image
 
+    def remap(
+        self,
+        color: tuple[int, int, int],
+        *,
+        start: int = 16,
+        end: int = 31,
+    ) -> Palette:
+        if not 0 <= start <= end < PALETTE_COLORS:
+            raise ValueError("palette remap range must be between 0 and 255")
+        if any(component < 0 or component > 255 for component in color):
+            raise ValueError("player color components must be between 0 and 255")
+        hue, saturation, target_value = colorsys.rgb_to_hsv(
+            color[0] / 255,
+            color[1] / 255,
+            color[2] / 255,
+        )
+        selected = self.colors[start : end + 1]
+        source_values = [max(item) / 255 for item in selected]
+        lowest = min(source_values)
+        highest = max(source_values)
+        colors = list(self.colors)
+        for offset, source_value in enumerate(source_values):
+            if highest - lowest > 0.05:
+                brightness = (source_value - lowest) / (highest - lowest)
+            elif len(source_values) > 1:
+                brightness = offset / (len(source_values) - 1)
+            else:
+                brightness = 1.0
+            red, green, blue = colorsys.hsv_to_rgb(
+                hue,
+                max(0.35, saturation),
+                target_value * (0.22 + brightness * 0.78),
+            )
+            colors[start + offset] = (
+                round(red * 255),
+                round(green * 255),
+                round(blue * 255),
+            )
+        return Palette(tuple(colors))
+
+    def with_player_color(
+        self,
+        name: str,
+        *,
+        start: int = 16,
+        end: int = 31,
+    ) -> Palette:
+        try:
+            color = PLAYER_COLOR_PRESETS[name]
+        except KeyError as error:
+            raise ValueError(f"unknown player color: {name}") from error
+        return self.remap(color, start=start, end=end)
+
 
 def parse_palette(data: bytes | bytearray | memoryview) -> Palette:
     view = memoryview(data)
@@ -49,4 +113,9 @@ def grayscale_palette() -> Palette:
     return Palette(tuple((index, index, index) for index in range(PALETTE_COLORS)))
 
 
-__all__ = ["Palette", "grayscale_palette", "parse_palette"]
+__all__ = [
+    "PLAYER_COLOR_PRESETS",
+    "Palette",
+    "grayscale_palette",
+    "parse_palette",
+]

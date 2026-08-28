@@ -70,12 +70,21 @@ def build_parser() -> argparse.ArgumentParser:
     entities.add_argument("source_id")
     entities.add_argument("--query")
     entities.add_argument("--kind", choices=ENTITY_KINDS)
-    entities.add_argument("--renderable", action="store_true")
+    availability = entities.add_mutually_exclusive_group()
+    availability.add_argument("--renderable", action="store_true")
+    availability.add_argument("--missing", action="store_true")
     entities.add_argument("--limit", type=int, default=50)
 
     entity = subcommands.add_parser("entity", help="检查单位规则和关联资产")
     entity.add_argument("source_id")
     entity.add_argument("entity_id")
+
+    semantic_check = subcommands.add_parser(
+        "semantic-check",
+        help="检查规则实体、资源关联和武器依赖覆盖",
+    )
+    semantic_check.add_argument("source_id")
+    semantic_check.add_argument("--limit", type=int, default=20)
     return parser
 
 
@@ -166,11 +175,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "entities":
+        renderable = True if args.renderable else False if args.missing else None
         result = services.semantic.list_entities(
             args.source_id,
             query=args.query,
             kind=args.kind,
-            renderable=True if args.renderable else None,
+            renderable=renderable,
             limit=max(1, min(args.limit, 500)),
         )
         for entity in result["items"]:
@@ -186,6 +196,15 @@ def main(argv: list[str] | None = None) -> int:
         result = services.semantic.get_entity(args.source_id, args.entity_id)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
+
+
+    if args.command == "semantic-check":
+        result = services.semantic.diagnostics(
+            args.source_id,
+            limit=max(1, min(args.limit, 100)),
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result["status"] == "ready" else 1
     return 2
 
 

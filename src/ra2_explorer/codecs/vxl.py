@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -60,6 +61,7 @@ class VxlFile:
         limb_index: int = 0,
         *,
         palette: Palette | None = None,
+        player_color: str | None = None,
         scale: int = 4,
     ) -> Image.Image:
         if not 0 <= limb_index < len(self.limbs):
@@ -99,6 +101,12 @@ class VxlFile:
         image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
         active_palette = palette or self.palette
+        if player_color:
+            active_palette = active_palette.with_player_color(
+                player_color,
+                start=self.remap_start,
+                end=self.remap_end,
+            )
 
         ordered = sorted(
             limb.voxels,
@@ -157,8 +165,15 @@ def render_vxl_composite(
     *,
     palette: Palette | None = None,
     frame: int = 0,
+    facing: int = 0,
+    player_color: str | None = None,
     scale: int = 4,
 ) -> Image.Image:
+    if not 0 <= facing <= 7:
+        raise ValueError("facing must be between 0 and 7")
+    angle = math.radians(facing * 45)
+    cosine = math.cos(angle)
+    sine = math.sin(angle)
     world_voxels = []
     for part in parts:
         animation = part.animation
@@ -169,6 +184,12 @@ def render_vxl_composite(
                 )
             transform = _hva_transform(animation, limb, limb_index, frame)
             active_palette = palette or part.model.palette
+            if player_color:
+                active_palette = active_palette.with_player_color(
+                    player_color,
+                    start=part.model.remap_start,
+                    end=part.model.remap_end,
+                )
             for voxel in limb.voxels:
                 local_x, local_y, local_z = _apply_transform(
                     transform,
@@ -177,10 +198,12 @@ def render_vxl_composite(
                     float(voxel.z),
                     limb,
                 )
+                world_x = (local_x + limb.min_bounds[0]) * limb.scale
+                world_y = -(local_y + limb.min_bounds[1]) * limb.scale
                 world_voxels.append(
                     _WorldVoxel(
-                        (local_x + limb.min_bounds[0]) * limb.scale,
-                        -(local_y + limb.min_bounds[1]) * limb.scale,
+                        world_x * cosine - world_y * sine,
+                        world_x * sine + world_y * cosine,
                         (local_z + limb.min_bounds[2]) * limb.scale,
                         limb.scale,
                         voxel.color,

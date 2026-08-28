@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import re
 import threading
-from collections import Counter
+from collections import Counter, OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,7 +11,7 @@ from PIL import Image
 
 from ra2_explorer.codecs.csf import parse_csf
 from ra2_explorer.codecs.hva import parse_hva
-from ra2_explorer.codecs.pal import Palette
+from ra2_explorer.codecs.pal import Palette, grayscale_palette
 from ra2_explorer.codecs.shp import parse_shp
 from ra2_explorer.codecs.text import parse_ini
 from ra2_explorer.codecs.vxl import VxlRenderPart, parse_vxl, render_vxl_composite
@@ -37,6 +38,8 @@ _RULE_FIELDS = {
     "prerequisite": "prerequisite",
     "primary": "primary",
     "secondary": "secondary",
+    "elite_primary": "eliteprimary",
+    "elite_secondary": "elitesecondary",
     "turret": "turret",
     "naval": "naval",
     "movement_zone": "movementzone",
@@ -51,8 +54,46 @@ _ART_FIELDS = {
     "voxel": "voxel",
     "new_theater": "newtheater",
     "foundation": "foundation",
+    "facings": "facings",
 }
 _THEATER_EXTENSIONS = ("tem", "sno", "urb", "ubn", "lun", "des")
+_WEAPON_FIELDS = {
+    "damage": "damage",
+    "rate_of_fire": "rof",
+    "range": "range",
+    "minimum_range": "minimumrange",
+    "burst": "burst",
+    "speed": "speed",
+    "projectile": "projectile",
+    "warhead": "warhead",
+    "report": "report",
+    "animation": "anim",
+}
+_PROJECTILE_FIELDS = {
+    "image": "image",
+    "arcing": "arcing",
+    "invisible": "invisible",
+    "proximity": "proximity",
+    "rotation": "rot",
+    "acceleration": "acceleration",
+    "inaccurate": "inaccurate",
+}
+_WARHEAD_FIELDS = {
+    "verses": "verses",
+    "cell_spread": "cellspread",
+    "percent_at_max": "percentatmax",
+    "infantry_death": "infdeath",
+    "animation_list": "animlist",
+    "wall": "wall",
+    "wood": "wood",
+    "radiation": "radiation",
+}
+_WEAPON_SLOTS = (
+    ("primary", "primary"),
+    ("secondary", "secondary"),
+    ("elite_primary", "eliteprimary"),
+    ("elite_secondary", "elitesecondary"),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,17 +124,39 @@ class EntityComponent:
 
 
 @dataclass(frozen=True, slots=True)
+class EntityDependency:
+    id: str
+    kind: str
+    slot: str
+    parent: str | None
+    resolved: bool
+    properties: dict[str, str]
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "slot": self.slot,
+            "parent": self.parent,
+            "resolved": self.resolved,
+            "properties": self.properties,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class GameEntity:
     id: str
     kind: str
     display_name: str
     internal_name: str
     ui_name: str | None
+    ui_name_resolved: bool
     image: str
     voxel: bool
     rules: dict[str, str]
     art: dict[str, str]
     components: tuple[EntityComponent, ...]
+    dependencies: tuple[EntityDependency, ...]
 
     @property
     def renderable(self) -> bool:
@@ -128,6 +191,7 @@ class GameEntity:
             "rules": self.rules,
             "art": self.art,
             "components": [component.as_dict() for component in self.components],
+            "dependencies": [dependency.as_dict() for dependency in self.dependencies],
         }
 
 
@@ -151,6 +215,7 @@ class SemanticLibrary:
         self.database = database
         self.reader = reader
         self._cache: dict[str, tuple[tuple[object, ...], SemanticCatalog]] = {}
+        self._parsed_cache: OrderedDict[str, object] = OrderedDict()
         self._lock = threading.Lock()
 
     def catalog(self, source_id: str) -> SemanticCatalog:
@@ -162,6 +227,9 @@ class SemanticLibrary:
                 return cached[1]
         catalog = self._build(source_id)
         with self._lock:
+            previous = self._cache.get(source_id)
+            if previous is None or previous[0] != token:
+                self._parsed_cache.clear()
             self._cache[source_id] = (token, catalog)
         return catalog
 
@@ -198,7 +266,83 @@ class SemanticLibrary:
         }
 
     def get_entity(self, source_id: str, entity_id: str) -> dict[str, object]:
-        return self.catalog(source_id).get(entity_id).as_dict()
+        entity = self.catalog(source_id).get(entity_id)
+        return {**entity.as_dict(), "preview": self._preview_info(entity)}
+
+    def diagnostics(self, source_id: str, *, limit: int = 20) -> dict[str, object]:
+        catalog = self.catalog(source_id)
+        entities = catalog.entities
+        missing_roles = Counter(
+            component.role
+            for entity in entities
+            for component in entity.components
+            if component.asset is None
+        )
+        dependency_count = sum(len(entity.dependencies) for entity in entities)
+        unresolved_dependencies = [
+            (entity, dependency)
+            for entity in entities
+            for dependency in entity.dependencies
+            if not dependency.resolved
+        ]
+        renderable_count = sum(entity.renderable for entity in entities)
+        localized_count = sum(entity.ui_name_resolved for entity in entities)
+        resolved_components = sum(
+            component.asset is not None
+            for entity in entities
+            for component in entity.components
+        )
+        component_count = sum(len(entity.components) for entity in entities)
+        return {
+            "status": "ready" if entities else "empty",
+            "entity_count": len(entities),
+            "renderable_count": renderable_count,
+            "renderable_percent": _percentage(renderable_count, len(entities)),
+            "localized_count": localized_count,
+            "localized_percent": _percentage(localized_count, len(entities)),
+            "component_count": component_count,
+            "resolved_component_count": resolved_components,
+            "component_percent": _percentage(resolved_components, component_count),
+            "dependency_count": dependency_count,
+            "unresolved_dependency_count": len(unresolved_dependencies),
+            "kinds": [
+                {
+                    "kind": kind,
+                    "count": sum(entity.kind == kind for entity in entities),
+                    "renderable_count": sum(
+                        entity.kind == kind and entity.renderable for entity in entities
+                    ),
+                }
+                for kind in ENTITY_KINDS
+            ],
+            "missing_components": [
+                {"role": role, "count": count}
+                for role, count in missing_roles.most_common()
+            ],
+            "samples": {
+                "missing_body": [
+                    {"id": entity.id, "display_name": entity.display_name}
+                    for entity in entities
+                    if not entity.renderable
+                ][:limit],
+                "unresolved_ui_name": [
+                    {"id": entity.id, "ui_name": entity.ui_name}
+                    for entity in entities
+                    if entity.ui_name and not entity.ui_name_resolved
+                ][:limit],
+                "unresolved_dependencies": [
+                    {
+                        "entity_id": entity.id,
+                        "id": dependency.id,
+                        "kind": dependency.kind,
+                        "slot": dependency.slot,
+                    }
+                    for entity, dependency in unresolved_dependencies[:limit]
+                ],
+            },
+            "inputs": catalog.inputs,
+            "warnings": list(catalog.warnings),
+        }
 
     def render(
         self,
@@ -207,6 +351,8 @@ class SemanticLibrary:
         *,
         palette: Palette | None,
         frame: int,
+        facing: int,
+        player_color: str | None,
         scale: int,
     ) -> tuple[GameEntity, Image.Image]:
         entity = self.catalog(source_id).get(entity_id)
@@ -223,24 +369,103 @@ class SemanticLibrary:
                 asset = entity.component(role)
                 if not asset:
                     continue
-                _, vxl_data = self.reader.read(str(asset["id"]))
+                model = self._parse_asset(asset, parse_vxl)
                 animation_asset = entity.component(animation_role)
                 animation = None
                 if animation_asset:
-                    _, hva_data = self.reader.read(str(animation_asset["id"]))
-                    animation = parse_hva(hva_data)
-                parts.append(VxlRenderPart(parse_vxl(vxl_data), animation))
+                    animation = self._parse_asset(animation_asset, parse_hva)
+                parts.append(VxlRenderPart(model, animation))
             return entity, render_vxl_composite(
                 parts,
                 palette=palette,
                 frame=frame,
+                facing=facing,
+                player_color=player_color,
                 scale=scale,
             )
-        _, shp_data = self.reader.read(str(body["id"]))
-        sprite = parse_shp(shp_data)
+        sprite = self._parse_asset(body, parse_shp)
         if not sprite.frames:
             raise InvalidFormatError("单位 SHP 没有可渲染帧")
-        return entity, sprite.render(frame % len(sprite.frames), palette, scale=scale)
+        active_palette = palette
+        if player_color:
+            active_palette = (palette or grayscale_palette()).with_player_color(player_color)
+        return entity, sprite.render(
+            frame % len(sprite.frames),
+            active_palette,
+            scale=scale,
+        )
+
+    def _preview_info(self, entity: GameEntity) -> dict[str, object]:
+        body = entity.component("body")
+        base: dict[str, object] = {
+            "format": str(body["format"]) if body else None,
+            "frame_count": 0 if body is None else 1,
+            "facing_count": 8 if entity.voxel else _positive_int(entity.art.get("facings"), 1),
+            "supports_facing": bool(body and body["format"] == "vxl"),
+            "supports_player_color": _yes(entity.art.get("remapable")),
+        }
+        if body is None:
+            return base
+        warnings = []
+        try:
+            if body["format"] == "vxl":
+                model = self._parse_asset(body, parse_vxl)
+                frame_counts = []
+                for role in ("body_hva", "turret_hva", "barrel_hva"):
+                    asset = entity.component(role)
+                    if asset:
+                        animation = self._parse_asset(asset, parse_hva)
+                        frame_counts.append(animation.frame_count)
+                base.update(
+                    {
+                        "frame_count": max((1, *frame_counts)),
+                        "limb_count": sum(
+                            len(self._parse_asset(asset, parse_vxl).limbs)
+                            for role in ("body", "turret", "barrel")
+                            if (asset := entity.component(role))
+                        ),
+                        "voxel_count": sum(
+                            self._parse_asset(asset, parse_vxl).voxel_count
+                            for role in ("body", "turret", "barrel")
+                            if (asset := entity.component(role))
+                        ),
+                        "remap_range": [model.remap_start, model.remap_end],
+                    }
+                )
+            else:
+                sprite = self._parse_asset(body, parse_shp)
+                base.update(
+                    {
+                        "frame_count": len(sprite.frames),
+                        "width": sprite.width,
+                        "height": sprite.height,
+                    }
+                )
+        except (OSError, Ra2ExplorerError, ValueError) as error:
+            warnings.append(str(error))
+        if warnings:
+            base["warnings"] = warnings
+        return base
+
+    def _parse_asset(
+        self,
+        asset: dict[str, Any],
+        parser: Callable[[bytes], Any],
+    ) -> Any:
+        asset_id = str(asset["id"])
+        with self._lock:
+            cached = self._parsed_cache.get(asset_id)
+            if cached is not None:
+                self._parsed_cache.move_to_end(asset_id)
+                return cached
+        _, data = self.reader.read(asset_id)
+        parsed = parser(data)
+        with self._lock:
+            self._parsed_cache[asset_id] = parsed
+            self._parsed_cache.move_to_end(asset_id)
+            while len(self._parsed_cache) > 24:
+                self._parsed_cache.popitem(last=False)
+        return parsed
 
     def _build(self, source_id: str) -> SemanticCatalog:
         assets = self.database.assets_for_formats(
@@ -276,9 +501,8 @@ class SemanticLibrary:
                 image = art_values.get("image") or art_key
                 ui_name = rule_values.get("uiname")
                 internal_name = rule_values.get("name") or entity_id
-                display_name = (
-                    strings.get(ui_name.casefold(), internal_name) if ui_name else internal_name
-                )
+                localized_name = strings.get(ui_name.casefold()) if ui_name else None
+                display_name = localized_name or internal_name
                 voxel = _yes(art_values.get("voxel"))
                 components, detected_voxel = _resolve_components(
                     by_name,
@@ -294,11 +518,13 @@ class SemanticLibrary:
                         display_name,
                         internal_name,
                         ui_name,
+                        localized_name is not None,
                         image,
                         voxel or detected_voxel,
                         _selected_fields(rule_values, _RULE_FIELDS),
                         _selected_fields(art_values, _ART_FIELDS),
                         components,
+                        _resolve_dependencies(rule_values, rules),
                     )
                 )
         entities.sort(key=lambda entity: (entity.display_name.casefold(), entity.id.casefold()))
@@ -417,6 +643,46 @@ def _resolve_components(
     return tuple(components), detected_voxel
 
 
+def _resolve_dependencies(
+    entity_rules: dict[str, str],
+    sections: dict[str, dict[str, str]],
+) -> tuple[EntityDependency, ...]:
+    dependencies = []
+    seen = set()
+
+    def add(
+        dependency_id: str,
+        kind: str,
+        slot: str,
+        parent: str | None,
+        fields: dict[str, str],
+    ) -> dict[str, str]:
+        values = sections.get(dependency_id.casefold(), {})
+        key = (dependency_id.casefold(), kind, slot, (parent or "").casefold())
+        if key not in seen:
+            seen.add(key)
+            dependencies.append(
+                EntityDependency(
+                    dependency_id,
+                    kind,
+                    slot,
+                    parent,
+                    bool(values),
+                    _selected_fields(values, fields),
+                )
+            )
+        return values
+
+    for slot, field in _WEAPON_SLOTS:
+        for weapon_id in _references(entity_rules.get(field)):
+            weapon = add(weapon_id, "weapon", slot, None, _WEAPON_FIELDS)
+            for projectile_id in _references(weapon.get("projectile")):
+                add(projectile_id, "projectile", slot, weapon_id, _PROJECTILE_FIELDS)
+            for warhead_id in _references(weapon.get("warhead")):
+                add(warhead_id, "warhead", slot, weapon_id, _WARHEAD_FIELDS)
+    return tuple(dependencies)
+
+
 def _find_asset(
     by_name: dict[str, list[dict[str, Any]]],
     names: tuple[str, ...],
@@ -473,8 +739,30 @@ def _clean_value(value: str) -> str:
     return value.split(";", 1)[0].strip()
 
 
+def _references(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    return tuple(
+        item
+        for raw in value.split(",")
+        if (item := raw.strip()) and item.casefold() != "none"
+    )
+
+
 def _yes(value: str | None) -> bool:
     return bool(value and value.casefold() in {"yes", "true", "1"})
+
+
+def _positive_int(value: str | None, fallback: int) -> int:
+    try:
+        parsed = int(value or "")
+    except ValueError:
+        return fallback
+    return parsed if parsed > 0 else fallback
+
+
+def _percentage(selected: int, total: int) -> float:
+    return round(selected * 100 / total, 1) if total else 0.0
 
 
 def _entity_search_text(entity: GameEntity) -> str:
@@ -486,6 +774,12 @@ def _entity_search_text(entity: GameEntity) -> str:
             entity.ui_name or "",
             entity.image,
             *entity.rules.values(),
+            *(dependency.id for dependency in entity.dependencies),
+            *(
+                value
+                for dependency in entity.dependencies
+                for value in dependency.properties.values()
+            ),
         )
     ).casefold()
 
@@ -493,6 +787,7 @@ def _entity_search_text(entity: GameEntity) -> str:
 __all__ = [
     "ENTITY_KINDS",
     "EntityComponent",
+    "EntityDependency",
     "GameEntity",
     "SemanticCatalog",
     "SemanticLibrary",
