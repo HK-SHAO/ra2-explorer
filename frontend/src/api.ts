@@ -151,10 +151,37 @@ export interface EntityComponent {
   asset: EntityComponentAsset | null;
 }
 
+export type EntityDependencyKind = "weapon" | "projectile" | "warhead";
+
+export interface EntityDependency {
+  id: string;
+  kind: EntityDependencyKind;
+  slot: "primary" | "secondary" | "elite_primary" | "elite_secondary";
+  parent: string | null;
+  resolved: boolean;
+  properties: Record<string, string>;
+}
+
+export interface EntityPreview {
+  format: "vxl" | "shp" | null;
+  frame_count: number;
+  facing_count: number;
+  supports_facing: boolean;
+  supports_player_color: boolean;
+  width?: number;
+  height?: number;
+  limb_count?: number;
+  voxel_count?: number;
+  remap_range?: number[];
+  warnings?: string[];
+}
+
 export interface GameEntity extends EntitySummary {
   rules: Record<string, string>;
   art: Record<string, string>;
   components: EntityComponent[];
+  dependencies: EntityDependency[];
+  preview: EntityPreview;
 }
 
 export interface EntityPage {
@@ -162,6 +189,37 @@ export interface EntityPage {
   total: number;
   kinds: Array<{ kind: EntityKind; count: number }>;
   warnings: string[];
+}
+
+export interface SemanticDiagnostics {
+  status: "ready" | "empty";
+  entity_count: number;
+  renderable_count: number;
+  renderable_percent: number;
+  localized_count: number;
+  localized_percent: number;
+  component_count: number;
+  resolved_component_count: number;
+  component_percent: number;
+  dependency_count: number;
+  unresolved_dependency_count: number;
+  kinds: Array<{ kind: EntityKind; count: number; renderable_count: number }>;
+  missing_components: Array<{ role: string; count: number }>;
+  warnings: string[];
+}
+
+export interface PlayerColor {
+  id: string;
+  rgb: number[];
+  hex: string;
+}
+
+export interface EntityPreviewOptions {
+  frame?: number;
+  facing?: number;
+  playerColor?: string;
+  paletteId?: string;
+  scale?: number;
 }
 
 export interface ReferenceStatus {
@@ -206,10 +264,16 @@ export const api = {
     if (format) params.set("format", format);
     return request<AssetPage>(`/api/assets?${params}`);
   },
-  entities: (sourceId: string, query: string, kind: EntityKind | "") => {
+  entities: (
+    sourceId: string,
+    query: string,
+    kind: EntityKind | "",
+    renderable: "" | "true" | "false" = "",
+  ) => {
     const params = new URLSearchParams({ source_id: sourceId, limit: "500" });
     if (query.trim()) params.set("q", query.trim());
     if (kind) params.set("kind", kind);
+    if (renderable) params.set("renderable", renderable);
     return request<EntityPage>(`/api/entities?${params}`);
   },
   entity: (sourceId: string, entityId: string) =>
@@ -220,6 +284,11 @@ export const api = {
   stats: (sourceId: string) => request<Stats>(`/api/stats?source_id=${encodeURIComponent(sourceId)}`),
   palettes: (sourceId: string) =>
     request<Asset[]>(`/api/palettes?source_id=${encodeURIComponent(sourceId)}`),
+  semanticDiagnostics: (sourceId: string) =>
+    request<SemanticDiagnostics>(
+      `/api/semantic/${encodeURIComponent(sourceId)}/diagnostics?limit=8`,
+    ),
+  playerColors: () => request<PlayerColor[]>("/api/player-colors"),
   shp: (assetId: string) => request<ShpMetadata>(`/api/assets/${assetId}/shp`),
   metadata: (assetId: string) => request<AssetMetadata>(`/api/assets/${assetId}/metadata`),
   text: (assetId: string, query = "") => {
@@ -232,8 +301,18 @@ export const api = {
     request<ReferenceStatus>("/api/reference-data/names/sync", { method: "POST" }),
   contentUrl: (assetId: string) => `/api/assets/${assetId}/content`,
   mediaUrl: (assetId: string) => `/api/assets/${assetId}/media`,
-  entityPreviewUrl: (sourceId: string, entityId: string, scale = 4) => {
-    const params = new URLSearchParams({ scale: String(scale) });
+  entityPreviewUrl: (
+    sourceId: string,
+    entityId: string,
+    options: EntityPreviewOptions = {},
+  ) => {
+    const params = new URLSearchParams({
+      frame: String(options.frame ?? 0),
+      facing: String(options.facing ?? 0),
+      scale: String(options.scale ?? 4),
+    });
+    if (options.playerColor) params.set("player_color", options.playerColor);
+    if (options.paletteId) params.set("palette_id", options.paletteId);
     return `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}/preview.png?${params}`;
   },
   previewUrl: (assetId: string, frame: number, paletteId: string, scale = 4) => {

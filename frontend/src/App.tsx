@@ -5,11 +5,14 @@ import {
   Asset,
   AssetMetadata,
   DiscoveryResult,
+  EntityDependency,
   EntityKind,
   EntitySummary,
   GameEntity,
   GameInstallation,
+  PlayerColor,
   ReferenceStatus,
+  SemanticDiagnostics,
   Source,
   Stats,
   TextAsset,
@@ -112,7 +115,61 @@ const ruleLabels: Record<string, string> = {
   prerequisite: "前置建筑",
   primary: "主武器",
   secondary: "副武器",
+  elite_primary: "精英主武器",
+  elite_secondary: "精英副武器",
   movement_zone: "移动区域",
+};
+
+const dependencyKindLabels: Record<EntityDependency["kind"], string> = {
+  weapon: "武器",
+  projectile: "弹体",
+  warhead: "弹头",
+};
+
+const dependencySlotLabels: Record<EntityDependency["slot"], string> = {
+  primary: "主武器",
+  secondary: "副武器",
+  elite_primary: "精英主武器",
+  elite_secondary: "精英副武器",
+};
+
+const dependencyPropertyLabels: Record<string, string> = {
+  damage: "伤害",
+  rate_of_fire: "射速",
+  range: "射程",
+  minimum_range: "最近射程",
+  burst: "连发",
+  speed: "速度",
+  projectile: "弹体",
+  warhead: "弹头",
+  report: "音效",
+  animation: "动画",
+  image: "图像",
+  arcing: "抛物线",
+  invisible: "不可见",
+  proximity: "近炸",
+  rotation: "转向",
+  acceleration: "加速度",
+  inaccurate: "散布",
+  verses: "装甲倍率",
+  cell_spread: "范围",
+  percent_at_max: "边缘伤害",
+  infantry_death: "步兵死亡",
+  animation_list: "命中动画",
+  wall: "墙体",
+  wood: "木质",
+  radiation: "辐射",
+};
+
+const playerColorLabels: Record<string, string> = {
+  red: "红色",
+  blue: "蓝色",
+  green: "绿色",
+  yellow: "黄色",
+  orange: "橙色",
+  purple: "紫色",
+  cyan: "青色",
+  gray: "灰色",
 };
 
 function formatBytes(value: number) {
@@ -156,15 +213,20 @@ function App() {
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<Stats>({ total_assets: 0, formats: [] });
   const [palettes, setPalettes] = useState<Asset[]>([]);
-  const [query, setQuery] = useState("");
+  const [playerColors, setPlayerColors] = useState<PlayerColor[]>([]);
+  const [assetQuery, setAssetQuery] = useState("");
   const [format, setFormat] = useState("");
   const [entities, setEntities] = useState<EntitySummary[]>([]);
   const [entityTotal, setEntityTotal] = useState(0);
   const [entityKinds, setEntityKinds] = useState<Array<{ kind: EntityKind; count: number }>>([]);
   const [entityKind, setEntityKind] = useState<EntityKind | "">("vehicle");
+  const [entityQuery, setEntityQuery] = useState("");
+  const [entityAvailability, setEntityAvailability] = useState<"" | "true" | "false">("");
+  const [semanticDiagnostics, setSemanticDiagnostics] = useState<SemanticDiagnostics | null>(null);
   const [selectedEntityId, setSelectedEntityId] = useState("");
   const [selectedEntity, setSelectedEntity] = useState<GameEntity | null>(null);
   const [entityLoading, setEntityLoading] = useState(false);
+  const [entityDetailLoading, setEntityDetailLoading] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [selected, setSelected] = useState<Asset | null>(null);
   const [metadata, setMetadata] = useState<AssetMetadata | null>(null);
@@ -182,6 +244,7 @@ function App() {
   const [discovery, setDiscovery] = useState<DiscoveryResult>({ candidates: [], checked_locations: [], official_sources: [] });
 
   const activeSource = sources.find((item) => item.id === sourceId) ?? null;
+  const sourceRevision = activeSource?.scanned_at || "";
 
   async function refreshSources(preferredId?: string) {
     const next = await api.sources();
@@ -195,25 +258,32 @@ function App() {
       api.sources(),
       api.referenceStatus(),
       api.discovery().catch(() => ({ candidates: [], checked_locations: [], official_sources: [] })),
+      api.playerColors().catch(() => []),
     ])
-      .then(([nextSources, nextReference, nextDiscovery]) => {
+      .then(([nextSources, nextReference, nextDiscovery, nextPlayerColors]) => {
         setSources(nextSources);
         setSourceId(nextSources[0]?.id || "");
         setReference(nextReference);
         setDiscovery(nextDiscovery);
+        setPlayerColors(nextPlayerColors);
       })
       .catch((reason: Error) => setError(reason.message))
       .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
+    setSelectedId("");
+    setSelected(null);
+    setSelectedEntityId("");
+    setSelectedEntity(null);
+    setSemanticDiagnostics(null);
+    setAssets([]);
+    setEntities([]);
+    setTotal(0);
+    setEntityTotal(0);
     if (!sourceId) {
-      setAssets([]);
-      setEntities([]);
       setStats({ total_assets: 0, formats: [] });
       setPalettes([]);
-      setSelectedId("");
-      setSelectedEntityId("");
       return;
     }
     let cancelled = false;
@@ -225,13 +295,22 @@ function App() {
       })
       .catch((reason: Error) => !cancelled && setError(reason.message));
     return () => { cancelled = true; };
-  }, [sourceId]);
+  }, [sourceId, sourceRevision]);
+
+  useEffect(() => {
+    if (!sourceId || view !== "entities") return;
+    let cancelled = false;
+    api.semanticDiagnostics(sourceId)
+      .then((result) => !cancelled && setSemanticDiagnostics(result))
+      .catch((reason: Error) => !cancelled && setError(reason.message));
+    return () => { cancelled = true; };
+  }, [sourceId, sourceRevision, view]);
 
   useEffect(() => {
     if (!sourceId || view !== "assets") return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      api.assets(sourceId, query, format)
+      api.assets(sourceId, assetQuery, format)
         .then((page) => {
           if (cancelled) return;
           setAssets(page.items);
@@ -243,19 +322,22 @@ function App() {
           );
         })
         .catch((reason: Error) => !cancelled && setError(reason.message));
-    }, query ? 180 : 0);
+    }, assetQuery ? 180 : 0);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [sourceId, query, format, view]);
+  }, [sourceId, sourceRevision, assetQuery, format, view]);
 
   useEffect(() => {
     if (!sourceId || view !== "entities") return;
     let cancelled = false;
     setEntityLoading(true);
+    setEntities([]);
+    setSelectedEntityId("");
+    setSelectedEntity(null);
     const timer = window.setTimeout(() => {
-      api.entities(sourceId, query, entityKind)
+      api.entities(sourceId, entityQuery, entityKind, entityAvailability)
         .then((page) => {
           if (cancelled) return;
           setEntities(page.items);
@@ -269,24 +351,28 @@ function App() {
         })
         .catch((reason: Error) => !cancelled && setError(reason.message))
         .finally(() => !cancelled && setEntityLoading(false));
-    }, query ? 180 : 0);
+    }, entityQuery ? 180 : 0);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [sourceId, query, entityKind, view]);
+  }, [sourceId, sourceRevision, entityQuery, entityKind, entityAvailability, view]);
 
   useEffect(() => {
     if (!sourceId || !selectedEntityId || view !== "entities") {
       setSelectedEntity(null);
+      setEntityDetailLoading(false);
       return;
     }
     let cancelled = false;
+    setSelectedEntity(null);
+    setEntityDetailLoading(true);
     api.entity(sourceId, selectedEntityId)
       .then((entity) => !cancelled && setSelectedEntity(entity))
-      .catch((reason: Error) => !cancelled && setError(reason.message));
+      .catch((reason: Error) => !cancelled && setError(reason.message))
+      .finally(() => !cancelled && setEntityDetailLoading(false));
     return () => { cancelled = true; };
-  }, [sourceId, selectedEntityId, view]);
+  }, [sourceId, sourceRevision, selectedEntityId, view]);
 
   useEffect(() => {
     setFrame(0);
@@ -417,13 +503,18 @@ function App() {
             </section>
 
             <section className="summary-grid" aria-label="索引统计">
-              <div><strong>{stats.total_assets.toLocaleString("zh-CN")}</strong><span>资产</span></div>
-              <div><strong>{activeSource?.archive_count.toLocaleString("zh-CN")}</strong><span>归档</span></div>
+              {view === "assets" ? <>
+                <div><strong>{stats.total_assets.toLocaleString("zh-CN")}</strong><span>资产</span></div>
+                <div><strong>{activeSource?.archive_count.toLocaleString("zh-CN")}</strong><span>归档</span></div>
+              </> : <>
+                <div><strong>{semanticDiagnostics?.entity_count.toLocaleString("zh-CN") || "—"}</strong><span>实体</span></div>
+                <div><strong>{semanticDiagnostics ? `${semanticDiagnostics.renderable_percent}%` : "—"}</strong><span>可预览</span></div>
+              </>}
             </section>
 
             <div className="view-switch" role="group" aria-label="浏览方式">
-              <button className={view === "assets" ? "active" : ""} onClick={() => { setView("assets"); setQuery(""); }}><Icon name="archive" size={15} />资源文件</button>
-              <button className={view === "entities" ? "active" : ""} onClick={() => { setView("entities"); setQuery(""); }}><Icon name="unit" size={16} />游戏单位</button>
+              <button className={view === "assets" ? "active" : ""} onClick={() => setView("assets")}><Icon name="archive" size={15} />资源文件</button>
+              <button className={view === "entities" ? "active" : ""} onClick={() => setView("entities")}><Icon name="unit" size={16} />游戏单位</button>
             </div>
 
             {view === "assets" ? <nav className="format-nav" aria-label="资产格式">
@@ -442,16 +533,22 @@ function App() {
               ))}
             </nav>}
 
-            <section className="reference-card">
+            {view === "assets" ? <section className="reference-card">
               <div className="reference-title"><Icon name="settings" /><span>文件名识别库</span></div>
               <p>{reference?.available ? `${reference.name_count?.toLocaleString("zh-CN") || "扩展"} 个已知名称` : "当前仅使用内置基础名称"}</p>
               <button disabled={busy} onClick={syncNames}>{reference?.available ? "重新同步" : "同步成熟名称库"}<Icon name="chevron" size={13} /></button>
-            </section>
+            </section> : <SemanticCoverageCard
+              diagnostics={semanticDiagnostics}
+              onShowMissing={() => {
+                setEntityKind("");
+                setEntityAvailability("false");
+              }}
+            />}
           </aside>
 
           {view === "assets" ? <><section className="asset-panel panel">
             <div className="asset-toolbar">
-              <label className="search-box"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、路径或 CRC…" aria-label="搜索资产" />{query && <button onClick={() => setQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</label>
+              <label className="search-box"><Icon name="search" /><input value={assetQuery} onChange={(event) => setAssetQuery(event.target.value)} placeholder="搜索名称、路径或 CRC…" aria-label="搜索资产" />{assetQuery && <button onClick={() => setAssetQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</label>
               <span className="result-count">显示 {assets.length} / {total}</span>
             </div>
             <div className="list-heading"><span>资产</span><span>位置</span><span>大小</span></div>
@@ -465,7 +562,7 @@ function App() {
                   <Icon name="chevron" size={15} />
                 </button>
               ))}
-              {assets.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的资产</strong><span>尝试清除关键词或切换格式。</span><button onClick={() => { setQuery(""); setFormat(""); }}>清除筛选</button></div>}
+              {assets.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的资产</strong><span>尝试清除关键词或切换格式。</span><button onClick={() => { setAssetQuery(""); setFormat(""); }}>清除筛选</button></div>}
             </div>
           </section>
 
@@ -489,12 +586,20 @@ function App() {
               entities={entities}
               total={entityTotal}
               loading={entityLoading}
-              query={query}
-              setQuery={setQuery}
+              query={entityQuery}
+              setQuery={setEntityQuery}
+              availability={entityAvailability}
+              setAvailability={setEntityAvailability}
               selectedId={selectedEntityId}
               setSelectedId={setSelectedEntityId}
             />
-            <EntityDetailPanel sourceId={sourceId} entity={selectedEntity} />
+            <EntityDetailPanel
+              sourceId={sourceId}
+              entity={selectedEntity}
+              loading={entityDetailLoading}
+              palettes={palettes}
+              playerColors={playerColors}
+            />
           </>}
         </main>
       )}
@@ -533,12 +638,34 @@ function EmptyLibrary({ busy, discoveries, onDemo, onAdd, onImport }: {
   );
 }
 
-function EntityListPanel({ entities, total, loading, query, setQuery, selectedId, setSelectedId }: {
+function SemanticCoverageCard({ diagnostics, onShowMissing }: {
+  diagnostics: SemanticDiagnostics | null;
+  onShowMissing: () => void;
+}) {
+  const missing = diagnostics ? diagnostics.entity_count - diagnostics.renderable_count : 0;
+  return (
+    <section className="reference-card semantic-card" aria-label="语义覆盖">
+      <div className="reference-title"><Icon name="unit" /><span>语义覆盖</span></div>
+      {diagnostics ? <>
+        <dl>
+          <div><dt>组件关联</dt><dd>{diagnostics.resolved_component_count} / {diagnostics.component_count}</dd></div>
+          <div><dt>本地化</dt><dd>{diagnostics.localized_percent}%</dd></div>
+          <div><dt>未解析依赖</dt><dd className={diagnostics.unresolved_dependency_count ? "warning" : ""}>{diagnostics.unresolved_dependency_count}</dd></div>
+        </dl>
+        <button disabled={!missing} onClick={onShowMissing}>查看 {missing} 个缺少主体的实体<Icon name="chevron" size={13} /></button>
+      </> : <p>正在分析规则与资源关联…</p>}
+    </section>
+  );
+}
+
+function EntityListPanel({ entities, total, loading, query, setQuery, availability, setAvailability, selectedId, setSelectedId }: {
   entities: EntitySummary[];
   total: number;
   loading: boolean;
   query: string;
   setQuery: (value: string) => void;
+  availability: "" | "true" | "false";
+  setAvailability: (value: "" | "true" | "false") => void;
   selectedId: string;
   setSelectedId: (id: string) => void;
 }) {
@@ -546,6 +673,11 @@ function EntityListPanel({ entities, total, loading, query, setQuery, selectedId
     <section className="asset-panel entity-panel panel">
       <div className="asset-toolbar">
         <label className="search-box"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索中文名、单位 ID、武器或阵营…" aria-label="搜索游戏单位" />{query && <button onClick={() => setQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</label>
+        <select className="entity-filter" value={availability} onChange={(event) => setAvailability(event.target.value as "" | "true" | "false")} aria-label="按预览状态筛选">
+          <option value="">全部状态</option>
+          <option value="true">可预览</option>
+          <option value="false">缺少主体</option>
+        </select>
         <span className="result-count">显示 {entities.length} / {total}</span>
       </div>
       <div className="list-heading entity-list-heading"><span>游戏单位</span><span>类型</span><span>数值</span></div>
@@ -560,13 +692,51 @@ function EntityListPanel({ entities, total, loading, query, setQuery, selectedId
           </button>
         ))}
         {loading && entities.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在解析规则实体…</strong></div>}
-        {!loading && entities.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的单位</strong><span>尝试清除关键词或切换单位类型。</span><button onClick={() => setQuery("")}>清除搜索</button></div>}
+        {!loading && entities.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的单位</strong><span>尝试清除关键词或预览状态。</span><button onClick={() => { setQuery(""); setAvailability(""); }}>清除筛选</button></div>}
       </div>
     </section>
   );
 }
 
-function EntityDetailPanel({ sourceId, entity }: { sourceId: string; entity: GameEntity | null }) {
+function EntityDetailPanel({ sourceId, entity, loading, palettes, playerColors }: {
+  sourceId: string;
+  entity: GameEntity | null;
+  loading: boolean;
+  palettes: Asset[];
+  playerColors: PlayerColor[];
+}) {
+  const [frame, setFrame] = useState(0);
+  const [facing, setFacing] = useState(0);
+  const [playerColor, setPlayerColor] = useState("");
+  const [paletteId, setPaletteId] = useState("");
+  const [playing, setPlaying] = useState(false);
+  const [previewFailed, setPreviewFailed] = useState(false);
+  const frameCount = Math.max(1, entity?.preview.frame_count || 1);
+
+  useEffect(() => {
+    setFrame(0);
+    setFacing(0);
+    setPlayerColor("");
+    setPaletteId("");
+    setPlaying(false);
+    setPreviewFailed(false);
+  }, [entity?.id]);
+
+  useEffect(() => {
+    if (!playing || frameCount < 2) return;
+    const timer = window.setInterval(() => setFrame((current) => (current + 1) % frameCount), 160);
+    return () => window.clearInterval(timer);
+  }, [playing, frameCount]);
+
+  const previewUrl = useMemo(() => entity?.renderable ? api.entityPreviewUrl(
+    sourceId,
+    entity.id,
+    { frame, facing, playerColor, paletteId, scale: 4 },
+  ) : "", [sourceId, entity, frame, facing, playerColor, paletteId]);
+
+  useEffect(() => setPreviewFailed(false), [previewUrl]);
+
+  if (loading) return <aside className="detail-panel panel empty-detail"><div className="radar small"><span /></div><strong>正在读取单位详情…</strong></aside>;
   if (!entity) return <aside className="detail-panel panel empty-detail"><div className="empty-detail-icon"><Icon name="unit" size={30} /></div><strong>选择一个游戏单位</strong><span>查看组合预览、规则和实际组件</span></aside>;
   const rules = Object.entries(entity.rules).filter(([key]) => ruleLabels[key]);
   return (
@@ -574,13 +744,23 @@ function EntityDetailPanel({ sourceId, entity }: { sourceId: string; entity: Gam
       <div className="detail-title"><div><span className="format-pill">{entityKindLabels[entity.kind]}</span><h2 title={entity.display_name}>{entity.display_name}</h2><small>{entity.id} · {entity.internal_name}</small></div></div>
 
       {entity.renderable ? <div className="preview-block entity-preview">
-        <div className={`preview-stage ${entity.voxel ? "vxl" : "shp"}`}><div className="preview-rulers horizontal" /><div className="preview-rulers vertical" /><img src={api.entityPreviewUrl(sourceId, entity.id, 4)} alt={`${entity.display_name} 组合预览`} /></div>
+        <div className={`preview-stage ${entity.voxel ? "vxl" : "shp"}`}><div className="preview-rulers horizontal" /><div className="preview-rulers vertical" />{previewFailed ? <div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong><span>切换帧或调色板后可重试。</span></div> : <img key={previewUrl} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} />}</div>
+        {frameCount > 1 && <div className="frame-controls">
+          <button className="play-button" onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : "play"} size={16} /></button>
+          <input type="range" min="0" max={frameCount - 1} value={Math.min(frame, frameCount - 1)} onChange={(event) => setFrame(Number(event.target.value))} aria-label="当前动画帧" />
+          <span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(frameCount).padStart(2, "0")}</span>
+        </div>}
+        <div className="entity-render-options">
+          {entity.preview.supports_facing && <label><span>朝向</span><select value={facing} onChange={(event) => setFacing(Number(event.target.value))}>{Array.from({ length: 8 }, (_, index) => <option key={index} value={index}>{index * 45}°</option>)}</select></label>}
+          {entity.preview.supports_player_color && <label><span>阵营色</span><select value={playerColor} onChange={(event) => setPlayerColor(event.target.value)}><option value="">原始色</option>{playerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
+          {palettes.length > 0 && <label><span>调色板</span><select value={paletteId} onChange={(event) => setPaletteId(event.target.value)}><option value="">自动</option>{palettes.map((palette) => <option key={palette.id} value={palette.id}>{palette.display_name}</option>)}</select></label>}
+        </div>
       </div> : <div className="unsupported-preview"><Icon name="unit" size={34} /><strong>缺少主体资产</strong><span>可在组件列表核对期望文件名。</span></div>}
 
       <div className="entity-identity">
         <span>规则映射</span>
         <strong><code>{entity.id}</code><i>→</i><code>{entity.image}</code></strong>
-        <small>{entity.voxel ? "VXL 多部件单位" : "SHP 帧动画单位"} · {entity.component_count} 个已关联组件</small>
+        <small>{entity.voxel ? "VXL 多部件单位" : "SHP 帧动画单位"} · {entity.component_count} 个已关联组件{entity.preview.frame_count > 1 ? ` · ${entity.preview.frame_count} 帧` : ""}</small>
       </div>
 
       <div className="metadata entity-rules">
@@ -589,6 +769,18 @@ function EntityDetailPanel({ sourceId, entity }: { sourceId: string; entity: Gam
           {rules.map(([key, value]) => <div key={key}><dt>{ruleLabels[key]}</dt><dd>{value}</dd></div>)}
         </dl>
       </div>
+
+      {entity.dependencies.length > 0 && <div className="entity-dependencies">
+        <h3>战斗依赖</h3>
+        <div className="dependency-list">
+          {entity.dependencies.map((dependency, index) => <article className={dependency.resolved ? "" : "unresolved"} key={`${dependency.slot}-${dependency.kind}-${dependency.id}-${index}`}>
+            <header><span>{dependencySlotLabels[dependency.slot]} · {dependencyKindLabels[dependency.kind]}</span><em>{dependency.resolved ? "已解析" : "缺少规则节"}</em></header>
+            <code>{dependency.id}</code>
+            {dependency.parent && <small>来自 {dependency.parent}</small>}
+            {Object.keys(dependency.properties).length > 0 && <dl>{Object.entries(dependency.properties).map(([key, value]) => <div key={key}><dt>{dependencyPropertyLabels[key] || key}</dt><dd title={value}>{value}</dd></div>)}</dl>}
+          </article>)}
+        </div>
+      </div>}
 
       <div className="entity-components">
         <h3>实际组件</h3>
