@@ -1,0 +1,49 @@
+# RA2 Explorer
+
+RA2 Explorer 是一个本地优先的《命令与征服：红色警戒 2》资产浏览器。它只读挂载用户自己的游戏目录，把 MIX 条目、PAL 调色板和 SHP 动画组织成可搜索、可预览、可导出的本地资产库。
+
+第一版的可执行边界：
+
+- 扫描本地目录中的松散资产和 MIX / MMX / YRO；
+- 读取基础、扩展和 Blowfish 加密 MIX，并递归索引已知的嵌套 MIX；
+- 同时解析 RA2/TS CRC32 与早期 Westwood 文件名哈希；
+- 预览 PAL 和 RA2/TS SHP，逐帧导出透明 PNG；
+- 通过 SQLite、HTTP API、CLI 和浏览器界面访问同一份索引；
+- 生成不包含 EA 内容的本地演示资产库。
+
+项目不会附带或自动上传商业游戏文件。当前官方 PC 版本是 Steam / EA App 中的 *Command & Conquer Red Alert 2 and Yuri's Revenge*；导入前需要由用户在相应平台合法安装。
+
+## 立即运行
+
+项目命令使用 Git Bash；不可用时使用 `cmd.exe`。以下命令均为 `cmd.exe` 语法，要求 Python 3.11+ 和 Node 18+：
+
+```bat
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -e .[dev]
+.venv\Scripts\ra2-explorer.exe sync-names
+.venv\Scripts\ra2-explorer.exe demo
+cd frontend
+npm ci
+npm run build
+cd ..
+.venv\Scripts\ra2-explorer.exe serve
+```
+
+服务默认打开 `http://127.0.0.1:8742`。构建后的页面由 Python 服务从 `frontend\dist` 提供；运行时不需要 Node，也不会加载 CDN。首次可直接浏览合成演示，再从页面添加自己的合法游戏目录。
+
+只开发 API 时可以不构建前端，接口文档位于 `http://127.0.0.1:8742/api/docs`。前端热更新使用 `cd frontend` 后运行 `npm run dev`。
+
+## 验证
+
+```bat
+.venv\Scripts\python.exe -m pytest
+.venv\Scripts\python.exe -m ruff check src tests
+cd frontend
+npm run build
+```
+
+真实 RA2 文件只用于本地 smoke test，不进入仓库。架构与导入边界见 [v0.1 架构](docs/ARCHITECTURE.md)，合法游戏来源、本机导入和无游戏文件时的演示方案见 [获取与导入游戏文件](docs/GAME_FILES.md)。
+
+## 权利边界
+
+RA2 Explorer 与 Electronic Arts 或其许可方无隶属或背书关系。游戏内容的提取、派生、上传和发布权限取决于用户所在地法律、平台条款以及具体素材权利；音乐、角色语音和第三方 Mod 资产应单独确认授权。
