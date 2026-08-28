@@ -1,0 +1,7 @@
+interface:
+  display_name: "项目开发强制准则"
+  short_description: "以最小验证推进 ra2-explorer，并分阶段提交和同步文档"
+  default_prompt: "Use $must-follow-project-dev-rules to implement this ra2-explorer change with focused validation, a stable stage commit, and current documentation."
+
+policy:
+  allow_implicit_invocation: true
