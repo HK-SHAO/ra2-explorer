@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 from pathlib import Path
 from urllib.parse import quote
 
@@ -81,7 +82,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/health")
     def health() -> dict[str, object]:
-        return {"status": "ok", "version": __version__}
+        return {
+            "status": "ok",
+            "name": "ra2-explorer",
+            "version": __version__,
+            "pid": os.getpid(),
+        }
 
     @app.get("/api/sources")
     def sources() -> list[dict[str, object]]:

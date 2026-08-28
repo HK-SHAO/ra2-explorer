@@ -59,3 +59,13 @@ def test_api_rejects_untrusted_host(tmp_path: Path) -> None:
     response = client.get("/api/health")
 
     assert response.status_code == 400
+
+
+def test_serve_defaults_do_not_open_external_programs() -> None:
+    from ra2_explorer.cli import build_parser
+    from ra2_explorer.config import DEFAULT_PORT
+
+    args = build_parser().parse_args(["serve"])
+
+    assert args.port == DEFAULT_PORT == 46_120
+    assert args.open_browser is False

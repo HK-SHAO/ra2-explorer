@@ -3,14 +3,20 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import threading
 import webbrowser
 from pathlib import Path
 
 import uvicorn
 
 from ra2_explorer.api import Services, create_app
-from ra2_explorer.config import load_settings
+from ra2_explorer.background import (
+    install_autostart,
+    service_status,
+    start_background,
+    stop_background,
+    uninstall_autostart,
+)
+from ra2_explorer.config import DEFAULT_HOST, DEFAULT_PORT, load_settings
 from ra2_explorer.demo import create_demo_installation
 from ra2_explorer.reference_data import sync_known_names
 
@@ -20,9 +26,16 @@ def build_parser() -> argparse.ArgumentParser:
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     serve = subcommands.add_parser("serve", help="启动本地 API 与浏览器界面")
-    serve.add_argument("--host", default="127.0.0.1")
-    serve.add_argument("--port", type=int, default=8742)
-    serve.add_argument("--no-browser", action="store_true")
+    serve.add_argument("--host", default=DEFAULT_HOST)
+    serve.add_argument("--port", type=int, default=DEFAULT_PORT)
+    serve.add_argument("--open-browser", action="store_true")
+
+    background = subcommands.add_parser("background", help="管理 Windows 后台与登录自启")
+    background.add_argument(
+        "action",
+        choices=("start", "stop", "status", "install", "uninstall"),
+    )
+    background.add_argument("--port", type=int, default=DEFAULT_PORT)
 
     import_command = subcommands.add_parser("import", help="导入并扫描 RA2 资源目录")
     import_command.add_argument("path", type=Path)
@@ -55,16 +68,31 @@ def main(argv: list[str] | None = None) -> int:
     services = Services(settings)
 
     if args.command == "serve":
-        if args.host not in {"127.0.0.1", "localhost", "::1"}:
-            raise SystemExit("第一版仅允许监听本机回环地址")
+        if args.host not in {DEFAULT_HOST, "localhost", "::1"}:
+            raise SystemExit("仅允许监听本机回环地址")
         if not 1 <= args.port <= 65_535:
             raise SystemExit("端口必须在 1 到 65535 之间")
-        url = f"http://127.0.0.1:{args.port}"
-        if not args.no_browser:
-            timer = threading.Timer(0.8, webbrowser.open, args=(url,))
-            timer.daemon = True
-            timer.start()
+        if args.open_browser:
+            webbrowser.open(f"http://{DEFAULT_HOST}:{args.port}")
         uvicorn.run(create_app(settings), host=args.host, port=args.port, log_level="info")
+        return 0
+
+    if args.command == "background":
+        if not 46_100 <= args.port <= 46_199:
+            raise SystemExit("后台服务端口必须位于 46100 到 46199")
+        root = Path.cwd().resolve()
+        if args.action == "start":
+            result = start_background(root, port=args.port)
+        elif args.action == "stop":
+            result = stop_background(port=args.port)
+        elif args.action == "status":
+            result = service_status(port=args.port)
+        elif args.action == "install":
+            result = install_autostart(root, port=args.port)
+            result["service"] = start_background(root, port=args.port)
+        else:
+            result = uninstall_autostart()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "import":

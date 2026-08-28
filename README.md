@@ -26,12 +26,21 @@ cd frontend
 npm ci
 npm run build
 cd ..
-.venv\Scripts\ra2-explorer.exe serve
+.venv\Scripts\ra2-explorer.exe background install
 ```
 
-服务默认打开 `http://127.0.0.1:8742`。构建后的页面由 Python 服务从 `frontend\dist` 提供；运行时不需要 Node，也不会加载 CDN。首次可直接浏览合成演示，再从页面添加自己的合法游戏目录。
+服务在 `http://127.0.0.1:46120` 无窗口后台运行，并登记为当前 Windows 用户的登录自启项。构建后的页面由 Python 服务从 `frontend\dist` 提供；运行时不需要 Node，也不会加载 CDN。首次可直接浏览合成演示，再从页面添加自己的合法游戏目录。
 
-只开发 API 时可以不构建前端，接口文档位于 `http://127.0.0.1:8742/api/docs`。前端热更新使用 `cd frontend` 后运行 `npm run dev`。
+只开发 API 时可以不构建前端，接口文档位于 `http://127.0.0.1:46120/api/docs`。前端热更新使用 `cd frontend` 后运行 `npm run dev`。后台管理命令为：
+
+```bat
+.venv\Scripts\ra2-explorer.exe background status
+.venv\Scripts\ra2-explorer.exe background stop
+.venv\Scripts\ra2-explorer.exe background start
+.venv\Scripts\ra2-explorer.exe background uninstall
+```
+
+交互式调试可运行 `.venv\Scripts\ra2-explorer.exe serve`；它默认不会调用 Windows 外部程序。如确实需要自动打开浏览器，显式增加 `--open-browser`。
 
 ## 验证
 

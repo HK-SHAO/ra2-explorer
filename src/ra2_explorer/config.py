@@ -4,6 +4,9 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 46_120
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -32,4 +35,4 @@ def load_settings(*, working_directory: Path | None = None) -> Settings:
     return settings
 
 
-__all__ = ["Settings", "load_settings"]
+__all__ = ["DEFAULT_HOST", "DEFAULT_PORT", "Settings", "load_settings"]
