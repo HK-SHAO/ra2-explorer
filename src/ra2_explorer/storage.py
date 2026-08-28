@@ -47,6 +47,18 @@ class AssetRecord:
     loose_relative_path: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class AssetSegmentRecord:
+    asset_id: str
+    container_asset_id: str
+    data_offset: int
+    data_size: int
+    sample_rate: int
+    channels: int
+    codec: str
+    block_align: int
+
+
 class Database:
     def __init__(self, path: Path):
         self.path = path
@@ -116,10 +128,22 @@ class Database:
                     loose_relative_path TEXT,
                     UNIQUE(source_id, virtual_path)
                 );
+                CREATE TABLE IF NOT EXISTS asset_segments (
+                    asset_id TEXT PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE,
+                    container_asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+                    data_offset INTEGER NOT NULL,
+                    data_size INTEGER NOT NULL,
+                    sample_rate INTEGER NOT NULL,
+                    channels INTEGER NOT NULL,
+                    codec TEXT NOT NULL,
+                    block_align INTEGER NOT NULL
+                );
                 CREATE INDEX IF NOT EXISTS idx_archives_source ON archives(source_id);
                 CREATE INDEX IF NOT EXISTS idx_assets_source_format ON assets(source_id, format);
                 CREATE INDEX IF NOT EXISTS idx_assets_display_name ON assets(display_name);
-                PRAGMA user_version = 1;
+                CREATE INDEX IF NOT EXISTS idx_asset_segments_container
+                    ON asset_segments(container_asset_id);
+                PRAGMA user_version = 2;
                 """
             )
 
@@ -177,12 +201,14 @@ class Database:
         source_id: str,
         archives: Iterable[ArchiveRecord],
         assets: Iterable[AssetRecord],
+        segments: Iterable[AssetSegmentRecord] = (),
         *,
         state: str,
         error: str | None,
     ) -> None:
         archive_rows = [asdict(record) for record in archives]
         asset_rows = [asdict(record) for record in assets]
+        segment_rows = [asdict(record) for record in segments]
         with self.connect() as connection:
             connection.execute("DELETE FROM assets WHERE source_id = ?", (source_id,))
             connection.execute("DELETE FROM archives WHERE source_id = ?", (source_id,))
@@ -212,6 +238,18 @@ class Database:
                 )
                 """,
                 asset_rows,
+            )
+            connection.executemany(
+                """
+                INSERT INTO asset_segments(
+                    asset_id, container_asset_id, data_offset, data_size,
+                    sample_rate, channels, codec, block_align
+                ) VALUES (
+                    :asset_id, :container_asset_id, :data_offset, :data_size,
+                    :sample_rate, :channels, :codec, :block_align
+                )
+                """,
+                segment_rows,
             )
             connection.execute(
                 """
@@ -294,6 +332,15 @@ class Database:
             ).fetchone()
         if not row:
             raise AssetNotFoundError("归档不存在")
+        return dict(row)
+
+    def get_asset_segment(self, asset_id: str) -> dict[str, Any]:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM asset_segments WHERE asset_id = ?", (asset_id,)
+            ).fetchone()
+        if not row:
+            raise AssetNotFoundError("资产片段不存在")
         return dict(row)
 
     def palette_assets(self, source_id: str) -> list[dict[str, Any]]:
@@ -394,4 +441,4 @@ class Database:
         return {"total_assets": total, "formats": [dict(row) for row in formats]}
 
 
-__all__ = ["ArchiveRecord", "AssetRecord", "Database"]
+__all__ = ["ArchiveRecord", "AssetRecord", "AssetSegmentRecord", "Database"]

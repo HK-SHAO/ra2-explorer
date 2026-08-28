@@ -6,6 +6,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from ra2_explorer.codecs.bag import parse_bag_index
 from ra2_explorer.codecs.mix import (
     MixHashType,
     classic_mix_hash,
@@ -20,7 +21,12 @@ from ra2_explorer.codecs.sniff import (
     sniff_format,
 )
 from ra2_explorer.errors import AssetNotFoundError, Ra2ExplorerError
-from ra2_explorer.storage import ArchiveRecord, AssetRecord, Database
+from ra2_explorer.storage import (
+    ArchiveRecord,
+    AssetRecord,
+    AssetSegmentRecord,
+    Database,
+)
 
 ARCHIVE_EXTENSIONS = {".mix", ".mmx", ".yro"}
 MAX_ARCHIVE_SIZE = 1_073_741_824
@@ -58,6 +64,7 @@ class NameResolver:
 class ScanResult:
     archives: list[ArchiveRecord]
     assets: list[AssetRecord]
+    segments: list[AssetSegmentRecord]
     errors: list[str]
 
 
@@ -85,7 +92,7 @@ class SourceLibrary:
             raise AssetNotFoundError("资源目录已不存在")
 
         self.database.set_source_state(source_id, "scanning")
-        result = ScanResult([], [], [])
+        result = ScanResult([], [], [], [])
         try:
             archive_paths = self._collect_loose_assets(source_id, root, result)
             for relative_path in archive_paths:
@@ -119,6 +126,7 @@ class SourceLibrary:
             source_id,
             result.archives,
             result.assets,
+            result.segments,
             state=state,
             error=error_summary,
         )
@@ -276,6 +284,7 @@ class SourceLibrary:
             )
         )
 
+        direct_assets: dict[str, tuple[AssetRecord, memoryview]] = {}
         for entry in index.entries:
             name = resolved_names.get(entry.crc)
             payload = index.payload(data, entry)
@@ -292,24 +301,25 @@ class SourceLibrary:
             display_name = name or f"crc_{entry.crc:08X}.{extension or 'bin'}"
             asset_virtual_path = f"{virtual_path}::{entry.ordinal:05d}:{display_name}"
             asset_id = str(uuid.uuid5(source_uuid, f"asset:{asset_virtual_path.casefold()}"))
-            result.assets.append(
-                AssetRecord(
-                    id=asset_id,
-                    source_id=source_id,
-                    archive_id=archive_id,
-                    ordinal=entry.ordinal,
-                    virtual_path=asset_virtual_path,
-                    name=name,
-                    display_name=display_name,
-                    crc=entry.crc,
-                    size=entry.size,
-                    format=asset_format,
-                    extension=extension,
-                    confidence=confidence,
-                    storage_kind="mix",
-                    loose_relative_path=None,
-                )
+            asset_record = AssetRecord(
+                id=asset_id,
+                source_id=source_id,
+                archive_id=archive_id,
+                ordinal=entry.ordinal,
+                virtual_path=asset_virtual_path,
+                name=name,
+                display_name=display_name,
+                crc=entry.crc,
+                size=entry.size,
+                format=asset_format,
+                extension=extension,
+                confidence=confidence,
+                storage_kind="mix",
+                loose_relative_path=None,
             )
+            result.assets.append(asset_record)
+            if name:
+                direct_assets[Path(name).name.casefold()] = (asset_record, payload)
 
             if asset_format != "mix" or depth >= MAX_NESTING_DEPTH:
                 continue
@@ -323,6 +333,67 @@ class SourceLibrary:
                 parent_archive_id=archive_id,
                 depth=depth + 1,
                 result=result,
+            )
+
+        audio_index = direct_assets.get("audio.idx")
+        audio_bag = direct_assets.get("audio.bag")
+        if audio_index and audio_bag:
+            try:
+                self._expand_audio_bag(
+                    source_id,
+                    audio_bag[0],
+                    audio_index[1],
+                    len(audio_bag[1]),
+                    result,
+                )
+            except Ra2ExplorerError as error:
+                result.errors.append(f"{virtual_path}/AUDIO.IDX: {error}")
+
+    @staticmethod
+    def _expand_audio_bag(
+        source_id: str,
+        bag_asset: AssetRecord,
+        index_data: bytes | bytearray | memoryview,
+        bag_size: int,
+        result: ScanResult,
+    ) -> None:
+        index = parse_bag_index(index_data, bag_size=bag_size)
+        source_uuid = uuid.UUID(source_id)
+        for ordinal, entry in enumerate(index.entries):
+            display_name = f"{entry.name}.wav"
+            virtual_path = (
+                f"{bag_asset.virtual_path}::sound:{ordinal:05d}:{display_name}"
+            )
+            asset_id = str(uuid.uuid5(source_uuid, f"asset:{virtual_path.casefold()}"))
+            result.assets.append(
+                AssetRecord(
+                    id=asset_id,
+                    source_id=source_id,
+                    archive_id=bag_asset.archive_id,
+                    ordinal=None,
+                    virtual_path=virtual_path,
+                    name=display_name,
+                    display_name=display_name,
+                    crc=None,
+                    size=entry.size,
+                    format="bag_audio",
+                    extension="wav",
+                    confidence="index",
+                    storage_kind="bag",
+                    loose_relative_path=None,
+                )
+            )
+            result.segments.append(
+                AssetSegmentRecord(
+                    asset_id=asset_id,
+                    container_asset_id=bag_asset.id,
+                    data_offset=entry.offset,
+                    data_size=entry.size,
+                    sample_rate=entry.sample_rate,
+                    channels=entry.channels,
+                    codec=entry.codec,
+                    block_align=entry.block_align,
+                )
             )
 
     @staticmethod
@@ -341,6 +412,14 @@ class AssetReader:
 
     def read(self, asset_id: str) -> tuple[dict[str, object], bytes]:
         asset = self.database.get_asset(asset_id)
+        if asset["storage_kind"] == "bag":
+            segment = self.database.get_asset_segment(asset_id)
+            _, container_data = self.read(str(segment["container_asset_id"]))
+            start = int(segment["data_offset"])
+            end = start + int(segment["data_size"])
+            if start < 0 or end > len(container_data):
+                raise Ra2ExplorerError("AUDIO.BAG 已变化，请重新扫描")
+            return {**asset, **segment}, container_data[start:end]
         source = self.database.get_source(asset["source_id"])
         root = Path(source["root_path"])
         if asset["storage_kind"] == "loose":

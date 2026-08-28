@@ -54,6 +54,109 @@ def wav_for_browser(data: bytes | bytearray | memoryview) -> tuple[bytes, bool]:
     return _decode_ima_adpcm(parsed), True
 
 
+def build_pcm_wav(
+    audio_data: bytes | bytearray | memoryview,
+    *,
+    sample_rate: int,
+    channels: int,
+    bits_per_sample: int = 16,
+) -> bytes:
+    if channels not in {1, 2}:
+        raise InvalidFormatError("WAV: PCM channel count must be one or two")
+    if not 4_000 <= sample_rate <= 192_000:
+        raise InvalidFormatError("WAV: PCM sample rate is outside the supported range")
+    if bits_per_sample not in {8, 16}:
+        raise InvalidFormatError("WAV: only 8-bit and 16-bit PCM are supported")
+    payload = bytes(audio_data)
+    if len(payload) > MAX_PCM_BYTES:
+        raise InvalidFormatError("WAV: PCM data exceeds the 512 MB safety limit")
+    bytes_per_sample = bits_per_sample // 8
+    block_align = channels * bytes_per_sample
+    if len(payload) % block_align:
+        raise InvalidFormatError("WAV: PCM data is not aligned to complete samples")
+    fmt = struct.pack(
+        "<HHIIHH",
+        1,
+        channels,
+        sample_rate,
+        sample_rate * block_align,
+        block_align,
+        bits_per_sample,
+    )
+    return _build_wave(fmt, payload)
+
+
+def build_ima_adpcm_wav(
+    audio_data: bytes | bytearray | memoryview,
+    *,
+    sample_rate: int,
+    channels: int,
+    block_align: int,
+) -> bytes:
+    if channels not in {1, 2}:
+        raise InvalidFormatError("WAV: IMA ADPCM channel count must be one or two")
+    if not 4_000 <= sample_rate <= 192_000:
+        raise InvalidFormatError("WAV: IMA ADPCM sample rate is outside the supported range")
+    header_size = channels * 4
+    if block_align <= header_size or block_align > 65_535:
+        raise InvalidFormatError("WAV: IMA ADPCM block size is invalid")
+    payload = bytes(audio_data)
+    samples_per_block = ((block_align - header_size) * 2 // channels) + 1
+    if samples_per_block <= 1:
+        raise InvalidFormatError("WAV: IMA ADPCM block has no encoded samples")
+    sample_count = _ima_sample_count(payload, channels, block_align)
+    byte_rate = max(1, sample_rate * block_align // samples_per_block)
+    fmt = struct.pack(
+        "<HHIIHHHH",
+        IMA_ADPCM_FORMAT,
+        channels,
+        sample_rate,
+        byte_rate,
+        block_align,
+        4,
+        2,
+        samples_per_block,
+    )
+    fact = struct.pack("<I", sample_count)
+    return _build_wave(fmt, payload, fact=fact)
+
+
+def _build_wave(fmt: bytes, audio_data: bytes, *, fact: bytes | None = None) -> bytes:
+    chunks = [b"fmt " + struct.pack("<I", len(fmt)) + fmt]
+    if fact is not None:
+        chunks.append(b"fact" + struct.pack("<I", len(fact)) + fact)
+    data_chunk = b"data" + struct.pack("<I", len(audio_data)) + audio_data
+    if len(audio_data) & 1:
+        data_chunk += b"\0"
+    chunks.append(data_chunk)
+    body = b"WAVE" + b"".join(chunks)
+    return b"RIFF" + struct.pack("<I", len(body)) + body
+
+
+def _ima_sample_count(audio_data: bytes, channels: int, block_align: int) -> int:
+    header_size = channels * 4
+    frames = 0
+    for block_start in range(0, len(audio_data), block_align):
+        block_size = min(block_align, len(audio_data) - block_start)
+        if block_size < header_size:
+            continue
+        encoded_size = block_size - header_size
+        if channels == 1:
+            frames += 1 + encoded_size * 2
+            continue
+        channel_samples = [1, 1]
+        cursor = 0
+        while cursor < encoded_size:
+            for channel in range(channels):
+                group_size = min(4, encoded_size - cursor)
+                cursor += group_size
+                channel_samples[channel] += group_size * 2
+                if cursor >= encoded_size:
+                    break
+        frames += min(channel_samples)
+    return frames
+
+
 def _parse_wave_chunks(data: bytes | bytearray | memoryview) -> _WaveChunks:
     raw = memoryview(data)
     if len(raw) < 12 or bytes(raw[:4]) != b"RIFF" or bytes(raw[8:12]) != b"WAVE":
@@ -217,4 +320,11 @@ def _decode_ima_adpcm(parsed: _WaveChunks) -> bytes:
     ) + fmt + b"data" + struct.pack("<I", len(pcm)) + bytes(pcm)
 
 
-__all__ = ["IMA_ADPCM_FORMAT", "WaveFile", "parse_wav", "wav_for_browser"]
+__all__ = [
+    "IMA_ADPCM_FORMAT",
+    "WaveFile",
+    "build_ima_adpcm_wav",
+    "build_pcm_wav",
+    "parse_wav",
+    "wav_for_browser",
+]

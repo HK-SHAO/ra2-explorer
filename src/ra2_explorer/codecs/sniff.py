@@ -65,6 +65,10 @@ def sniff_format(data: bytes | bytearray | memoryview, name: str | None = None) 
     sample = bytes(view[:4096])
     if sample.startswith(b"RIFF") and sample[8:12] == b"WAVE":
         return "wav"
+    if sample.startswith(b"GABA"):
+        return "idx"
+    if _looks_like_aud(view):
+        return "aud"
     if len(view) >= 128 and sample[:1] == b"\x0a" and sample[2:3] == b"\x01":
         return "pcx"
     if _looks_like_hva(view):
@@ -87,6 +91,19 @@ def _looks_like_hva(data: memoryview) -> bool:
         return False
     name = bytes(data[:16]).split(b"\0", 1)[0]
     return bool(name) and all(32 <= byte < 127 for byte in name)
+
+
+def _looks_like_aud(data: memoryview) -> bool:
+    if len(data) < 20:
+        return False
+    sample_rate, data_size, output_size, flags, compression = struct.unpack_from(
+        "<HIIBB", data, 0
+    )
+    if not 4_000 <= sample_rate <= 192_000 or data_size != len(data) - 12:
+        return False
+    if not output_size or flags & ~0x03 or compression not in {1, 99}:
+        return False
+    return struct.unpack_from("<I", data, 16)[0] == 0xDEAF
 
 
 def _looks_like_tmp(data: memoryview) -> bool:

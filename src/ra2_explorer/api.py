@@ -14,6 +14,12 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from ra2_explorer import __version__
+from ra2_explorer.codecs.aud import aud_for_browser, parse_aud
+from ra2_explorer.codecs.bag import (
+    BagAudioEntry,
+    bag_audio_for_browser,
+    inspect_bag_audio,
+)
 from ra2_explorer.codecs.csf import parse_csf
 from ra2_explorer.codecs.hva import parse_hva
 from ra2_explorer.codecs.pal import PLAYER_COLOR_PRESETS, grayscale_palette, parse_palette
@@ -216,10 +222,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def asset_content(asset_id: str) -> StreamingResponse:
         asset_record, data = services.reader.read(asset_id)
         safe_name = Path(asset_record["display_name"]).name or "asset.bin"
+        media_type = "application/octet-stream"
+        if asset_record["format"] == "bag_audio":
+            data = bag_audio_for_browser(data, _bag_entry_from_asset(asset_record))
+            media_type = "audio/wav"
         disposition = f"attachment; filename*=UTF-8''{quote(safe_name)}"
         return StreamingResponse(
             io.BytesIO(data),
-            media_type="application/octet-stream",
+            media_type=media_type,
             headers={"Content-Disposition": disposition},
         )
 
@@ -353,12 +363,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/assets/{asset_id}/media")
     def asset_media(asset_id: str) -> Response:
         asset_record, data = services.reader.read(asset_id)
-        if asset_record["format"] != "wav":
+        asset_format = str(asset_record["format"])
+        transcoded = False
+        if asset_format == "wav":
+            playable_data, transcoded = wav_for_browser(data)
+        elif asset_format == "aud":
+            playable_data = aud_for_browser(data)
+            transcoded = True
+        elif asset_format == "bag_audio":
+            playable_data = bag_audio_for_browser(data, _bag_entry_from_asset(asset_record))
+            transcoded = str(asset_record["codec"]) == "ima_adpcm"
+        else:
             raise HTTPException(status_code=409, detail="该格式不能直接在浏览器中播放")
-        playable_data, transcoded = wav_for_browser(data)
         headers = {"Cache-Control": "private, max-age=3600"}
         if transcoded:
-            headers["X-RA2-Transcoded"] = "ima-adpcm-to-pcm16"
+            headers["X-RA2-Transcoded"] = "source-audio-to-pcm"
         return Response(
             content=playable_data,
             media_type="audio/wav",
@@ -420,6 +439,21 @@ def _validated_player_color(player_color: str | None) -> str | None:
     if normalized not in PLAYER_COLOR_PRESETS:
         raise HTTPException(status_code=422, detail="未知阵营颜色")
     return normalized
+
+
+def _bag_entry_from_asset(asset: dict[str, object]) -> BagAudioEntry:
+    channels = int(asset["channels"])
+    codec = str(asset["codec"])
+    flags = 0x04 | (0x01 if channels == 2 else 0)
+    flags |= 0x02 if codec == "pcm16" else 0x08
+    return BagAudioEntry(
+        name=Path(str(asset["display_name"])).stem,
+        offset=int(asset["data_offset"]),
+        size=int(asset["data_size"]),
+        sample_rate=int(asset["sample_rate"]),
+        flags=flags,
+        block_align=int(asset["block_align"]),
+    )
 
 
 def _select_palette(
@@ -613,6 +647,27 @@ def _inspect_asset(asset: dict[str, object], data: bytes) -> dict[str, object]:
             "duration_seconds": audio.duration_seconds,
             "browser_playable": audio.browser_playable,
             "playback_transcodes_to_pcm": audio.audio_format == 17,
+        }
+    if asset_format == "aud":
+        audio = parse_aud(data)
+        return {
+            **base,
+            "audio_format": audio.compression,
+            "audio_codec": audio.codec,
+            "channels": audio.channels,
+            "sample_rate": audio.sample_rate,
+            "bits_per_sample": audio.bits_per_sample,
+            "data_size": audio.data_size,
+            "sample_count": audio.sample_count,
+            "duration_seconds": audio.duration_seconds,
+            "chunk_count": audio.chunk_count,
+            "browser_playable": True,
+            "playback_transcodes_to_pcm": True,
+        }
+    if asset_format == "bag_audio":
+        return {
+            **base,
+            **inspect_bag_audio(data, _bag_entry_from_asset(asset)),
         }
     if asset_format == "pcx":
         from PIL import Image, UnidentifiedImageError

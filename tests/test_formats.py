@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import struct
 
+from ra2_explorer.codecs.aud import aud_for_browser, parse_aud
+from ra2_explorer.codecs.bag import (
+    bag_audio_for_browser,
+    parse_bag_index,
+)
 from ra2_explorer.codecs.csf import parse_csf
 from ra2_explorer.codecs.hva import parse_hva
 from ra2_explorer.codecs.pal import parse_palette
@@ -152,3 +157,62 @@ def test_ima_adpcm_wav_is_transcoded_to_browser_pcm() -> None:
     assert transcoded is True
     assert parse_wav(pcm).audio_format == 1
     assert parse_wav(pcm).data_size == samples_per_block * 2
+
+
+def test_audio_idx_expands_pcm_and_ima_bag_entries() -> None:
+    pcm_entry = struct.pack(
+        "<16sIIIII",
+        b"unitpcm\0",
+        0,
+        8,
+        22_050,
+        0x06,
+        0,
+    )
+    ima_entry = struct.pack(
+        "<16sIIIII",
+        b"unitima\0",
+        8,
+        8,
+        8_000,
+        0x0C,
+        8,
+    )
+    index = parse_bag_index(
+        b"GABA" + struct.pack("<II", 2, 2) + pcm_entry + ima_entry,
+        bag_size=16,
+    )
+
+    assert [entry.name for entry in index.entries] == ["unitpcm", "unitima"]
+    assert index.entries[0].codec == "pcm16"
+    assert index.entries[1].codec == "ima_adpcm"
+    ima_block = struct.pack("<hBB", 0, 0, 0) + bytes((0x11, 0x22, 0x34, 0x87))
+    playable = bag_audio_for_browser(ima_block, index.entries[1])
+    assert parse_wav(playable).audio_format == 1
+    assert parse_wav(playable).data_size == 18
+
+
+def test_aud_decodes_ima_and_westwood_chunks_to_pcm_wav() -> None:
+    ima_payload = bytes((0x11, 0x22, 0x34, 0x87))
+    ima_chunk = struct.pack("<HHI", len(ima_payload), 16, 0xDEAF) + ima_payload
+    ima_aud = struct.pack("<HIIBB", 8_000, len(ima_chunk), 16, 0x02, 99) + ima_chunk
+
+    ima_metadata = parse_aud(ima_aud)
+    ima_wav = aud_for_browser(ima_aud)
+
+    assert ima_metadata.codec == "ima_adpcm"
+    assert ima_metadata.sample_count == 8
+    assert parse_wav(ima_wav).data_size == 16
+
+    westwood_payload = bytes((0x82, 120, 128, 136))
+    westwood_chunk = (
+        struct.pack("<HHI", len(westwood_payload), 3, 0xDEAF) + westwood_payload
+    )
+    westwood_aud = (
+        struct.pack("<HIIBB", 11_025, len(westwood_chunk), 3, 0, 1)
+        + westwood_chunk
+    )
+
+    westwood_wav = aud_for_browser(westwood_aud)
+    assert parse_wav(westwood_wav).bits_per_sample == 8
+    assert parse_wav(westwood_wav).data_size == 3

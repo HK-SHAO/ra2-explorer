@@ -6,6 +6,8 @@ from collections.abc import Callable
 
 from PIL import Image, UnidentifiedImageError
 
+from ra2_explorer.codecs.aud import aud_for_browser, parse_aud
+from ra2_explorer.codecs.bag import BagAudioEntry, bag_audio_for_browser
 from ra2_explorer.codecs.csf import parse_csf
 from ra2_explorer.codecs.hva import parse_hva
 from ra2_explorer.codecs.pal import parse_palette
@@ -29,6 +31,8 @@ VALIDATED_FORMATS = (
     "map",
     "text",
     "wav",
+    "aud",
+    "bag_audio",
     "pcx",
 )
 
@@ -57,7 +61,7 @@ def validate_source(
             checked += 1
             try:
                 current, data = reader.read(str(asset["id"]))
-                _validate_asset(str(current["format"]), data)
+                _validate_asset(str(current["format"]), data, current)
             except (OSError, Ra2ExplorerError, UnidentifiedImageError, ValueError) as error:
                 errors.append(
                     {
@@ -90,7 +94,11 @@ def validate_source(
     }
 
 
-def _validate_asset(asset_format: str, data: bytes) -> None:
+def _validate_asset(
+    asset_format: str,
+    data: bytes,
+    asset: dict[str, object] | None = None,
+) -> None:
     validators: dict[str, Callable[[bytes], object]] = {
         "pal": parse_palette,
         "hva": parse_hva,
@@ -105,6 +113,27 @@ def _validate_asset(asset_format: str, data: bytes) -> None:
         validator(data)
         if asset_format == "wav":
             wav_for_browser(data)
+        return
+    if asset_format == "aud":
+        parse_aud(data)
+        aud_for_browser(data)
+        return
+    if asset_format == "bag_audio":
+        if asset is None:
+            raise ValueError("AUDIO.BAG validation requires segment metadata")
+        channels = int(asset["channels"])
+        codec = str(asset["codec"])
+        flags = 0x04 | (0x01 if channels == 2 else 0)
+        flags |= 0x02 if codec == "pcm16" else 0x08
+        entry = BagAudioEntry(
+            name=str(asset["display_name"]),
+            offset=int(asset["data_offset"]),
+            size=int(asset["data_size"]),
+            sample_rate=int(asset["sample_rate"]),
+            flags=flags,
+            block_align=int(asset["block_align"]),
+        )
+        bag_audio_for_browser(data, entry)
         return
     if asset_format == "shp":
         sprite = parse_shp(data)
