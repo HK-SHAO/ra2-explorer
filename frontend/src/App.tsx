@@ -1710,18 +1710,21 @@ function AudioDownloadAction({ assetId, label }: { assetId: string; label: strin
   return <a className="audio-download-action" href={api.contentUrl(assetId)} download title={`下载 ${label}`} aria-label={`下载 ${label}`}><Icon name="download" size={15} /></a>;
 }
 
-function StablePreviewImage({ src, alt, style, className, draggable = false, onLoad, onError }: {
+function StablePreviewImage({ src, alt, style, className, draggable = false, onBeforeReveal, onLoad, onError }: {
   src: string;
   alt: string;
   style?: CSSProperties;
   className?: string;
   draggable?: boolean;
+  onBeforeReveal?: (image: HTMLImageElement) => void;
   onLoad?: (image: HTMLImageElement) => void;
   onError?: () => void;
 }) {
   const [displayedSrc, setDisplayedSrc] = useState(src);
   const requestedSrc = useRef(src);
+  const onBeforeRevealRef = useRef(onBeforeReveal);
   const onErrorRef = useRef(onError);
+  onBeforeRevealRef.current = onBeforeReveal;
   onErrorRef.current = onError;
 
   useEffect(() => {
@@ -1730,7 +1733,9 @@ function StablePreviewImage({ src, alt, style, className, draggable = false, onL
     let cancelled = false;
     const candidate = new Image();
     const reveal = () => {
-      if (!cancelled && requestedSrc.current === src) setDisplayedSrc(src);
+      if (cancelled || requestedSrc.current !== src) return;
+      onBeforeRevealRef.current?.(candidate);
+      setDisplayedSrc(src);
     };
     candidate.onload = () => {
       if (typeof candidate.decode === "function") void candidate.decode().catch(() => undefined).then(reveal);
@@ -1809,7 +1814,6 @@ function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, b
 
   useEffect(() => {
     reset();
-    setImageFit(null);
   }, [fitKey, fitContent, frameFitIdentity]);
 
   useEffect(() => {
@@ -1909,17 +1913,20 @@ function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, b
   }
 
   useEffect(() => {
-    if (!fitContent || !frameFit) return;
+    if (!fitContent) return;
     const image = viewportRef.current?.querySelector<HTMLImageElement>(".image-viewport-canvas img");
-    if (image?.complete) measureVisibleContent(image);
+    if (
+      image?.complete
+      && image.getAttribute("src") === image.dataset.requestedSrc
+    ) measureVisibleContent(image);
   }, [fitContent, frameFitIdentity]);
 
   const fittedImageStyle = useMemo<CSSProperties | undefined>(() => {
     if (!imageFit || viewportSize.width <= 0 || viewportSize.height <= 0) return undefined;
-    const padding = 27;
+    const padding = Math.max(32, Math.min(viewportSize.width, viewportSize.height) * 0.12);
     const availableWidth = Math.max(1, viewportSize.width - padding * 2);
     const availableHeight = Math.max(1, viewportSize.height - padding * 2);
-    const scale = Math.min(
+    const scale = Math.min(1.75,
       availableWidth / Math.max(1, imageFit.bounds.width),
       availableHeight / Math.max(1, imageFit.bounds.height),
     );
@@ -1934,8 +1941,8 @@ function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, b
 
   function adjustZoom(delta: number) {
     setZoom((current) => {
-      const next = Math.min(6, Math.max(1, Math.round((current + delta) * 10) / 10));
-      if (next === 1) setPan({ x: 0, y: 0 });
+      const next = Math.min(6, Math.max(0.25, Math.round((current + delta) * 100) / 100));
+      if (next <= 1) setPan({ x: 0, y: 0 });
       return next;
     });
   }
@@ -1975,10 +1982,10 @@ function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, b
     <div className="preview-rulers horizontal" />
     <div className="preview-rulers vertical" />
     <div className={`image-viewport-canvas ${activeFittedImageStyle ? "content-fitted" : ""}`} style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
-      <StablePreviewImage src={src} alt={alt} style={activeFittedImageStyle} onLoad={fitContent ? measureVisibleContent : undefined} onError={onError} />
+      <StablePreviewImage src={src} alt={alt} style={activeFittedImageStyle} onBeforeReveal={fitContent ? measureVisibleContent : undefined} onLoad={fitContent ? measureVisibleContent : undefined} onError={onError} />
     </div>
     <div className="image-viewport-tools" onPointerDown={(event) => event.stopPropagation()}>
-      <button type="button" onClick={() => adjustZoom(-0.25)} disabled={zoom <= 1} aria-label="缩小" title="缩小">−</button>
+      <button type="button" onClick={() => adjustZoom(-0.25)} disabled={zoom <= 0.25} aria-label="缩小" title="缩小">−</button>
       <span>{Math.round(zoom * 100)}%</span>
       <button type="button" onClick={() => adjustZoom(0.25)} disabled={zoom >= 6} aria-label="放大" title="放大">＋</button>
       <button type="button" onClick={reset} disabled={zoom === 1 && pan.x === 0 && pan.y === 0}>适应</button>
