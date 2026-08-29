@@ -1,6 +1,6 @@
 ---
 name: must-follow-project-dev-rules
-description: Apply the mandatory ra2-explorer repository development workflow whenever implementing, fixing, refactoring, testing, configuring, documenting, or committing project changes. Enforces focused validation without routine file hashes, stable stage commits, and continuously current documentation; do not use for read-only diagnosis that makes no repository changes.
+description: Apply the mandatory ra2-explorer repository development workflow whenever implementing, fixing, refactoring, testing, configuring, documenting, or committing project changes. Enforces focused validation without routine file hashes, small stable stage commits, and continuously current documentation; do not use for read-only diagnosis that makes no repository changes.
 ---
 
 # ra2-explorer 项目开发强制准则
@@ -59,14 +59,18 @@ description: Apply the mandatory ra2-explorer repository development workflow wh
    应使用临时消息文件配合 `git commit -F`，提交后立即删除临时文件。一个稳定阶段不得长期留在未提交工作区。
 4. 不把无关阶段塞进同一提交；未稳定的阶段不得为了满足形式要求提前提交。
 5. 除非用户明确要求，不 amend、不重写历史、不覆盖他人的提交。
-6. 一次用户任务可能同时包含多个可独立稳定的改动。提交前必须按修改文件、功能边界和内容归属
-   合理划分为一个或多个阶段；每个成熟阶段分别使用一行祈使式 commit message 提交，不得仅因
-   需求是一次性提出就把彼此独立的代码、配置、文档或清理工作合并成一个大提交。
+6. 一次用户任务可能同时包含多个可独立稳定的改动。提交前必须查看 diff 规模，并按用户可见能力、
+   模块边界和内容归属拆成合理的多个小提交；每个提交只表达一个完整、可验证的主目的。不得仅因需求
+   是一次性提出，就把彼此独立的代码、配置、文档或清理工作合并成一个过大的提交；对应某项代码合同
+   的测试和文档应跟随该项代码，不得为了追求文件分类而拆散同一个可运行阶段。
 7. 开发过程中即使会持续收到新需求，已完成且验证通过的边界功能也必须立即提交，不等待整段对话或
    所有后续需求结束。新需求与当前未稳定阶段同属一个功能边界时可一并收敛；若属于无关或新的功能边界，
    先提交已稳定改动，再开始新阶段，避免上下文切换污染已完成工作。
 8. 稳定阶段不是抢救性快照。类型检查、针对性测试或真实主路径验收仍失败时，必须继续收敛当前阶段，
    不得为了快速清空工作区而提交半成品。
+9. 多个阶段提交应尽可能降低相互冲突：先提交依赖较少的规则、数据合同或独立组件，再提交依赖它们的
+   行为；避免多个提交反复改写同一段代码。若两个改动必须共同存在才能编译或运行，应合并为一个内聚
+   提交，而不是制造不可构建的中间历史。
 
 ## 文档与经验同步
 
