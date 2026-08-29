@@ -138,6 +138,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert entity_summaries["DemoVehicle"]["body_format"] == "vxl"
     assert entity_summaries["DemoVehicle"]["usage"] == "buildable"
     assert entity_summaries["DemoInfantry"]["usage"] == "buildable"
+    assert entity_summaries["DemoInfantry"]["display_name"] == "测试步兵"
     assert entity_summaries["DemoVehicle"]["media_count"] > 0
     assert "voice" in entity_summaries["DemoVehicle"]["media_kinds"]
     assert entity_summaries["DemoVehicle"]["countries"] == ["Americans", "Russians"]
@@ -180,6 +181,22 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert client.get(
         "/api/entities",
         params={"source_id": source["id"], "usage": "invalid"},
+    ).status_code == 422
+    simplified_name_search = client.get(
+        "/api/entities",
+        params={"source_id": source["id"], "q": "测试步兵"},
+    )
+    assert [item["id"] for item in simplified_name_search.json()["items"]] == [
+        "DemoInfantry"
+    ]
+    traditional_name_search = client.get(
+        "/api/entities",
+        params={"source_id": source["id"], "q": "測試步兵", "language": "zh-TW"},
+    )
+    assert traditional_name_search.json()["items"][0]["display_name"] == "測試步兵"
+    assert client.get(
+        "/api/entities",
+        params={"source_id": source["id"], "language": "english"},
     ).status_code == 422
 
     semantic_media = client.get(

@@ -124,6 +124,7 @@ export interface DiscoveryResult {
 
 export type EntityKind = "vehicle" | "infantry" | "aircraft" | "building";
 export type EntityUsage = "buildable" | "hero" | "tech" | "civilian" | "scenario";
+export type GameLanguage = "zh-CN" | "zh-TW";
 
 export interface EntitySummary {
   id: string;
@@ -288,6 +289,7 @@ export interface EntityListOptions {
   usage?: EntityUsage | "";
   side?: string;
   renderable?: "" | "true" | "false";
+  language?: GameLanguage;
 }
 
 export interface MediaListOptions {
@@ -298,6 +300,7 @@ export interface MediaListOptions {
   offset?: number;
   limit?: number;
   sort?: MediaSort;
+  language?: GameLanguage;
 }
 
 export interface SemanticDiagnostics {
@@ -392,6 +395,7 @@ export const api = {
     if (options.usage) params.set("usage", options.usage);
     if (options.side) params.set("side", options.side);
     if (options.renderable) params.set("renderable", options.renderable);
+    params.set("language", options.language ?? "zh-CN");
     return request<EntityPage>(`/api/entities?${params}`);
   },
   media: (sourceId: string, options: MediaListOptions = {}) => {
@@ -405,11 +409,12 @@ export const api = {
     if (options.kind) params.set("kind", options.kind);
     if (options.group) params.set("group", options.group);
     if (options.eventType) params.set("event_type", options.eventType);
+    params.set("language", options.language ?? "zh-CN");
     return request<MediaPage>(`/api/media?${params}`);
   },
-  entity: (sourceId: string, entityId: string) =>
+  entity: (sourceId: string, entityId: string, language: GameLanguage = "zh-CN") =>
     request<GameEntity>(
-      `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}`,
+      `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}?language=${encodeURIComponent(language)}`,
     ).then((entity) => ({
       ...entity,
       body_format: entity.body_format ?? entity.components?.find((item) => item.role === "body")?.asset?.format ?? null,
@@ -431,8 +436,8 @@ export const api = {
       },
     })),
   asset: (id: string) => request<Asset>(`/api/assets/${id}`),
-  assetAssociations: (id: string) =>
-    request<AssetAssociationPage>(`/api/assets/${id}/associations`),
+  assetAssociations: (id: string, language: GameLanguage = "zh-CN") =>
+    request<AssetAssociationPage>(`/api/assets/${id}/associations?language=${encodeURIComponent(language)}`),
   stats: (sourceId: string) => request<Stats>(`/api/stats?source_id=${encodeURIComponent(sourceId)}`),
   palettes: (sourceId: string) =>
     request<Asset[]>(`/api/palettes?source_id=${encodeURIComponent(sourceId)}`),

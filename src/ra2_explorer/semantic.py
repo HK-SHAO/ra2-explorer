@@ -25,6 +25,12 @@ from ra2_explorer.codecs.vxl import (
 )
 from ra2_explorer.errors import AssetNotFoundError, InvalidFormatError, Ra2ExplorerError
 from ra2_explorer.library import AssetReader
+from ra2_explorer.localization import (
+    DEFAULT_GAME_LANGUAGE,
+    GameLanguage,
+    localize_game_text,
+    localized_search_match,
+)
 from ra2_explorer.storage import Database
 
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
@@ -224,12 +230,14 @@ class MediaSample:
     animation: AnimationPlayback | None = None
     weight: int = 1
 
-    def as_dict(self) -> dict[str, object]:
+    def as_dict(
+        self, language: GameLanguage = DEFAULT_GAME_LANGUAGE
+    ) -> dict[str, object]:
         return {
             "name": self.name,
-            "text": self.text,
+            "text": localize_game_text(self.text, language),
             "original_text": self.original_text,
-            "localized_text": self.localized_text,
+            "localized_text": localize_game_text(self.localized_text, language),
             "text_label": self.text_label,
             "asset": _asset_summary(self.asset),
             "animation": self.animation.as_dict() if self.animation else None,
@@ -245,13 +253,15 @@ class MediaAssociation:
     source: str
     samples: tuple[MediaSample, ...]
 
-    def as_dict(self) -> dict[str, object]:
+    def as_dict(
+        self, language: GameLanguage = DEFAULT_GAME_LANGUAGE
+    ) -> dict[str, object]:
         return {
             "kind": self.kind,
             "slot": self.slot,
             "event": self.event,
             "source": self.source,
-            "samples": [sample.as_dict() for sample in self.samples],
+            "samples": [sample.as_dict(language) for sample in self.samples],
         }
 
 
@@ -284,13 +294,15 @@ class GameEntity:
             None,
         )
 
-    def summary(self) -> dict[str, object]:
+    def summary(
+        self, language: GameLanguage = DEFAULT_GAME_LANGUAGE
+    ) -> dict[str, object]:
         body = self.component("body")
         return {
             "id": self.id,
             "kind": self.kind,
             "usage": self.usage,
-            "display_name": self.display_name,
+            "display_name": localize_game_text(self.display_name, language),
             "internal_name": self.internal_name,
             "ui_name": self.ui_name,
             "image": self.image,
@@ -308,14 +320,16 @@ class GameEntity:
             "primary": self.rules.get("primary"),
         }
 
-    def as_dict(self) -> dict[str, object]:
+    def as_dict(
+        self, language: GameLanguage = DEFAULT_GAME_LANGUAGE
+    ) -> dict[str, object]:
         return {
-            **self.summary(),
+            **self.summary(language),
             "rules": self.rules,
             "art": self.art,
             "components": [component.as_dict() for component in self.components],
             "dependencies": [dependency.as_dict() for dependency in self.dependencies],
-            "media": [association.as_dict() for association in self.media],
+            "media": [association.as_dict(language) for association in self.media],
         }
 
 
@@ -375,6 +389,7 @@ class SemanticLibrary:
         usage: str | None = None,
         side: str | None = None,
         renderable: bool | None = None,
+        language: GameLanguage = DEFAULT_GAME_LANGUAGE,
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, object]:
@@ -386,8 +401,11 @@ class SemanticLibrary:
         if kind:
             entities = [entity for entity in entities if entity.kind == kind]
         if query:
-            needle = query.casefold()
-            entities = [entity for entity in entities if needle in _entity_search_text(entity)]
+            entities = [
+                entity
+                for entity in entities
+                if localized_search_match(query, _entity_search_text(entity))
+            ]
         usage_counts = Counter(entity.usage for entity in entities)
         if usage:
             entities = [entity for entity in entities if entity.usage == usage]
@@ -403,7 +421,7 @@ class SemanticLibrary:
         total = len(entities)
         selected = entities[offset : offset + limit]
         return {
-            "items": [entity.summary() for entity in selected],
+            "items": [entity.summary(language) for entity in selected],
             "total": total,
             "kinds": [
                 {"kind": entity_kind, "count": counts.get(entity_kind, 0)}
@@ -415,7 +433,11 @@ class SemanticLibrary:
                 if usage_counts.get(entity_usage, 0)
             ],
             "countries": [
-                {**country, "count": country_counts.get(country["id"], 0)}
+                {
+                    **country,
+                    "display_name": localize_game_text(country["display_name"], language),
+                    "count": country_counts.get(country["id"], 0),
+                }
                 for country in catalog.countries
                 if country_counts.get(country["id"], 0)
             ],
@@ -436,6 +458,7 @@ class SemanticLibrary:
         group: str | None = None,
         event_type: str | None = None,
         sort: str = "name_asc",
+        language: GameLanguage = DEFAULT_GAME_LANGUAGE,
         limit: int = 500,
         offset: int = 0,
     ) -> dict[str, object]:
@@ -453,8 +476,11 @@ class SemanticLibrary:
         if group:
             items = [item for item in items if group in item["groups"]]  # type: ignore[operator]
         if query:
-            needle = query.casefold()
-            items = [item for item in items if needle in _media_search_text(item)]
+            items = [
+                item
+                for item in items
+                if localized_search_match(query, _media_search_text(item))
+            ]
         event_type_counts = Counter(
             str(slot)
             for item in items
@@ -477,7 +503,10 @@ class SemanticLibrary:
             )
         total = len(items)
         return {
-            "items": items[offset : offset + limit],
+            "items": [
+                _localized_media_item(item, language)
+                for item in items[offset : offset + limit]
+            ],
             "total": total,
             "kinds": [
                 {"kind": media_kind, "count": kind_counts.get(media_kind, 0)}
@@ -493,11 +522,21 @@ class SemanticLibrary:
             ],
         }
 
-    def get_entity(self, source_id: str, entity_id: str) -> dict[str, object]:
+    def get_entity(
+        self,
+        source_id: str,
+        entity_id: str,
+        language: GameLanguage = DEFAULT_GAME_LANGUAGE,
+    ) -> dict[str, object]:
         entity = self.catalog(source_id).get(entity_id)
-        return {**entity.as_dict(), "preview": self._preview_info(entity)}
+        return {**entity.as_dict(language), "preview": self._preview_info(entity)}
 
-    def asset_associations(self, source_id: str, asset_id: str) -> dict[str, object]:
+    def asset_associations(
+        self,
+        source_id: str,
+        asset_id: str,
+        language: GameLanguage = DEFAULT_GAME_LANGUAGE,
+    ) -> dict[str, object]:
         catalog = self.catalog(source_id)
         items: list[dict[str, object]] = []
         seen: set[tuple[str, ...]] = set()
@@ -516,7 +555,7 @@ class SemanticLibrary:
                             "kind": "component",
                             "slot": component.role,
                             "event": component.expected_name,
-                            "entity": entity.summary(),
+                            "entity": entity.summary(language),
                             "text": None,
                             "original_text": None,
                             "localized_text": None,
@@ -532,10 +571,12 @@ class SemanticLibrary:
                                 "kind": association.kind,
                                 "slot": association.slot,
                                 "event": association.event,
-                                "entity": entity.summary(),
-                                "text": sample.text,
-                                "original_text": sample.original_text,
-                                "localized_text": sample.localized_text,
+                            "entity": entity.summary(language),
+                            "text": localize_game_text(sample.text, language),
+                            "original_text": sample.original_text,
+                            "localized_text": localize_game_text(
+                                sample.localized_text, language
+                            ),
                             },
                             (
                                 "entity",
@@ -556,9 +597,11 @@ class SemanticLibrary:
                             "slot": association.slot,
                             "event": association.event,
                             "entity": None,
-                            "text": sample.text,
+                            "text": localize_game_text(sample.text, language),
                             "original_text": sample.original_text,
-                            "localized_text": sample.localized_text,
+                            "localized_text": localize_game_text(
+                                sample.localized_text, language
+                            ),
                         },
                         (
                             "event",
@@ -579,9 +622,11 @@ class SemanticLibrary:
                             "slot": "sound_event",
                             "event": event,
                             "entity": None,
-                            "text": sample.text,
+                            "text": localize_game_text(sample.text, language),
                             "original_text": sample.original_text,
-                            "localized_text": sample.localized_text,
+                            "localized_text": localize_game_text(
+                                sample.localized_text, language
+                            ),
                         },
                         (media_kind, event.casefold(), sample.name.casefold()),
                     )
@@ -1947,6 +1992,36 @@ def _media_search_text(item: dict[str, object]) -> str:
             ),
         )
     ).casefold()
+
+
+def _localized_media_item(
+    item: dict[str, object], language: GameLanguage
+) -> dict[str, object]:
+    entities = item["entities"]
+    return {
+        **item,
+        "description": localize_game_text(
+            str(item["description"]) if item.get("description") is not None else None,
+            language,
+        ),
+        "texts": [
+            localize_game_text(str(value), language)
+            for value in item["texts"]  # type: ignore[union-attr]
+        ],
+        "localized_texts": [
+            localize_game_text(str(value), language)
+            for value in item["localized_texts"]  # type: ignore[union-attr]
+        ],
+        "entities": [
+            {
+                **entity,
+                "display_name": localize_game_text(
+                    str(entity["display_name"]), language
+                ),
+            }
+            for entity in entities  # type: ignore[union-attr]
+        ],
+    }
 
 
 def _media_kind_for_asset(

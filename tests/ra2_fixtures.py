@@ -170,7 +170,7 @@ def _build_fixture_csf() -> bytes:
         ("VOX:ExplorerReady", "Asset pipeline ready.", "explorer-ready"),
         ("VOX:fixture_event", "Ready for the test.", "fixture"),
         ("UNIT:DemoVehicle", "Generated test vehicle", None),
-        ("UNIT:DemoInfantry", "Generated test infantry", None),
+        ("UNIT:DemoInfantry", "測試步兵", None),
         ("Name:Americans", "United States", None),
         ("Name:Russians", "Russia", None),
     )

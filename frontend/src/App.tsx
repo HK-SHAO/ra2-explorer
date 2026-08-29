@@ -27,6 +27,7 @@ import {
   EntitySummary,
   EntityUsage,
   GameEntity,
+  GameLanguage,
   GameInstallation,
   MediaAssociation,
   MediaItem,
@@ -503,13 +504,13 @@ function useRememberedScroll<T extends HTMLElement = HTMLDivElement>(key: string
   return { ref, remember };
 }
 
-function sortEntities(entities: EntitySummary[], sort: EntitySort) {
+function sortEntities(entities: EntitySummary[], sort: EntitySort, language: GameLanguage) {
   const selected = [...entities];
   const numeric = (value: string | null) => Number.parseInt(value || "0", 10) || 0;
   selected.sort((left, right) => {
-    if (sort === "cost_desc") return numeric(right.cost) - numeric(left.cost) || left.display_name.localeCompare(right.display_name, "zh-CN");
-    if (sort === "strength_desc") return numeric(right.strength) - numeric(left.strength) || left.display_name.localeCompare(right.display_name, "zh-CN");
-    const compared = left.display_name.localeCompare(right.display_name, "zh-CN", { numeric: true });
+    if (sort === "cost_desc") return numeric(right.cost) - numeric(left.cost) || left.display_name.localeCompare(right.display_name, language);
+    if (sort === "strength_desc") return numeric(right.strength) - numeric(left.strength) || left.display_name.localeCompare(right.display_name, language);
+    const compared = left.display_name.localeCompare(right.display_name, language, { numeric: true });
     return sort === "name_desc" ? -compared : compared;
   });
   return selected;
@@ -523,6 +524,12 @@ function initialVisibleFormats() {
     // Ignore invalid local preferences and use the product defaults.
   }
   return defaultVisibleFormats;
+}
+
+function storedGameLanguage(): GameLanguage {
+  return window.localStorage.getItem("ra2exp-game-language-v1") === "zh-TW"
+    ? "zh-TW"
+    : "zh-CN";
 }
 
 function categoryCount(stats: Stats, formats: string[]) {
@@ -561,6 +568,7 @@ function ExplorerApp() {
   const [detailPlacement, setDetailPlacement] = useState<DetailPlacement>(() =>
     window.localStorage.getItem("ra2exp-detail-placement") === "right" ? "right" : "bottom",
   );
+  const [gameLanguage, setGameLanguage] = useState<GameLanguage>(storedGameLanguage);
   const [entities, setEntities] = useState<EntitySummary[]>([]);
   const [entityTotal, setEntityTotal] = useState(0);
   const [entityKinds, setEntityKinds] = useState<Array<{ kind: EntityKind; count: number }>>([]);
@@ -658,8 +666,8 @@ function ExplorerApp() {
     });
   }, [entitySides, entitySide]);
   const visibleEntities = useMemo(
-    () => sortEntities(entities, entitySort),
-    [entities, entitySort],
+    () => sortEntities(entities, entitySort, gameLanguage),
+    [entities, entitySort, gameLanguage],
   );
   const compactAudioDetail = view === "assets" && isMediaCategory;
   const detailSize = detailPlacement === "bottom"
@@ -682,6 +690,11 @@ function ExplorerApp() {
   function updateDetailPlacement(next: DetailPlacement) {
     setDetailPlacement(next);
     window.localStorage.setItem("ra2exp-detail-placement", next);
+  }
+
+  function updateGameLanguage(next: GameLanguage) {
+    setGameLanguage(next);
+    window.localStorage.setItem("ra2exp-game-language-v1", next);
   }
 
   function updateSidebarCollapsed(next: boolean) {
@@ -878,7 +891,7 @@ function ExplorerApp() {
     Promise.all([
       api.stats(sourceId),
       api.palettes(sourceId),
-      api.media(sourceId, { kind: "voice", limit: 1 }),
+      api.media(sourceId, { kind: "voice", limit: 1, language: gameLanguage }),
     ])
       .then(([nextStats, nextPalettes, mediaFacets]) => {
         if (cancelled) return;
@@ -889,7 +902,7 @@ function ExplorerApp() {
       })
       .catch((reason: Error) => !cancelled && setError(reason.message));
     return () => { cancelled = true; };
-  }, [sourceId, sourceRevision]);
+  }, [sourceId, sourceRevision, gameLanguage]);
 
   useEffect(() => {
     if (!sourceId || view !== "assets" || isMediaCategory) return;
@@ -945,6 +958,7 @@ function ExplorerApp() {
         offset: 0,
         limit: 500,
         sort: mediaSort,
+        language: gameLanguage,
       })
         .then((page) => {
           if (cancelled) return;
@@ -964,7 +978,7 @@ function ExplorerApp() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [sourceId, sourceRevision, assetQuery, mediaKind, mediaGroup, mediaEventType, mediaSort, view, isMediaCategory]);
+  }, [sourceId, sourceRevision, assetQuery, mediaKind, mediaGroup, mediaEventType, mediaSort, gameLanguage, view, isMediaCategory]);
 
   useEffect(() => {
     if (!sourceId || view !== "entities") return;
@@ -977,6 +991,7 @@ function ExplorerApp() {
         kind: entityKind,
         usage: entityUsage,
         side: entitySide,
+        language: gameLanguage,
       })
         .then((page) => {
           if (cancelled) return;
@@ -998,7 +1013,7 @@ function ExplorerApp() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [sourceId, sourceRevision, entityQuery, entityKind, entityUsage, entitySide, view]);
+  }, [sourceId, sourceRevision, entityQuery, entityKind, entityUsage, entitySide, gameLanguage, view]);
 
   useEffect(() => {
     if (!sourceId || !selectedEntityId || view !== "entities") {
@@ -1008,7 +1023,7 @@ function ExplorerApp() {
     }
     let cancelled = false;
     setEntityDetailLoading(true);
-    api.entity(sourceId, selectedEntityId)
+    api.entity(sourceId, selectedEntityId, gameLanguage)
       .then((entity) => !cancelled && setSelectedEntity(entity))
       .catch((reason: Error) => {
         if (cancelled) return;
@@ -1017,7 +1032,7 @@ function ExplorerApp() {
       })
       .finally(() => !cancelled && setEntityDetailLoading(false));
     return () => { cancelled = true; };
-  }, [sourceId, sourceRevision, selectedEntityId, view]);
+  }, [sourceId, sourceRevision, selectedEntityId, gameLanguage, view]);
 
   useEffect(() => {
     setFrame(0);
@@ -1047,11 +1062,11 @@ function ExplorerApp() {
       return;
     }
     let cancelled = false;
-    api.assetAssociations(selected.id)
+    api.assetAssociations(selected.id, gameLanguage)
       .then((result) => !cancelled && setAssociations(result))
       .catch(() => undefined);
     return () => { cancelled = true; };
-  }, [selected]);
+  }, [selected, gameLanguage]);
 
   useEffect(() => {
     if (!playing || !selected || !["shp", "hva"].includes(selected.format) || !metadata?.frame_count || metadata.frame_count < 2) return;
@@ -1134,6 +1149,7 @@ function ExplorerApp() {
         offset: mediaItems.length,
         limit: 500,
         sort: mediaSort,
+        language: gameLanguage,
       });
       setMediaItems((current) => {
         const known = new Set(current.map((item) => item.asset.id));
@@ -1337,7 +1353,7 @@ function ExplorerApp() {
       )}
 
       {addOpen && <AddSourceDialog discoveries={discovery.candidates} busy={busy} onClose={() => setAddOpen(false)} onSubmit={async (path, name) => { await runAction(() => api.addSource(path, name), "资源目录已导入"); setAddOpen(false); }} />}
-      {settingsOpen && <FormatSettingsDialog formats={stats.formats} enabled={enabledFormats} onChange={updateEnabledFormats} detailPlacement={detailPlacement} onDetailPlacementChange={updateDetailPlacement} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <FormatSettingsDialog formats={stats.formats} enabled={enabledFormats} onChange={updateEnabledFormats} detailPlacement={detailPlacement} onDetailPlacementChange={updateDetailPlacement} gameLanguage={gameLanguage} onGameLanguageChange={updateGameLanguage} onClose={() => setSettingsOpen(false)} />}
       {error && <div className="toast error" role="alert"><Icon name="info" /><span>{error}</span><button onClick={() => setError("")} aria-label="关闭"><Icon name="close" size={15} /></button></div>}
       {notice && <div className="toast success" role="status"><span className="check">✓</span><span>{notice}</span></div>}
     </div>
@@ -2514,12 +2530,14 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   );
 }
 
-function FormatSettingsDialog({ formats, enabled, onChange, detailPlacement, onDetailPlacementChange, onClose }: {
+function FormatSettingsDialog({ formats, enabled, onChange, detailPlacement, onDetailPlacementChange, gameLanguage, onGameLanguageChange, onClose }: {
   formats: Stats["formats"];
   enabled: string[];
   onChange: (formats: string[]) => void;
   detailPlacement: DetailPlacement;
   onDetailPlacementChange: (placement: DetailPlacement) => void;
+  gameLanguage: GameLanguage;
+  onGameLanguageChange: (language: GameLanguage) => void;
   onClose: () => void;
 }) {
   const enabledSet = new Set(enabled);
@@ -2538,13 +2556,22 @@ function FormatSettingsDialog({ formats, enabled, onChange, detailPlacement, onD
     <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="dialog format-settings" role="dialog" aria-modal="true" aria-labelledby="format-settings-title">
         <div className="dialog-header"><div className="dialog-icon"><Icon name="settings" /></div><div><h2 id="format-settings-title">显示设置</h2></div><button type="button" onClick={onClose} aria-label="关闭"><Icon name="close" /></button></div>
-        <section className="detail-placement-setting">
-          <strong>详情布局</strong>
-          <div className="layout-choice" role="group" aria-label="详情区域布局">
-            <button type="button" className={detailPlacement === "bottom" ? "active" : ""} onClick={() => onDetailPlacementChange("bottom")}>上下</button>
-            <button type="button" className={detailPlacement === "right" ? "active" : ""} onClick={() => onDetailPlacementChange("right")}>左右</button>
-          </div>
-        </section>
+        <div className="display-settings">
+          <section className="display-setting-row">
+            <strong>详情布局</strong>
+            <div className="layout-choice" role="group" aria-label="详情区域布局">
+              <button type="button" className={detailPlacement === "bottom" ? "active" : ""} onClick={() => onDetailPlacementChange("bottom")}>上下</button>
+              <button type="button" className={detailPlacement === "right" ? "active" : ""} onClick={() => onDetailPlacementChange("right")}>左右</button>
+            </div>
+          </section>
+          <section className="display-setting-row">
+            <strong>游戏文本</strong>
+            <div className="layout-choice" role="group" aria-label="游戏文本语言">
+              <button type="button" className={gameLanguage === "zh-CN" ? "active" : ""} onClick={() => onGameLanguageChange("zh-CN")}>简体中文</button>
+              <button type="button" className={gameLanguage === "zh-TW" ? "active" : ""} onClick={() => onGameLanguageChange("zh-TW")}>繁體中文</button>
+            </div>
+          </section>
+        </div>
         <div className="format-settings-actions">
           <button type="button" onClick={() => onChange(available.filter((item) => defaultVisibleFormats.includes(item)))}>常用素材</button>
           <button type="button" onClick={() => onChange(available)}>全部启用</button>
@@ -2586,22 +2613,24 @@ function AddSourceDialog({ discoveries, busy, onClose, onSubmit }: { discoveries
 }
 
 function DetachedEntityDetail({ sourceId, entityId }: { sourceId: string; entityId: string }) {
+  const [gameLanguage] = useState<GameLanguage>(storedGameLanguage);
   const [entity, setEntity] = useState<GameEntity | null>(null);
   const [colors, setColors] = useState<PlayerColor[]>([]);
   const [error, setError] = useState("");
   useEffect(() => {
-    Promise.all([api.entity(sourceId, entityId), api.playerColors()])
+    Promise.all([api.entity(sourceId, entityId, gameLanguage), api.playerColors()])
       .then(([nextEntity, nextColors]) => {
         setEntity(nextEntity);
         setColors(nextColors);
         document.title = `${nextEntity.display_name} · RA2 Explorer`;
       })
       .catch((reason: Error) => setError(reason.message));
-  }, [sourceId, entityId]);
+  }, [sourceId, entityId, gameLanguage]);
   return <main className="detached-shell">{error ? <div className="detached-error">{error}</div> : <EntityDetailPanel sourceId={sourceId} entity={entity} loading={!entity} playerColors={colors} wide scrollKey={`detached-entity:${sourceId}:${entityId}`} />}</main>;
 }
 
 function DetachedAssetDetail({ assetId }: { assetId: string }) {
+  const [gameLanguage] = useState<GameLanguage>(storedGameLanguage);
   const [asset, setAsset] = useState<Asset | null>(null);
   const [metadata, setMetadata] = useState<AssetMetadata | null>(null);
   const [associations, setAssociations] = useState<AssetAssociationPage | null>(null);
@@ -2618,7 +2647,7 @@ function DetachedAssetDetail({ assetId }: { assetId: string }) {
       .then(async (nextAsset) => {
         const [nextMetadata, nextAssociations, nextPalettes, nextColors] = await Promise.all([
           api.metadata(assetId),
-          api.assetAssociations(assetId).catch(() => null),
+          api.assetAssociations(assetId, gameLanguage).catch(() => null),
           api.palettes(nextAsset.source_id),
           api.playerColors(),
         ]);
@@ -2630,7 +2659,7 @@ function DetachedAssetDetail({ assetId }: { assetId: string }) {
         document.title = `${nextAsset.display_name} · RA2 Explorer`;
       })
       .catch((reason: Error) => setError(reason.message));
-  }, [assetId]);
+  }, [assetId, gameLanguage]);
   useEffect(() => {
     if (!asset || !["ini", "map", "text", "csf"].includes(asset.format)) return;
     const timer = window.setTimeout(() => api.text(asset.id, textQuery).then(setTextAsset).catch(() => undefined), textQuery ? 180 : 0);

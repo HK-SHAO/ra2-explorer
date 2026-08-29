@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 authors = [{ name = "ra2-explorer contributors" }]
 dependencies = [
   "fastapi>=0.116,<1",
+  "opencc>=1.4.2,<2",
   "pillow>=11.3,<13",
   "pycryptodome>=3.23,<4",
   "uvicorn>=0.35,<1",

@@ -42,6 +42,7 @@ from ra2_explorer.derived import DerivedStore
 from ra2_explorer.discovery import discover_installations
 from ra2_explorer.errors import AssetNotFoundError, InvalidFormatError, Ra2ExplorerError
 from ra2_explorer.library import AssetReader, SourceLibrary
+from ra2_explorer.localization import DEFAULT_GAME_LANGUAGE, GameLanguage
 from ra2_explorer.reference_data import (
     load_audio_transcript,
     load_known_names,
@@ -201,10 +202,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return services.database.get_asset(asset_id)
 
     @app.get("/api/assets/{asset_id}/associations")
-    def asset_associations(asset_id: str) -> dict[str, object]:
+    def asset_associations(
+        asset_id: str,
+        language: GameLanguage = DEFAULT_GAME_LANGUAGE,
+    ) -> dict[str, object]:
         asset_record = services.database.get_asset(asset_id)
         return services.semantic.asset_associations(
-            str(asset_record["source_id"]), asset_id
+            str(asset_record["source_id"]), asset_id, language
         )
 
     @app.get("/api/entities")
@@ -215,6 +219,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         usage: str | None = Query(default=None, max_length=32),
         side: str | None = Query(default=None, max_length=64),
         renderable: bool | None = Query(default=None),
+        language: GameLanguage = DEFAULT_GAME_LANGUAGE,
         limit: int = Query(default=100, ge=1, le=1_000),
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, object]:
@@ -229,6 +234,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             usage=usage,
             side=side,
             renderable=renderable,
+            language=language,
             limit=limit,
             offset=offset,
         )
@@ -241,6 +247,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         group: str | None = Query(default=None, max_length=64),
         event_type: str | None = Query(default=None, max_length=64),
         sort: str = Query(default="name_asc", max_length=24),
+        language: GameLanguage = DEFAULT_GAME_LANGUAGE,
         limit: int = Query(default=500, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, object]:
@@ -255,6 +262,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             group=group,
             event_type=event_type,
             sort=sort,
+            language=language,
             limit=limit,
             offset=offset,
         )
@@ -267,8 +275,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return services.semantic.diagnostics(source_id, limit=limit)
 
     @app.get("/api/entities/{source_id}/{entity_id}")
-    def entity(source_id: str, entity_id: str) -> dict[str, object]:
-        return services.semantic.get_entity(source_id, entity_id)
+    def entity(
+        source_id: str,
+        entity_id: str,
+        language: GameLanguage = DEFAULT_GAME_LANGUAGE,
+    ) -> dict[str, object]:
+        return services.semantic.get_entity(source_id, entity_id, language)
 
     @app.get("/api/entities/{source_id}/{entity_id}/preview.png")
     def entity_preview(
