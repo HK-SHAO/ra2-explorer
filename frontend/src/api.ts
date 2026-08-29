@@ -469,7 +469,7 @@ export const api = {
       frame: String(options.frame ?? 0),
       facing: String(options.facing ?? 0),
       scale: String(options.scale ?? 4),
-      v: "6",
+      v: "7",
     });
     if (options.playerColor) params.set("player_color", options.playerColor);
     if (options.paletteId) params.set("palette_id", options.paletteId);

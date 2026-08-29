@@ -29,19 +29,22 @@ interface ViewerEngine {
   render: (() => void) | null;
 }
 
-export function VoxelViewer({ url, label, viewKey, onFacingChange }: {
+export function VoxelViewer({ url, label, viewKey, onFacingChange, onLoadSettled }: {
   url: string;
   label: string;
   viewKey: string;
   onFacingChange?: (facing: number) => void;
+  onLoadSettled?: () => void;
 }) {
   const mountRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<ViewerEngine | null>(null);
   const onFacingChangeRef = useRef(onFacingChange);
+  const onLoadSettledRef = useRef(onLoadSettled);
   const [loadedScene, setLoadedScene] = useState<{ data: VoxelSceneData; viewKey: string } | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   onFacingChangeRef.current = onFacingChange;
+  onLoadSettledRef.current = onLoadSettled;
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -185,65 +188,74 @@ export function VoxelViewer({ url, label, viewKey, onFacingChange }: {
           throw new Error("模型数据版本不受支持");
         }
         setLoadedScene({ data: scene, viewKey });
-        setLoading(false);
       })
       .catch((reason: unknown) => {
         if (controller.signal.aborted) return;
         setLoadedScene(null);
         setLoading(false);
         setError(reason instanceof Error ? reason.message : "模型加载失败");
+        onLoadSettledRef.current?.();
       });
     return () => controller.abort();
   }, [url, viewKey]);
 
   useEffect(() => {
     const engine = engineRef.current;
-    if (!engine || !loadedScene) return;
+    if (!loadedScene) return;
+    if (!engine) {
+      setLoading(false);
+      onLoadSettledRef.current?.();
+      return;
+    }
     const { data, viewKey: loadedViewKey } = loadedScene;
     const preserveView = engine.viewKey === loadedViewKey && engine.fitBounds !== null;
     const preservedBounds = preserveView ? engine.fitBounds?.clone() || null : null;
     disposeModel(engine);
 
-    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const geometry = data.lighting === "westwood_vpl"
+      ? unlitVoxelGeometry()
+      : new THREE.BoxGeometry(1, 1, 1);
     const material = data.lighting === "westwood_vpl"
       ? new THREE.MeshBasicMaterial({ color: 0xffffff })
       : new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
     const model = new THREE.InstancedMesh(geometry, material, data.voxels.length);
     model.instanceMatrix.setUsage(THREE.StaticDrawUsage);
-    const transform = new THREE.Object3D();
+    const matrices = model.instanceMatrix.array as Float32Array;
+    const colors = new Float32Array(data.voxels.length * 3);
     const color = new THREE.Color();
-    const box = new THREE.Box3().makeEmpty();
-    const voxelMinimum = new THREE.Vector3();
-    const voxelMaximum = new THREE.Vector3();
+    const colorCache = new Map<number, readonly [number, number, number]>();
     data.voxels.forEach((voxel, index) => {
       const [x, y, z, size, red, green, blue] = voxel;
       const safeSize = Math.max(0.000_001, size);
-      const halfSize = safeSize / 2;
-      transform.position.set(x, z, y);
-      transform.scale.setScalar(safeSize);
-      transform.updateMatrix();
-      model.setMatrixAt(index, transform.matrix);
-      color.setRGB(red / 255, green / 255, blue / 255, THREE.SRGBColorSpace);
-      model.setColorAt(index, color);
-      voxelMinimum.set(x - halfSize, z - halfSize, y - halfSize);
-      voxelMaximum.set(x + halfSize, z + halfSize, y + halfSize);
-      box.expandByPoint(voxelMinimum);
-      box.expandByPoint(voxelMaximum);
+      const matrixOffset = index * 16;
+      matrices[matrixOffset] = safeSize;
+      matrices[matrixOffset + 5] = safeSize;
+      matrices[matrixOffset + 10] = safeSize;
+      matrices[matrixOffset + 12] = x;
+      matrices[matrixOffset + 13] = z;
+      matrices[matrixOffset + 14] = y;
+      matrices[matrixOffset + 15] = 1;
+
+      const colorKey = (red << 16) | (green << 8) | blue;
+      let linear = colorCache.get(colorKey);
+      if (!linear) {
+        color.setRGB(red / 255, green / 255, blue / 255, THREE.SRGBColorSpace);
+        linear = [color.r, color.g, color.b];
+        colorCache.set(colorKey, linear);
+      }
+      const colorOffset = index * 3;
+      colors[colorOffset] = linear[0];
+      colors[colorOffset + 1] = linear[1];
+      colors[colorOffset + 2] = linear[2];
     });
     model.instanceMatrix.needsUpdate = true;
-    if (model.instanceColor) model.instanceColor.needsUpdate = true;
-    model.computeBoundingSphere();
+    model.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
+    model.instanceColor.needsUpdate = true;
+    const box = sceneBounds(data.bounds);
+    model.boundingBox = box.clone();
+    model.boundingSphere = box.getBoundingSphere(new THREE.Sphere());
     engine.scene.add(model);
     engine.model = model;
-
-    if (box.isEmpty()) {
-      const minimum = data.bounds.min;
-      const maximum = data.bounds.max;
-      box.set(
-        new THREE.Vector3(minimum[0], minimum[2], minimum[1]),
-        new THREE.Vector3(maximum[0], maximum[2], maximum[1]),
-      );
-    }
     engine.fitBounds = preservedBounds || box.clone();
     engine.viewKey = loadedViewKey;
     const center = engine.fitBounds.getCenter(new THREE.Vector3());
@@ -271,9 +283,8 @@ export function VoxelViewer({ url, label, viewKey, onFacingChange }: {
       engine.camera.updateMatrixWorld(true);
       engine.camera.zoom = 1;
       engine.controls.target.copy(center);
-      engine.controls.update();
       engine.updateProjection?.();
-      engine.render?.();
+      if (!engine.controls.update()) engine.render?.();
     };
     engine.resetView = resetView;
     if (preserveView) {
@@ -282,6 +293,8 @@ export function VoxelViewer({ url, label, viewKey, onFacingChange }: {
     } else {
       resetView();
     }
+    setLoading(false);
+    onLoadSettledRef.current?.();
   }, [loadedScene]);
 
   return (
@@ -295,6 +308,40 @@ export function VoxelViewer({ url, label, viewKey, onFacingChange }: {
       {loading && <div className="voxel-status">正在载入模型…</div>}
       {error && <div className="voxel-status error">{error}</div>}
     </div>
+  );
+}
+
+function unlitVoxelGeometry() {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute([
+    -0.5, -0.5, -0.5,
+    0.5, -0.5, -0.5,
+    0.5, 0.5, -0.5,
+    -0.5, 0.5, -0.5,
+    -0.5, -0.5, 0.5,
+    0.5, -0.5, 0.5,
+    0.5, 0.5, 0.5,
+    -0.5, 0.5, 0.5,
+  ], 3));
+  geometry.setIndex([
+    0, 2, 1, 0, 3, 2,
+    4, 5, 6, 4, 6, 7,
+    0, 1, 5, 0, 5, 4,
+    3, 7, 6, 3, 6, 2,
+    1, 2, 6, 1, 6, 5,
+    0, 4, 7, 0, 7, 3,
+  ]);
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function sceneBounds(bounds: VoxelSceneData["bounds"]) {
+  const minimum = bounds.min;
+  const maximum = bounds.max;
+  return new THREE.Box3(
+    new THREE.Vector3(minimum[0], minimum[2], minimum[1]),
+    new THREE.Vector3(maximum[0], maximum[2], maximum[1]),
   );
 }
 

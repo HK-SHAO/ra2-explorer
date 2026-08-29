@@ -304,7 +304,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "previews",
             source_id,
             entity_id,
-            "renderer-vpl-techno-body-v2",
+            "renderer-vpl-techno-body-v3",
             f"frame-{frame}",
             f"facing-{facing}",
             f"color-{player_color or 'original'}",
@@ -330,7 +330,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             scale=scale,
         )
         if thumbnail:
-            image = _crop_transparent_preview(image)
+            image = _crop_transparent_preview(
+                image,
+                padding_ratio=0.26 if semantic_entity.kind == "infantry" else 0.08,
+            )
         output = io.BytesIO()
         image.save(output, format="PNG")
         rendered = output.getvalue()
@@ -786,14 +789,14 @@ def _source_artifact_path(
     )
 
 
-def _crop_transparent_preview(image):
+def _crop_transparent_preview(image, *, padding_ratio: float = 0.08):
     if "A" not in image.getbands():
         return image
     bounds = image.getchannel("A").getbbox()
     if bounds is None:
         return image
     left, top, right, bottom = bounds
-    padding = max(2, round(max(right - left, bottom - top) * 0.08))
+    padding = max(2, round(max(right - left, bottom - top) * padding_ratio))
     return image.crop(
         (
             max(0, left - padding),

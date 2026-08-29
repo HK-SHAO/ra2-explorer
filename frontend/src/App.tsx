@@ -10,6 +10,7 @@ import {
   WheelEvent as ReactWheelEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -48,7 +49,20 @@ function VoxelPreview({ url, label, viewKey, onFacingChange }: {
   viewKey: string;
   onFacingChange?: (facing: number) => void;
 }) {
-  return <Suspense fallback={<div className="voxel-viewer"><div className="voxel-status">正在载入三维视图…</div></div>}><VoxelViewer url={url} label={label} viewKey={viewKey} onFacingChange={onFacingChange} /></Suspense>;
+  const finishPriorityRef = useRef<(() => void) | null>(null);
+  useLayoutEffect(() => {
+    const finish = beginModelPreviewPriority();
+    finishPriorityRef.current = finish;
+    return () => {
+      if (finishPriorityRef.current === finish) finishPriorityRef.current = null;
+      finish();
+    };
+  }, [url]);
+  const finishPriority = useCallback(() => {
+    finishPriorityRef.current?.();
+    finishPriorityRef.current = null;
+  }, []);
+  return <Suspense fallback={<div className="voxel-viewer"><div className="voxel-status">正在载入三维视图…</div></div>}><VoxelViewer url={url} label={label} viewKey={viewKey} onFacingChange={onFacingChange} onLoadSettled={finishPriority} /></Suspense>;
 }
 
 type IconName =
@@ -1587,12 +1601,111 @@ function EntityListPanel({ entities, total, loading, query, setQuery, sort, setS
 function EntityGridCard({ entity, sourceId, selected, onSelect }: { entity: EntitySummary; sourceId: string; selected: boolean; onSelect: (id: string) => void }) {
   return (
     <button className={`asset-card entity-card ${selected ? "selected" : ""}`} onClick={() => onSelect(entity.id)}>
-      <span className={`asset-card-preview entity-card-preview ${entity.renderable ? "ready" : "missing"}`}>
-        {entity.renderable ? <img loading="lazy" src={api.entityPreviewUrl(sourceId, entity.id, { scale: 3, thumbnail: true })} alt="" onError={(event) => { event.currentTarget.hidden = true; }} /> : <Icon name="unit" size={34} />}
-      </span>
+      <EntityCardPreview entity={entity} sourceId={sourceId} />
       <span className="asset-card-copy"><strong title={entity.display_name}>{entity.display_name}</strong></span>
     </button>
   );
+}
+
+type CardPreviewJob = {
+  active: boolean;
+  done: boolean;
+  weight: number;
+  start: () => void;
+};
+
+const cardPreviewQueue: CardPreviewJob[] = [];
+const cardPreviewCapacity = 4;
+let activeCardPreviewWeight = 0;
+let modelPreviewPriorityDepth = 0;
+
+function beginModelPreviewPriority() {
+  modelPreviewPriorityDepth += 1;
+  let finished = false;
+  return () => {
+    if (finished) return;
+    finished = true;
+    modelPreviewPriorityDepth = Math.max(0, modelPreviewPriorityDepth - 1);
+    drainCardPreviewQueue();
+  };
+}
+
+function drainCardPreviewQueue() {
+  if (modelPreviewPriorityDepth > 0) return;
+  while (cardPreviewQueue.length > 0) {
+    const nextIndex = cardPreviewQueue.findIndex(
+      (job) => job.done || activeCardPreviewWeight + job.weight <= cardPreviewCapacity,
+    );
+    if (nextIndex < 0) return;
+    const [job] = cardPreviewQueue.splice(nextIndex, 1);
+    if (job.done) continue;
+    job.active = true;
+    activeCardPreviewWeight += job.weight;
+    job.start();
+  }
+}
+
+function scheduleCardPreview(start: () => void, weight: number) {
+  const job: CardPreviewJob = { active: false, done: false, weight, start };
+  cardPreviewQueue.push(job);
+  drainCardPreviewQueue();
+  return () => {
+    if (job.done) return;
+    job.done = true;
+    if (job.active) activeCardPreviewWeight = Math.max(0, activeCardPreviewWeight - job.weight);
+    drainCardPreviewQueue();
+  };
+}
+
+function EntityCardPreview({ entity, sourceId }: { entity: EntitySummary; sourceId: string }) {
+  const previewRef = useRef<HTMLSpanElement>(null);
+  const finishRef = useRef<(() => void) | null>(null);
+  const [requested, setRequested] = useState(false);
+  const url = entity.renderable
+    ? api.entityPreviewUrl(sourceId, entity.id, { scale: 2, thumbnail: true })
+    : "";
+
+  useEffect(() => {
+    setRequested(false);
+    finishRef.current?.();
+    finishRef.current = null;
+    if (!url) return;
+    let disposed = false;
+    let observer: IntersectionObserver | null = null;
+    const request = () => {
+      if (disposed || finishRef.current) return;
+      finishRef.current = scheduleCardPreview(() => {
+        if (!disposed) setRequested(true);
+      }, entity.body_format === "vxl" ? 2 : 1);
+    };
+    if ("IntersectionObserver" in window && previewRef.current) {
+      observer = new IntersectionObserver((entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer?.disconnect();
+        request();
+      }, { rootMargin: "160px 0px" });
+      observer.observe(previewRef.current);
+    } else {
+      request();
+    }
+    return () => {
+      disposed = true;
+      observer?.disconnect();
+      finishRef.current?.();
+      finishRef.current = null;
+    };
+  }, [url]);
+
+  function finish() {
+    finishRef.current?.();
+    finishRef.current = null;
+  }
+
+  return <span ref={previewRef} className={`asset-card-preview entity-card-preview ${entity.renderable ? "ready" : "missing"}`}>
+    {entity.renderable
+      ? requested && <img decoding="async" fetchPriority="low" src={url} alt="" onLoad={finish} onError={(event) => { finish(); event.currentTarget.hidden = true; }} />
+      : <Icon name="unit" size={34} />}
+  </span>;
 }
 
 function FrameGrid({ count, active, onSelect, urlFor }: { count: number; active: number; onSelect: (frame: number) => void; urlFor: (frame: number) => string }) {
