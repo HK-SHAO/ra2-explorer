@@ -111,14 +111,55 @@ def sync_known_names(path: Path, *, timeout: float = 30.0) -> dict[str, object]:
     return manifest
 
 
-def load_audio_transcript(path: Path) -> dict[str, dict[str, str]]:
+def load_audio_transcript(
+    path: Path, *, supplement_paths: tuple[Path, ...] = ()
+) -> dict[str, dict[str, str]]:
+    entries: dict[str, dict[str, str]] = {}
+    if path.is_file():
+        try:
+            with path.open("rb") as stream:
+                entries.update(_parse_audio_transcript(stream.read(2_000_001)))
+        except (OSError, BadZipFile, KeyError, ValueError, ElementTree.ParseError):
+            pass
+    for supplement_path in supplement_paths:
+        entries.update(_load_audio_transcript_supplement(supplement_path))
+    return entries
+
+
+def _load_audio_transcript_supplement(path: Path) -> dict[str, dict[str, str]]:
     if not path.is_file():
         return {}
     try:
-        with path.open("rb") as stream:
-            return _parse_audio_transcript(stream.read(2_000_001))
-    except (OSError, BadZipFile, KeyError, ValueError, ElementTree.ParseError):
+        content = path.read_bytes()
+        if len(content) > 2_000_000:
+            return {}
+        payload = json.loads(content.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return {}
+    raw_entries = payload.get("entries") if isinstance(payload, dict) else None
+    if not isinstance(raw_entries, dict):
+        return {}
+
+    entries: dict[str, dict[str, str]] = {}
+    for raw_name, raw_entry in raw_entries.items():
+        if not isinstance(raw_name, str) or not isinstance(raw_entry, dict):
+            continue
+        file_id = _audio_stem(raw_name)
+        original_text = raw_entry.get("original_text") or raw_entry.get("text")
+        localized_text = raw_entry.get("localized_text")
+        if not file_id or not isinstance(original_text, str) or not original_text.strip():
+            continue
+        entry = {
+            key: value.strip()
+            for key, value in raw_entry.items()
+            if isinstance(key, str) and isinstance(value, str)
+        }
+        entry["text"] = original_text.strip()
+        entry["original_text"] = original_text.strip()
+        if isinstance(localized_text, str) and localized_text.strip():
+            entry["localized_text"] = localized_text.strip()
+        entries[file_id] = entry
+    return entries
 
 
 def sync_audio_transcript(path: Path, *, timeout: float = 30.0) -> dict[str, object]:

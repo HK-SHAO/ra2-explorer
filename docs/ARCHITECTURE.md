@@ -27,7 +27,7 @@ Python 服务是唯一的数据访问入口。CLI 和 HTTP API 都调用 `Source
 
 - `.runtime\RA2MD` 是只读官方安装；扫描、预览、验证和后台服务都不会修改文件或运行其中的 EXE。
 - `.runtime\RA2MD-Ext\index\ra2-explorer.db` 保存索引；按需解包字节、解析元数据、PNG、WAV、MP4 和三维场景 JSON 位于 `RA2MD-Ext\artifacts\v1`。缓存键包含来源、扫描版本、资产标识、转换参数和解析器版本。
-- `.runtime\RA2MD-Ext\reference` 保存可重新下载的文件名数据库、声音转录表和供应来源清单。旧 `.runtime\ra2-explorer.db` 会一次性迁移到 `RA2MD-Ext`，新写入不再落到旧位置。
+- `.runtime\RA2MD-Ext\reference` 保存可重新下载的文件名数据库、声音转录表、从本地官方任务音频校对出的 `mission-audio-transcript.json` 和供应来源清单。旧 `.runtime\ra2-explorer.db` 会一次性迁移到 `RA2MD-Ext`，新写入不再落到旧位置。
 - 扫描器显式排除 `RA2MD-Ext`，防止派生结果被重复识别为原始游戏资产。
 - 索引记录松散相对路径，或 MIX 根文件与嵌套条目链；首次读取时校验 CRC/大小并按需解出，后续同一扫描版本可以复用隔离缓存。
 - `.runtime`、真实游戏目录、参考仓库、虚拟环境和前端构建产物均不进入 Git。
@@ -110,7 +110,7 @@ RA2/TS 的文件名标识是对大写文件名执行带特殊尾部填充的 CRC
 - `GET /api/palettes`、`GET /api/stats`：辅助浏览；
 - `POST /api/reference-data/names/sync`：同步固定提交的名称数据库。
 
-声音转录通过 `ra2exp sync-audio-text` 显式同步到派生工作区；服务启动时只读取本地副本，不在浏览请求中隐式联网。
+声音转录通过 `ra2exp sync-audio-text` 显式同步到派生工作区；服务启动时将社区 XLSX 与本地 `mission-audio-transcript.json` 补充表按音频文件名合并，补充表优先且可同时提供原文与中文。官方 EVAMD/任务地图提供播放事件关联但没有字幕，因此任务对白的校对结果单独留在 `RA2MD-Ext`，不改写游戏安装。浏览请求不会隐式联网。
 
 OpenAPI 页面在 `/api/docs`。生产端口固定为 `46120`，可通过 `pythonw.exe` 无窗口运行并登记为当前用户登录自启。服务拒绝非本机 Host，CLI 也拒绝监听非回环地址。应用不会默认调用系统 URL 打开器，避免错误的浏览器/RemoteApp 关联产生外部弹窗。当前不包含认证，因此不得通过反向代理暴露到局域网或公网。
 

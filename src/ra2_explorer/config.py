@@ -25,6 +25,10 @@ class Settings:
     def audio_transcript_path(self) -> Path:
         return self.derived_root / "reference" / "ra2-audio-transcript.xlsx"
 
+    @property
+    def mission_audio_transcript_path(self) -> Path:
+        return self.derived_root / "reference" / "mission-audio-transcript.json"
+
     def prepare(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.derived_root.mkdir(parents=True, exist_ok=True)

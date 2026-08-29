@@ -1364,9 +1364,9 @@ def _merge_csf_inputs(
     voice_strings: dict[str, VoiceText] = {
         key: VoiceText(
             f"TRANSCRIPT:{key}",
-            transcript["text"],
-            transcript["text"],
-            None,
+            transcript.get("localized_text") or transcript["text"],
+            transcript.get("original_text") or transcript["text"],
+            transcript.get("localized_text"),
         )
         for key, transcript in voice_transcripts.items()
         if transcript.get("text")

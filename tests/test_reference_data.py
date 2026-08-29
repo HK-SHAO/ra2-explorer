@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -28,6 +29,53 @@ def test_audio_transcript_ignores_invalid_workbook(tmp_path) -> None:
     path.write_bytes(b"not an xlsx file")
 
     assert load_audio_transcript(path) == {}
+
+
+def test_audio_transcript_merges_local_mission_supplement(tmp_path) -> None:
+    workbook_path = tmp_path / "audio-transcript.xlsx"
+    workbook_path.write_bytes(_audio_transcript_workbook())
+    supplement_path = tmp_path / "mission-audio-transcript.json"
+    supplement_path.write_text(
+        json.dumps(
+            {
+                "entries": {
+                    "$A01_P01.wav": {
+                        "original_text": "Protect the Time Machine.",
+                        "localized_text": "保护时间机器。",
+                        "speaker": "EVA",
+                    }
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    entries = load_audio_transcript(
+        workbook_path, supplement_paths=(supplement_path,)
+    )
+
+    assert entries["giselea"]["text"] == "Sir, yes sir!"
+    assert entries["a01_p01"] == {
+        "original_text": "Protect the Time Machine.",
+        "localized_text": "保护时间机器。",
+        "speaker": "EVA",
+        "text": "Protect the Time Machine.",
+    }
+
+
+def test_audio_transcript_can_load_supplement_without_workbook(tmp_path) -> None:
+    supplement_path = tmp_path / "mission-audio-transcript.json"
+    supplement_path.write_text(
+        '{"entries":{"S02_P01":{"text":"Destroy Einstein lab."}}}',
+        encoding="utf-8",
+    )
+
+    entries = load_audio_transcript(
+        tmp_path / "missing.xlsx", supplement_paths=(supplement_path,)
+    )
+
+    assert entries["s02_p01"]["original_text"] == "Destroy Einstein lab."
 
 
 def _audio_transcript_workbook() -> bytes:

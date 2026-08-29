@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -22,6 +23,21 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     )
     settings.prepare()
     settings.known_names_path.write_text("\n".join(FIXTURE_NAMES), encoding="utf-8")
+    settings.mission_audio_transcript_path.parent.mkdir(parents=True, exist_ok=True)
+    settings.mission_audio_transcript_path.write_text(
+        json.dumps(
+            {
+                "entries": {
+                    "fixture.wav": {
+                        "original_text": "Ready for the test.",
+                        "localized_text": "准备测试。",
+                    }
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     client = TestClient(create_app(settings))
 
     installation = create_fixture_installation(tmp_path / "fixture-installation")
@@ -207,10 +223,10 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     media_items = semantic_media.json()["items"]
     assert len(media_items) == 1
     assert media_items[0]["asset"]["display_name"] == "fixture.wav"
-    assert media_items[0]["description"] == "Ready for the test."
+    assert media_items[0]["description"] == "准备测试。"
     assert media_items[0]["groups"] == ["unit_voice"]
     assert media_items[0]["original_texts"] == ["Ready for the test."]
-    assert media_items[0]["localized_texts"] == []
+    assert media_items[0]["localized_texts"] == ["准备测试。"]
     assert {item["event_type"] for item in semantic_media.json()["event_types"]} >= {
         "select",
         "sound_event",
@@ -262,9 +278,9 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert entity_body["art"]["weapon_1_flh"] == "160,18,80"
     select_voice = next(item for item in entity_body["media"] if item["slot"] == "select")
     assert select_voice["event"] == "FixtureSelect"
-    assert select_voice["samples"][0]["text"] == "Ready for the test."
+    assert select_voice["samples"][0]["text"] == "准备测试。"
     assert select_voice["samples"][0]["original_text"] == "Ready for the test."
-    assert select_voice["samples"][0]["localized_text"] is None
+    assert select_voice["samples"][0]["localized_text"] == "准备测试。"
     assert select_voice["samples"][0]["text_label"] == "VOX:fixture_event"
     assert select_voice["samples"][0]["asset"]["display_name"] == "fixture.wav"
     assert select_voice["samples"][0]["weight"] == 2
@@ -275,9 +291,9 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     association_items = associations.json()["items"]
     assert any(
         item["entity"]["id"] == "DemoVehicle"
-        and item["text"] == "Ready for the test."
+        and item["text"] == "准备测试。"
         and item["original_text"] == "Ready for the test."
-        and item["localized_text"] is None
+        and item["localized_text"] == "准备测试。"
         for item in association_items
         if item["entity"]
     )
