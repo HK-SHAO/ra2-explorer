@@ -237,6 +237,7 @@ class AnimationPlayback:
     loop_end: int | None = None
     loop_count: int | None = None
     direction: str | None = None
+    shadow: bool = False
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -248,6 +249,7 @@ class AnimationPlayback:
             "loop_end": self.loop_end,
             "loop_count": self.loop_count,
             "direction": self.direction,
+            "shadow": self.shadow,
         }
 
 
@@ -261,6 +263,7 @@ class MediaSample:
     text_label: str | None = None
     animation: AnimationPlayback | None = None
     weight: int = 1
+    palette: str | None = None
 
     def as_dict(
         self, language: GameLanguage = DEFAULT_GAME_LANGUAGE
@@ -274,6 +277,7 @@ class MediaSample:
             "asset": _asset_summary(self.asset),
             "animation": self.animation.as_dict() if self.animation else None,
             "weight": self.weight,
+            "palette": self.palette,
         }
 
 
@@ -834,7 +838,7 @@ class SemanticLibrary:
         sprite = self._parse_asset(body, parse_shp)
         if not sprite.frames:
             raise InvalidFormatError("单位 SHP 没有可渲染帧")
-        visible_frames = self._visible_shp_frames(body, sprite)
+        visible_frames = self._entity_shp_frames(entity, body, sprite)
         if not visible_frames:
             raise InvalidFormatError("单位 SHP 的所有帧均为空")
         active_palette = palette
@@ -850,6 +854,11 @@ class SemanticLibrary:
             source_frame,
             active_palette,
             scale=scale,
+            shadow_frame=(
+                sprite.paired_shadow_frame(source_frame)
+                if entity.kind == "building"
+                else None
+            ),
         )
 
     def model_scene(
@@ -958,7 +967,7 @@ class SemanticLibrary:
                 )
             else:
                 sprite = self._parse_asset(body, parse_shp)
-                visible_frames = self._visible_shp_frames(body, sprite)
+                visible_frames = self._entity_shp_frames(entity, body, sprite)
                 base.update(
                     {
                         "frame_count": len(visible_frames),
@@ -992,6 +1001,22 @@ class SemanticLibrary:
         with self._lock:
             self._shp_frame_cache[asset_id] = visible
         return visible
+
+    def _entity_shp_frames(
+        self,
+        entity: GameEntity,
+        asset: dict[str, Any],
+        sprite: ShpFile,
+    ) -> tuple[int, ...]:
+        visible = self._visible_shp_frames(asset, sprite)
+        if entity.kind != "building":
+            return visible
+        shadow_frames = {
+            shadow
+            for frame in range(len(sprite.frames) // 2)
+            if (shadow := sprite.paired_shadow_frame(frame)) is not None
+        }
+        return tuple(frame for frame in visible if frame not in shadow_frames)
 
     def _parse_asset(
         self,
@@ -1934,7 +1959,17 @@ def _resolve_media(
                     field,
                     animation,
                     entity_id,
-                    _animation_samples(animation, art_sections, assets),
+                    _animation_samples(
+                        animation,
+                        art_sections,
+                        assets,
+                        palette=(
+                            "unit"
+                            if role in {"construction", "operation"}
+                            else None
+                        ),
+                        force_shadow=role == "construction",
+                    ),
                     role=role,
                     rule_field=f"ArtType.{field}",
                 )
@@ -1990,19 +2025,33 @@ def _animation_samples(
     reference: str,
     art_sections: dict[str, dict[str, str]],
     assets: _AssetIndex,
+    *,
+    palette: str | None = None,
+    force_shadow: bool = False,
 ) -> tuple[MediaSample, ...]:
     values = art_sections.get(reference.casefold(), {})
     image = values.get("image") or reference
     names = (image,) if "." in image else (f"{image}.shp", f"{image}.hva")
     asset = _find_asset(assets, names, ("shp", "hva", "video"))
     playback = _art_animation_playback(values)
+    if force_shadow:
+        playback = replace(playback or AnimationPlayback(), shadow=True)
     direction_match = re.search(r"-(NE|SE|SW|NW|N|E|S|W)$", reference, re.IGNORECASE)
     if direction_match:
         playback = replace(
             playback or AnimationPlayback(),
             direction=direction_match.group(1).upper(),
         )
-    return (MediaSample(reference, None, asset, animation=playback),)
+    palette_kind = palette or ("unit" if _yes(values.get("altpalette")) else "animation")
+    return (
+        MediaSample(
+            reference,
+            None,
+            asset,
+            animation=playback,
+            palette=palette_kind,
+        ),
+    )
 
 
 def _entity_animation_role(field: str) -> str | None:
@@ -2019,13 +2068,22 @@ def _entity_animation_role(field: str) -> str | None:
 
 
 def _art_animation_playback(values: dict[str, str]) -> AnimationPlayback | None:
-    playback_fields = {"start", "loopstart", "loopend", "loopcount", "rate"}
+    playback_fields = {
+        "start",
+        "end",
+        "loopstart",
+        "loopend",
+        "loopcount",
+        "rate",
+        "shadow",
+    }
     if not playback_fields.intersection(values):
         return None
     start = _integer(values.get("start"), 0) or 0
     loop_start = _integer(values.get("loopstart"))
     loop_end = _integer(values.get("loopend"))
-    frame_count = loop_end - start if loop_end is not None and loop_end > start else None
+    end = loop_end if loop_end is not None else _integer(values.get("end"))
+    frame_count = end - start + 1 if end is not None and end >= start else None
     return AnimationPlayback(
         start_frame=max(0, start),
         frame_count=frame_count,
@@ -2033,6 +2091,7 @@ def _art_animation_playback(values: dict[str, str]) -> AnimationPlayback | None:
         loop_start=loop_start,
         loop_end=loop_end,
         loop_count=_integer(values.get("loopcount")),
+        shadow=_yes(values.get("shadow")),
     )
 
 

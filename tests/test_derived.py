@@ -45,3 +45,24 @@ def test_atomic_write_does_not_hide_real_replace_failure(
         DerivedStore._atomic_write(target, b"payload")
 
     assert list(tmp_path.glob(".*.tmp")) == []
+
+
+def test_artifact_path_compacts_long_cache_identity(tmp_path: Path) -> None:
+    store = DerivedStore(tmp_path / "RA2MD-Ext")
+    path = store.artifact_path(
+        "previews",
+        source_id="source-id",
+        revision="revision",
+        identity=("TESLA", *("very-long-effect-identity" for _ in range(12))),
+        extension="png",
+    )
+    different = store.artifact_path(
+        "previews",
+        source_id="source-id",
+        revision="revision",
+        identity=("TESLA", *("different-effect-identity" for _ in range(12))),
+        extension="png",
+    )
+
+    assert len(path.stem) <= 48
+    assert path != different

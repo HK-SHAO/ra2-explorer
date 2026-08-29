@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import uuid
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +52,9 @@ class DerivedStore:
         safe_source = _safe_part(source_id)
         safe_revision = _safe_part(revision)
         safe_identity = "__".join(_safe_part(item) for item in identity)
+        if len(safe_identity) > 48:
+            digest = hashlib.sha256(safe_identity.encode("utf-8")).hexdigest()[:20]
+            safe_identity = f"{_safe_part(identity[0])[:20]}__{digest}"
         safe_extension = _safe_part(extension).lstrip(".") or "bin"
         candidate = (
             self.artifacts_root
@@ -133,7 +138,10 @@ class DerivedStore:
                 if not path.is_file():
                     raise
         finally:
-            temporary.unlink(missing_ok=True)
+            # A failed Windows long-path or concurrent cleanup must not
+            # replace the original write error with a second exception.
+            with suppress(OSError):
+                temporary.unlink(missing_ok=True)
 
 
 def _safe_part(value: object) -> str:

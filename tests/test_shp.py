@@ -9,7 +9,7 @@ from ra2_explorer.codecs.mix import parse_mix, ra2_mix_hash
 from ra2_explorer.codecs.pal import parse_palette
 from ra2_explorer.codecs.shp import parse_shp
 from ra2_explorer.errors import InvalidFormatError
-from tests.ra2_fixtures import create_fixture_installation
+from tests.ra2_fixtures import _encode_shp, create_fixture_installation
 
 
 def test_fixture_sprite_decodes_and_renders(tmp_path: Path) -> None:
@@ -56,3 +56,19 @@ def test_shp_accepts_retail_cc_filled_null_frames() -> None:
     assert sprite.frames[0].empty is True
     assert sprite.render(0).size == (180, 150)
     assert sprite.render(0).getbbox() is None
+
+
+def test_shp_detects_and_composites_second_half_shadow_frames() -> None:
+    width = height = 8
+    body = bytearray(width * height)
+    body[2 * width + 3] = 48
+    shadow = bytearray(width * height)
+    shadow[5 * width + 4] = 1
+    sprite = parse_shp(_encode_shp(width, height, [bytes(body), bytes(shadow)]))
+
+    assert sprite.paired_shadow_frame(0) == 1
+    assert sprite.paired_shadow_frame(1) is None
+
+    rendered = sprite.render(0, shadow_frame=1)
+    assert rendered.getpixel((3, 2))[3] == 255
+    assert rendered.getpixel((4, 5)) == (0, 0, 0, 96)

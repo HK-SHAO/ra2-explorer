@@ -111,31 +111,67 @@ class ShpFile:
         palette: Palette | None = None,
         *,
         scale: int = 1,
+        shadow_frame: int | None = None,
     ) -> Image.Image:
         if scale < 1 or scale > 16:
             raise ValueError("scale must be between 1 and 16")
+        canvas = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
+        if shadow_frame is not None:
+            shadow = self._render_frame(shadow_frame, palette, shadow=True)
+            canvas.alpha_composite(shadow)
+        canvas.alpha_composite(self._render_frame(frame_index, palette))
+        if scale != 1:
+            scaled_size = (self.width * scale, self.height * scale)
+            canvas = canvas.resize(scaled_size, Image.Resampling.NEAREST)
+        return canvas
+
+    def paired_shadow_frame(self, frame_index: int) -> int | None:
+        """Return the matching second-half Westwood shadow frame when present."""
+        frame_count = len(self.frames)
+        if frame_count < 2 or frame_count % 2 or frame_index >= frame_count // 2:
+            return None
+        candidate = frame_index + frame_count // 2
+        frame = self.frames[candidate]
+        if frame.empty:
+            return None
+        opaque_indices = {value for value in self.pixels(candidate) if value}
+        return candidate if opaque_indices == {1} else None
+
+    def render_shadow(self, frame_index: int, *, scale: int = 1) -> Image.Image:
+        if scale < 1 or scale > 16:
+            raise ValueError("scale must be between 1 and 16")
+        image = self._render_frame(frame_index, None, shadow=True)
+        if scale != 1:
+            image = image.resize(
+                (self.width * scale, self.height * scale),
+                Image.Resampling.NEAREST,
+            )
+        return image
+
+    def _render_frame(
+        self,
+        frame_index: int,
+        palette: Palette | None,
+        *,
+        shadow: bool = False,
+    ) -> Image.Image:
         frame = self.frames[frame_index]
         frame_pixels = self.pixels(frame_index)
         if frame.empty:
-            canvas = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
-            if scale != 1:
-                canvas = canvas.resize(
-                    (self.width * scale, self.height * scale),
-                    Image.Resampling.NEAREST,
-                )
-            return canvas
+            return Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
         selected_palette = palette or grayscale_palette()
         rgba = bytearray(frame.width * frame.height * 4)
         for pixel_index, palette_index in enumerate(frame_pixels):
             offset = pixel_index * 4
-            rgba[offset : offset + 4] = bytes(selected_palette.rgba(palette_index))
+            rgba[offset : offset + 4] = bytes(
+                (0, 0, 0, 96 if palette_index else 0)
+                if shadow
+                else selected_palette.rgba(palette_index)
+            )
 
         crop = Image.frombytes("RGBA", (frame.width, frame.height), bytes(rgba))
         canvas = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
         canvas.alpha_composite(crop, (frame.x, frame.y))
-        if scale != 1:
-            scaled_size = (self.width * scale, self.height * scale)
-            canvas = canvas.resize(scaled_size, Image.Resampling.NEAREST)
         return canvas
 
 

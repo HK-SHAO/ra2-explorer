@@ -4,12 +4,14 @@ import io
 import json
 import os
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.gzip import GZipMiddleware
@@ -295,6 +297,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         palette_id: str | None = None,
         scale: int = Query(default=4, ge=1, le=12),
         thumbnail: bool = False,
+        effect_asset_id: str | None = None,
+        effect_frame: int = Query(default=0, ge=0),
+        effect_shadow_frame: int | None = Query(default=None, ge=0),
+        effect_palette_kind: Literal["unit", "animation"] | None = None,
     ) -> Response:
         semantic_entity = services.semantic.catalog(source_id).get(entity_id)
         body = semantic_entity.component("body")
@@ -302,11 +308,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail="该单位没有可渲染的主体资产")
         palette = _select_palette(services, body, palette_id)
         player_color = _validated_player_color(player_color)
-        renderer_version = (
-            "renderer-shp-sequence-facing-v2"
-            if body["format"] == "shp"
-            else "renderer-vpl-techno-body-v3"
-        )
+        renderer_version = "shp-e1" if body["format"] == "shp" else "vpl-body-v3"
         artifact_path = _source_artifact_path(
             services,
             "previews",
@@ -319,6 +321,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             f"palette-{palette_id or 'auto'}",
             f"scale-{scale}",
             f"thumbnail-{thumbnail}",
+            f"effect-{effect_asset_id or 'none'}",
+            f"effect-frame-{effect_frame}",
+            f"effect-shadow-{effect_shadow_frame if effect_shadow_frame is not None else 'none'}",
+            f"effect-palette-{effect_palette_kind or 'auto'}",
             extension="png",
         )
         cached = services.derived.read_bytes(artifact_path)
@@ -337,6 +343,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             player_color=player_color,
             scale=scale,
         )
+        if effect_asset_id:
+            if body["format"] != "shp":
+                raise HTTPException(
+                    status_code=409,
+                    detail="只有 SHP 主体支持原始画布动画合成",
+                )
+            effect_asset, effect_data = services.reader.read(effect_asset_id)
+            if (
+                effect_asset["source_id"] != body["source_id"]
+                or effect_asset["format"] != "shp"
+            ):
+                raise HTTPException(status_code=409, detail="动画资产不属于当前 SHP 单位")
+            effect_sprite = parse_shp(effect_data)
+            if effect_frame >= len(effect_sprite.frames) or (
+                effect_shadow_frame is not None
+                and effect_shadow_frame >= len(effect_sprite.frames)
+            ):
+                raise HTTPException(status_code=416, detail="动画帧编号超出范围")
+            effect_palette = _select_palette(
+                services,
+                effect_asset,
+                None,
+                effect_palette_kind,
+            )
+            if player_color:
+                effect_palette = (effect_palette or grayscale_palette()).with_player_color(
+                    player_color
+                )
+            effect_main = effect_sprite.render(effect_frame, effect_palette, scale=scale)
+            layers = []
+            if effect_shadow_frame is not None:
+                layers.append(
+                    effect_sprite.render_shadow(effect_shadow_frame, scale=scale)
+                )
+            layers.extend((image, effect_main))
+            image = _alpha_composite_centered(layers)
         if thumbnail:
             image = _crop_transparent_preview(
                 image,
@@ -560,6 +602,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         frame: int = Query(default=0, ge=0),
         player_color: str | None = Query(default=None, max_length=24),
         palette_id: str | None = None,
+        palette_kind: Literal["unit", "animation"] | None = None,
+        shadow_frame: int | None = Query(default=None, ge=0),
         scale: int = Query(default=4, ge=1, le=16),
     ) -> Response:
         asset_record = services.database.get_asset(asset_id)
@@ -578,10 +622,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             services,
             "previews",
             asset_record,
-            "renderer-vpl-v1",
+            "renderer-shp-shadow-palette-v1",
             f"frame-{frame}",
             f"color-{player_color or 'original'}",
             f"palette-{palette_id or 'auto'}",
+            f"palette-kind-{palette_kind or 'auto'}",
+            f"shadow-{shadow_frame if shadow_frame is not None else 'none'}",
             f"scale-{scale}",
             extension="png",
         )
@@ -597,12 +643,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             image = parse_palette(data).preview(cell_size=max(4, scale * 3))
         elif asset_record["format"] == "shp":
             sprite = parse_shp(data)
-            if frame >= len(sprite.frames):
+            if frame >= len(sprite.frames) or (
+                shadow_frame is not None and shadow_frame >= len(sprite.frames)
+            ):
                 raise HTTPException(status_code=416, detail="帧编号超出范围")
-            palette = _select_palette(services, asset_record, palette_id)
+            palette = _select_palette(
+                services,
+                asset_record,
+                palette_id,
+                palette_kind,
+            )
             if player_color:
                 palette = (palette or grayscale_palette()).with_player_color(player_color)
-            image = sprite.render(frame, palette, scale=scale)
+            image = sprite.render(
+                frame,
+                palette,
+                scale=scale,
+                shadow_frame=shadow_frame,
+            )
         elif asset_record["format"] == "vxl":
             model = parse_vxl(data)
             if frame >= len(model.limbs):
@@ -641,8 +699,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             palette = _select_palette(services, asset_record, palette_id)
             image = template.render(frame, palette=palette, scale=scale)
         elif asset_record["format"] == "pcx":
-            from PIL import Image, UnidentifiedImageError
-
             try:
                 image = Image.open(io.BytesIO(data))
                 image.load()
@@ -846,6 +902,7 @@ def _select_palette(
     services: Services,
     asset: dict[str, object],
     palette_id: str | None,
+    palette_kind: Literal["unit", "animation"] | None = None,
 ):
     palettes = services.database.palette_assets(str(asset["source_id"]))
     if palette_id:
@@ -888,6 +945,9 @@ def _select_palette(
         )
     uses_iso_palette = asset.get("format") == "tmp"
     preferred = (
+        ["anim.pal", f"unit{theater}.pal", "unittem.pal"]
+        if palette_kind == "animation"
+        else
         [f"iso{theater}.pal", "isotem.pal", f"unit{theater}.pal", "unittem.pal"]
         if uses_iso_palette
         else [f"unit{theater}.pal", "unittem.pal", f"iso{theater}.pal", "isotem.pal"]
@@ -902,6 +962,18 @@ def _select_palette(
     )
     _, palette_data = services.reader.read(palette_asset["id"])
     return parse_palette(palette_data)
+
+
+def _alpha_composite_centered(layers: list[Image.Image]) -> Image.Image:
+    width = max(layer.width for layer in layers)
+    height = max(layer.height for layer in layers)
+    output = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    for layer in layers:
+        output.alpha_composite(
+            layer.convert("RGBA"),
+            ((width - layer.width) // 2, (height - layer.height) // 2),
+        )
+    return output
 
 
 def _json_bytes(data: dict[str, object]) -> bytes:

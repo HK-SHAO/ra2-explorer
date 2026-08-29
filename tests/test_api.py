@@ -10,6 +10,7 @@ from PIL import Image
 from ra2_explorer.api import create_app
 from ra2_explorer.config import Settings
 from ra2_explorer.semantic import (
+    _art_animation_playback,
     _effective_entity_countries,
     _entity_animation_role,
     _entity_usage,
@@ -379,6 +380,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
         "loop_end": None,
         "loop_count": None,
         "direction": None,
+        "shadow": False,
     }
     infantry_image = client.get(
         f"/api/entities/{source['id']}/DemoInfantry/preview.png",
@@ -445,6 +447,17 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     )
     assert invalid_color.status_code == 422
 
+    layered_sprite = client.get(
+        f"/api/assets/{sprite['id']}/preview.png",
+        params={
+            "frame": 0,
+            "shadow_frame": 1,
+            "palette_kind": "animation",
+        },
+    )
+    assert layered_sprite.status_code == 200
+    assert layered_sprite.content.startswith(b"\x89PNG")
+
     artifact_kinds = {
         path.parent.name
         for path in settings.derived_root.rglob("*")
@@ -472,6 +485,25 @@ def test_api_rejects_untrusted_host(tmp_path: Path) -> None:
     response = client.get("/api/health")
 
     assert response.status_code == 400
+
+
+def test_art_animation_playback_uses_inclusive_bounds_and_shadow() -> None:
+    playback = _art_animation_playback(
+        {
+            "start": "10",
+            "loopstart": "10",
+            "loopend": "19",
+            "rate": "450",
+            "shadow": "yes",
+        }
+    )
+
+    assert playback is not None
+    assert playback.start_frame == 10
+    assert playback.frame_count == 10
+    assert playback.loop_end == 19
+    assert playback.rate_ms == 450
+    assert playback.shadow is True
 
 
 def test_unassociated_voice_keeps_catalog_transcript_in_asset_data(

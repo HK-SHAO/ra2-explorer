@@ -217,6 +217,7 @@ export interface AnimationPlayback {
   loop_end: number | null;
   loop_count: number | null;
   direction: string | null;
+  shadow: boolean;
 }
 
 export interface MediaSample {
@@ -228,6 +229,7 @@ export interface MediaSample {
   asset: EntityComponentAsset | null;
   animation: AnimationPlayback | null;
   weight: number;
+  palette: "unit" | "animation" | null;
 }
 
 export interface MediaAssociation {
@@ -349,6 +351,10 @@ export interface EntityPreviewOptions {
   paletteId?: string;
   scale?: number;
   thumbnail?: boolean;
+  effectAssetId?: string;
+  effectFrame?: number;
+  effectShadowFrame?: number;
+  effectPalette?: "unit" | "animation";
 }
 
 export interface ReferenceStatus {
@@ -484,11 +490,15 @@ export const api = {
       frame: String(options.frame ?? 0),
       facing: String(options.facing ?? 0),
       scale: String(options.scale ?? 4),
-      v: "9",
+      v: "10",
     });
     if (options.playerColor) params.set("player_color", options.playerColor);
     if (options.paletteId) params.set("palette_id", options.paletteId);
     if (options.thumbnail) params.set("thumbnail", "true");
+    if (options.effectAssetId) params.set("effect_asset_id", options.effectAssetId);
+    if (options.effectFrame !== undefined) params.set("effect_frame", String(options.effectFrame));
+    if (options.effectShadowFrame !== undefined) params.set("effect_shadow_frame", String(options.effectShadowFrame));
+    if (options.effectPalette) params.set("effect_palette_kind", options.effectPalette);
     return `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}/preview.png?${params}`;
   },
   entityModelUrl: (
@@ -513,10 +523,13 @@ export const api = {
     paletteId: string,
     scale = 4,
     playerColor = "",
+    options: { palette?: "unit" | "animation"; shadowFrame?: number } = {},
   ) => {
     const params = new URLSearchParams({ frame: String(frame), scale: String(scale) });
     if (paletteId) params.set("palette_id", paletteId);
     if (playerColor) params.set("player_color", playerColor);
+    if (options.palette) params.set("palette_kind", options.palette);
+    if (options.shadowFrame !== undefined) params.set("shadow_frame", String(options.shadowFrame));
     return `/api/assets/${assetId}/preview.png?${params}`;
   },
 };
