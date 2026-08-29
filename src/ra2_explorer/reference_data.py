@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import urllib.request
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
+from xml.etree import ElementTree
+from zipfile import BadZipFile, ZipFile
 
 from ra2_explorer.errors import Ra2ExplorerError
 
@@ -12,6 +16,14 @@ CNC_FORMATS_REVISION = "77da596ed72a1201740e054855bf2ff60640bfa9"
 KNOWN_NAMES_URL = (
     "https://raw.githubusercontent.com/iron-curtain-engine/cnc-formats/"
     f"{CNC_FORMATS_REVISION}/src/mix/known_names_ra2.txt"
+)
+AUDIO_TRANSCRIPT_FILE_ID = "10u79FuSLL7F_BCMJa81BjjYh89ZdkGDU"
+AUDIO_TRANSCRIPT_URL = (
+    "https://drive.usercontent.google.com/download"
+    f"?id={AUDIO_TRANSCRIPT_FILE_ID}&export=download&confirm=t"
+)
+AUDIO_TRANSCRIPT_SOURCE_URL = (
+    "https://forums.cncnet.org/topic/12109-in-game-audio-database-transcript/"
 )
 
 BUILTIN_NAMES = (
@@ -99,6 +111,131 @@ def sync_known_names(path: Path, *, timeout: float = 30.0) -> dict[str, object]:
     return manifest
 
 
+def load_audio_transcript(path: Path) -> dict[str, dict[str, str]]:
+    if not path.is_file():
+        return {}
+    try:
+        with path.open("rb") as stream:
+            return _parse_audio_transcript(stream.read(2_000_001))
+    except (OSError, BadZipFile, KeyError, ValueError, ElementTree.ParseError):
+        return {}
+
+
+def sync_audio_transcript(path: Path, *, timeout: float = 30.0) -> dict[str, object]:
+    request = urllib.request.Request(
+        AUDIO_TRANSCRIPT_URL,
+        headers={"User-Agent": "ra2-explorer/0.7 reference-sync"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            content = response.read(2_000_001)
+    except OSError as error:
+        raise Ra2ExplorerError(f"声音转录表下载失败：{error}") from error
+    if len(content) > 2_000_000:
+        raise Ra2ExplorerError("声音转录表超过允许的 2 MB")
+    try:
+        entries = _parse_audio_transcript(content)
+    except (BadZipFile, KeyError, ValueError, ElementTree.ParseError) as error:
+        raise Ra2ExplorerError("声音转录表不是有效的 XLSX 文件") from error
+    if len(entries) < 1_000:
+        raise Ra2ExplorerError("声音转录表内容不完整")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
+        temporary.write(content)
+        temporary_path = Path(temporary.name)
+    temporary_path.replace(path)
+    manifest = {
+        "provider": "CnCNet community",
+        "resource": "RA2 in-game audio database and transcript",
+        "source_url": AUDIO_TRANSCRIPT_SOURCE_URL,
+        "download_url": AUDIO_TRANSCRIPT_URL,
+        "downloaded_at": datetime.now(UTC).isoformat(),
+        "entry_count": len(entries),
+    }
+    path.with_name("audio-transcript-manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def _parse_audio_transcript(content: bytes) -> dict[str, dict[str, str]]:
+    if len(content) > 2_000_000:
+        raise ValueError("workbook is too large")
+    with ZipFile(BytesIO(content)) as workbook:
+        if sum(item.file_size for item in workbook.infolist()) > 20_000_000:
+            raise ValueError("expanded workbook is too large")
+        namespace = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+        try:
+            shared_root = ElementTree.fromstring(workbook.read("xl/sharedStrings.xml"))
+        except KeyError:
+            shared = []
+        else:
+            shared = ["".join(node.itertext()) for node in shared_root]
+        book_root = ElementTree.fromstring(workbook.read("xl/workbook.xml"))
+        relations_root = ElementTree.fromstring(
+            workbook.read("xl/_rels/workbook.xml.rels")
+        )
+        targets = {
+            node.attrib["Id"]: node.attrib["Target"] for node in relations_root
+        }
+        relation_key = (
+            "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+        )
+        sheets = book_root.findall("m:sheets/m:sheet", namespace)
+        selected = next(
+            (sheet for sheet in sheets if sheet.attrib.get("name") == "Complete List"),
+            sheets[0] if sheets else None,
+        )
+        if selected is None:
+            raise ValueError("workbook has no sheets")
+        target = targets[selected.attrib[relation_key]].lstrip("/")
+        if not target.startswith("xl/"):
+            target = "xl/" + target
+        sheet_root = ElementTree.fromstring(workbook.read(target))
+
+        entries: dict[str, dict[str, str]] = {}
+        for row in sheet_root.findall(".//m:sheetData/m:row", namespace)[1:]:
+            values: dict[str, str] = {}
+            for cell in row.findall("m:c", namespace):
+                column_match = re.match(r"[A-Z]+", cell.attrib.get("r", ""))
+                if column_match is None:
+                    continue
+                if cell.attrib.get("t") == "inlineStr":
+                    inline = cell.find("m:is", namespace)
+                    raw = "".join(inline.itertext()) if inline is not None else ""
+                else:
+                    value = cell.find("m:v", namespace)
+                    raw = value.text if value is not None and value.text else ""
+                if cell.attrib.get("t") == "s" and raw:
+                    shared_index = int(raw)
+                    if not 0 <= shared_index < len(shared):
+                        raise ValueError("shared string index is out of range")
+                    raw = shared[shared_index]
+                values[column_match.group()] = raw.strip()
+            file_id = _audio_stem(values.get("A", ""))
+            line = values.get("B", "")
+            if not file_id or not line:
+                continue
+            entries[file_id] = {
+                "text": line,
+                "unit": values.get("C", ""),
+                "category": values.get("D", ""),
+                "comments": values.get("E", ""),
+                "faction": values.get("F", ""),
+            }
+        return entries
+
+
+def _audio_stem(value: str) -> str:
+    selected = value.strip().strip("\"'").lstrip("$").replace("\\", "/")
+    selected = selected.rsplit("/", 1)[-1]
+    if "." in selected:
+        selected = selected.rsplit(".", 1)[0]
+    return selected.casefold()
+
+
 def reference_status(path: Path) -> dict[str, object]:
     manifest_path = path.with_name("manifest.json")
     if not path.is_file() or not manifest_path.is_file():
@@ -113,7 +250,11 @@ def reference_status(path: Path) -> dict[str, object]:
 __all__ = [
     "BUILTIN_NAMES",
     "CNC_FORMATS_REVISION",
+    "AUDIO_TRANSCRIPT_SOURCE_URL",
+    "AUDIO_TRANSCRIPT_URL",
+    "load_audio_transcript",
     "load_known_names",
     "reference_status",
+    "sync_audio_transcript",
     "sync_known_names",
 ]

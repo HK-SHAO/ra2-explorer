@@ -21,6 +21,10 @@ class Settings:
     def derived_root(self) -> Path:
         return (self.derived_dir or self.data_dir / "RA2MD-Ext").resolve()
 
+    @property
+    def audio_transcript_path(self) -> Path:
+        return self.derived_root / "reference" / "ra2-audio-transcript.xlsx"
+
     def prepare(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.derived_root.mkdir(parents=True, exist_ok=True)

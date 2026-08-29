@@ -151,6 +151,8 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert media_items[0]["asset"]["display_name"] == "fixture.wav"
     assert media_items[0]["description"] == "Ready for the test."
     assert media_items[0]["groups"] == ["unit_voice"]
+    assert media_items[0]["original_texts"] == ["Ready for the test."]
+    assert media_items[0]["localized_texts"] == []
     assert client.get(
         "/api/media",
         params={"source_id": source["id"], "sort": "random"},
@@ -174,6 +176,9 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     select_voice = next(item for item in entity_body["media"] if item["slot"] == "select")
     assert select_voice["event"] == "FixtureSelect"
     assert select_voice["samples"][0]["text"] == "Ready for the test."
+    assert select_voice["samples"][0]["original_text"] == "Ready for the test."
+    assert select_voice["samples"][0]["localized_text"] is None
+    assert select_voice["samples"][0]["text_label"] == "VOX:fixture_event"
     assert select_voice["samples"][0]["asset"]["display_name"] == "fixture.wav"
 
     associations = client.get(f"/api/assets/{sound['id']}/associations")
@@ -182,6 +187,8 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert any(
         item["entity"]["id"] == "DemoVehicle"
         and item["text"] == "Ready for the test."
+        and item["original_text"] == "Ready for the test."
+        and item["localized_text"] is None
         for item in association_items
         if item["entity"]
     )

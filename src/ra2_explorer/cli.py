@@ -18,7 +18,7 @@ from ra2_explorer.background import (
 )
 from ra2_explorer.config import DEFAULT_HOST, DEFAULT_PORT, load_settings
 from ra2_explorer.discovery import discover_installations
-from ra2_explorer.reference_data import sync_known_names
+from ra2_explorer.reference_data import sync_audio_transcript, sync_known_names
 from ra2_explorer.semantic import ENTITY_KINDS
 from ra2_explorer.validation import VALIDATED_FORMATS, validate_source
 
@@ -51,6 +51,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sync = subcommands.add_parser("sync-names", help="同步固定版本的 RA2 文件名库")
     sync.add_argument("--timeout", type=float, default=30.0)
+
+    sync_audio = subcommands.add_parser(
+        "sync-audio-text",
+        help="同步 CnCNet 社区维护的 RA2/YR 声音转录表",
+    )
+    sync_audio.add_argument("--timeout", type=float, default=30.0)
 
     subcommands.add_parser("discover", help="发现 Steam、EA App 与旧版合法安装目录")
 
@@ -151,6 +157,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "sync-names":
         manifest = sync_known_names(settings.known_names_path, timeout=args.timeout)
+        print(json.dumps(manifest, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "sync-audio-text":
+        manifest = sync_audio_transcript(
+            settings.audio_transcript_path,
+            timeout=args.timeout,
+        )
         print(json.dumps(manifest, ensure_ascii=False, indent=2))
         return 0
 

@@ -9,7 +9,7 @@ from typing import Any
 
 from PIL import Image
 
-from ra2_explorer.codecs.csf import CsfValue, parse_csf
+from ra2_explorer.codecs.csf import parse_csf
 from ra2_explorer.codecs.hva import parse_hva
 from ra2_explorer.codecs.mix import classic_mix_hash, ra2_mix_hash
 from ra2_explorer.codecs.pal import Palette, grayscale_palette
@@ -179,15 +179,29 @@ class EntityDependency:
 
 
 @dataclass(frozen=True, slots=True)
+class VoiceText:
+    label: str
+    text: str
+    original_text: str | None
+    localized_text: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class MediaSample:
     name: str
     text: str | None
     asset: dict[str, Any] | None
+    original_text: str | None = None
+    localized_text: str | None = None
+    text_label: str | None = None
 
     def as_dict(self) -> dict[str, object]:
         return {
             "name": self.name,
             "text": self.text,
+            "original_text": self.original_text,
+            "localized_text": self.localized_text,
+            "text_label": self.text_label,
             "asset": _asset_summary(self.asset),
         }
 
@@ -292,9 +306,15 @@ class SemanticCatalog:
 
 
 class SemanticLibrary:
-    def __init__(self, database: Database, reader: AssetReader):
+    def __init__(
+        self,
+        database: Database,
+        reader: AssetReader,
+        voice_transcripts: dict[str, dict[str, str]] | None = None,
+    ):
         self.database = database
         self.reader = reader
+        self.voice_transcripts = voice_transcripts or {}
         self._cache: dict[str, tuple[tuple[object, ...], SemanticCatalog]] = {}
         self._parsed_cache: OrderedDict[str, object] = OrderedDict()
         self._shp_frame_cache: dict[str, tuple[int, ...]] = {}
@@ -436,6 +456,8 @@ class SemanticLibrary:
                             "event": component.expected_name,
                             "entity": entity.summary(),
                             "text": None,
+                            "original_text": None,
+                            "localized_text": None,
                         },
                         ("entity", entity.id, "component", component.role),
                     )
@@ -450,6 +472,8 @@ class SemanticLibrary:
                                 "event": association.event,
                                 "entity": entity.summary(),
                                 "text": sample.text,
+                                "original_text": sample.original_text,
+                                "localized_text": sample.localized_text,
                             },
                             (
                                 "entity",
@@ -471,6 +495,8 @@ class SemanticLibrary:
                             "event": association.event,
                             "entity": None,
                             "text": sample.text,
+                            "original_text": sample.original_text,
+                            "localized_text": sample.localized_text,
                         },
                         (
                             "event",
@@ -492,6 +518,8 @@ class SemanticLibrary:
                             "event": event,
                             "entity": None,
                             "text": sample.text,
+                            "original_text": sample.original_text,
+                            "localized_text": sample.localized_text,
                         },
                         (media_kind, event.casefold(), sample.name.casefold()),
                     )
@@ -777,7 +805,12 @@ class SemanticLibrary:
         art = _merge_ini_inputs(self.reader, art_assets, warnings)
         sounds = _merge_ini_inputs(self.reader, sound_assets, warnings)
         eva = _merge_ini_inputs(self.reader, eva_assets, warnings)
-        strings, voice_strings = _merge_csf_inputs(self.reader, csf_assets, warnings)
+        strings, voice_strings = _merge_csf_inputs(
+            self.reader,
+            csf_assets,
+            warnings,
+            self.voice_transcripts,
+        )
         audio_events = _build_audio_events(sounds, asset_index, voice_strings)
         eva_events = _build_eva_events(eva, asset_index, voice_strings)
         country_definitions = _build_country_definitions(rules, strings)
@@ -837,7 +870,6 @@ class SemanticLibrary:
                             entity_id,
                             rule_values,
                             art_values,
-                            components,
                             dependencies,
                             art,
                             asset_index,
@@ -903,7 +935,7 @@ def _build_media_items(
     entities: tuple[GameEntity, ...],
     audio_events: dict[str, tuple[MediaSample, ...]],
     eva_events: tuple[MediaAssociation, ...],
-    voice_strings: dict[str, CsfValue],
+    voice_strings: dict[str, VoiceText],
 ) -> tuple[dict[str, object], ...]:
     representatives: dict[str, dict[str, Any]] = {}
     for asset in assets:
@@ -921,6 +953,8 @@ def _build_media_items(
             "sound": False,
             "groups": set(),
             "texts": set(),
+            "original_texts": set(),
+            "localized_texts": set(),
             "events": set(),
             "slots": set(),
             "entities": {},
@@ -951,6 +985,10 @@ def _build_media_items(
         state["groups"].add(group)
         if sample.text:
             state["texts"].add(sample.text.strip())
+        if sample.original_text:
+            state["original_texts"].add(sample.original_text.strip())
+        if sample.localized_text:
+            state["localized_texts"].add(sample.localized_text.strip())
         if event:
             state["events"].add(event)
         if slot:
@@ -1041,6 +1079,10 @@ def _build_media_items(
                 continue
             state["voice"] = True
             state["texts"].add(value.text.strip())
+            if value.original_text:
+                state["original_texts"].add(value.original_text.strip())
+            if value.localized_text:
+                state["localized_texts"].add(value.localized_text.strip())
             stem = key.casefold()
             if not any(group.endswith("_voice") for group in state["groups"]):
                 state["groups"].add(
@@ -1073,6 +1115,8 @@ def _build_media_items(
                 groups.append("mission_voice")
                 groups.sort()
         texts = sorted(state["texts"], key=str.casefold)
+        original_texts = sorted(state["original_texts"], key=str.casefold)
+        localized_texts = sorted(state["localized_texts"], key=str.casefold)
         events = sorted(state["events"], key=str.casefold)
         entity_refs = sorted(
             state["entities"].values(),
@@ -1103,6 +1147,8 @@ def _build_media_items(
                 "kind": kind,
                 "groups": groups,
                 "texts": texts,
+                "original_texts": original_texts,
+                "localized_texts": localized_texts,
                 "events": events,
                 "slots": sorted(state["slots"]),
                 "entities": entity_refs,
@@ -1151,9 +1197,19 @@ def _merge_csf_inputs(
     reader: AssetReader,
     assets: list[dict[str, Any]],
     warnings: list[str],
-) -> tuple[dict[str, str], dict[str, CsfValue]]:
+    voice_transcripts: dict[str, dict[str, str]],
+) -> tuple[dict[str, str], dict[str, VoiceText]]:
     strings: dict[str, str] = {}
-    voice_strings: dict[str, CsfValue] = {}
+    voice_strings: dict[str, VoiceText] = {
+        key: VoiceText(
+            f"TRANSCRIPT:{key}",
+            transcript["text"],
+            transcript["text"],
+            None,
+        )
+        for key, transcript in voice_transcripts.items()
+        if transcript.get("text")
+    }
     for asset in assets:
         try:
             _, data = reader.read(str(asset["id"]))
@@ -1166,8 +1222,34 @@ def _merge_csf_inputs(
                 folded = label.name.casefold()
                 strings[folded] = label.values[0].text
                 if folded.startswith("vox:"):
-                    voice_strings[folded[4:]] = label.values[0]
+                    value = label.values[0]
+                    for alias in _voice_aliases(folded[4:], value.extra):
+                        current = voice_strings.get(alias)
+                        original_text = current.original_text if current else None
+                        localized_text = current.localized_text if current else None
+                        if parsed.language == 9:
+                            localized_text = value.text
+                        elif parsed.language == 0:
+                            original_text = value.text
+                        voice_strings[alias] = VoiceText(
+                            label.name,
+                            localized_text or original_text or value.text,
+                            original_text,
+                            localized_text,
+                        )
     return strings, voice_strings
+
+
+def _voice_aliases(label_name: str, extra: str | None) -> tuple[str, ...]:
+    aliases = [label_name.casefold()]
+    for raw in re.split(r"[,;|\s]+", extra or ""):
+        token = raw.strip().strip("\"'").lstrip("$").replace("\\", "/")
+        token = token.rsplit("/", 1)[-1]
+        if "." in token:
+            token = token.rsplit(".", 1)[0]
+        if token:
+            aliases.append(token.casefold())
+    return tuple(dict.fromkeys(aliases))
 
 
 @dataclass(slots=True)
@@ -1209,7 +1291,7 @@ def _asset_summary(asset: dict[str, Any] | None) -> dict[str, object] | None:
 def _build_audio_events(
     sections: dict[str, dict[str, str]],
     assets: _AssetIndex,
-    voice_strings: dict[str, CsfValue],
+    voice_strings: dict[str, VoiceText],
 ) -> dict[str, tuple[MediaSample, ...]]:
     events = {}
     for event, values in sections.items():
@@ -1224,7 +1306,7 @@ def _build_audio_events(
 def _build_eva_events(
     sections: dict[str, dict[str, str]],
     assets: _AssetIndex,
-    voice_strings: dict[str, CsfValue],
+    voice_strings: dict[str, VoiceText],
 ) -> tuple[MediaAssociation, ...]:
     associations = []
     for event, values in sections.items():
@@ -1233,7 +1315,13 @@ def _build_eva_events(
             for sample_name in _tokens(values.get(faction)):
                 sample = _audio_sample(sample_name, assets, voice_strings)
                 if sample.text is None and fallback_text:
-                    sample = MediaSample(sample.name, fallback_text, sample.asset)
+                    sample = MediaSample(
+                        sample.name,
+                        fallback_text,
+                        sample.asset,
+                        fallback_text,
+                        None,
+                    )
                 associations.append(
                     MediaAssociation("voice", f"eva_{faction}", event, "eva", (sample,))
                 )
@@ -1244,12 +1332,11 @@ def _resolve_media(
     entity_id: str,
     rules: dict[str, str],
     entity_art: dict[str, str],
-    components: tuple[EntityComponent, ...],
     dependencies: tuple[EntityDependency, ...],
     art_sections: dict[str, dict[str, str]],
     assets: _AssetIndex,
     audio_events: dict[str, tuple[MediaSample, ...]],
-    voice_strings: dict[str, CsfValue],
+    voice_strings: dict[str, VoiceText],
 ) -> tuple[MediaAssociation, ...]:
     associations: list[MediaAssociation] = []
     seen: set[tuple[str, str, str, str]] = set()
@@ -1309,35 +1396,6 @@ def _resolve_media(
                     )
                 )
 
-    body = next((item for item in components if item.role == "body" and item.asset), None)
-    if body and body.asset and body.asset["format"] == "shp":
-        add(
-            MediaAssociation(
-                "animation",
-                "body_animation",
-                entity_id,
-                entity_id,
-                (MediaSample(str(body.asset["display_name"]), None, body.asset),),
-            )
-        )
-    for component in components:
-        if component.asset and component.role.endswith("_hva"):
-            add(
-                MediaAssociation(
-                    "animation",
-                    component.role,
-                    component.expected_name,
-                    entity_id,
-                    (
-                        MediaSample(
-                            str(component.asset["display_name"]),
-                            None,
-                            component.asset,
-                        ),
-                    ),
-                )
-            )
-
     for field, value in entity_art.items():
         if not (field.endswith("anim") or field in {"buildup", "bibshape"}):
             continue
@@ -1357,14 +1415,21 @@ def _resolve_media(
 def _audio_sample(
     raw_name: str,
     assets: _AssetIndex,
-    voice_strings: dict[str, CsfValue],
+    voice_strings: dict[str, VoiceText],
 ) -> MediaSample:
     name = raw_name.strip().lstrip("$")
     stem = name.rsplit(".", 1)[0]
     names = (name,) if "." in name else (f"{name}.wav", f"{name}.aud")
     asset = _find_asset(assets, names, ("bag_audio", "wav", "aud"))
-    localized = voice_strings.get(stem.casefold())
-    return MediaSample(name, localized.text if localized else None, asset)
+    voice_text = voice_strings.get(stem.casefold())
+    return MediaSample(
+        name,
+        voice_text.text if voice_text else None,
+        asset,
+        voice_text.original_text if voice_text else None,
+        voice_text.localized_text if voice_text else None,
+        voice_text.label if voice_text else None,
+    )
 
 
 def _animation_samples(
@@ -1653,6 +1718,8 @@ def _media_search_text(item: dict[str, object]) -> str:
             str(asset["display_name"]),  # type: ignore[index]
             str(item.get("description") or ""),
             *(str(value) for value in item["texts"]),  # type: ignore[union-attr]
+            *(str(value) for value in item["original_texts"]),  # type: ignore[union-attr]
+            *(str(value) for value in item["localized_texts"]),  # type: ignore[union-attr]
             *(str(value) for value in item["events"]),  # type: ignore[union-attr]
             *(str(value) for value in item["slots"]),  # type: ignore[union-attr]
             *(str(value) for value in item["countries"]),  # type: ignore[union-attr]
@@ -1688,6 +1755,7 @@ __all__ = [
     "GameEntity",
     "MediaAssociation",
     "MediaSample",
+    "VoiceText",
     "SemanticCatalog",
     "SemanticLibrary",
 ]

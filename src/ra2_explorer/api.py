@@ -41,6 +41,7 @@ from ra2_explorer.discovery import discover_installations
 from ra2_explorer.errors import AssetNotFoundError, InvalidFormatError, Ra2ExplorerError
 from ra2_explorer.library import AssetReader, SourceLibrary
 from ra2_explorer.reference_data import (
+    load_audio_transcript,
     load_known_names,
     reference_status,
     sync_known_names,
@@ -82,7 +83,11 @@ class Services:
             (settings.derived_root,),
         )
         self.reader = AssetReader(self.database, self.derived)
-        self.semantic = SemanticLibrary(self.database, self.reader)
+        self.semantic = SemanticLibrary(
+            self.database,
+            self.reader,
+            load_audio_transcript(settings.audio_transcript_path),
+        )
         self.video = VideoTranscoder(self.database, self.reader, self.derived)
 
     def reload_names(self) -> None:

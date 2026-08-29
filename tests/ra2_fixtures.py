@@ -158,7 +158,7 @@ def _build_fixture_csf() -> bytes:
     labels = (
         ("UI:ExplorerTitle", "RA2 Explorer format sample", None),
         ("VOX:ExplorerReady", "Asset pipeline ready.", "explorer-ready"),
-        ("VOX:fixture", "Ready for the test.", "fixture-extra"),
+        ("VOX:fixture_event", "Ready for the test.", "fixture"),
         ("UNIT:DemoVehicle", "Generated test vehicle", None),
         ("UNIT:DemoInfantry", "Generated test infantry", None),
         ("Name:Americans", "United States", None),

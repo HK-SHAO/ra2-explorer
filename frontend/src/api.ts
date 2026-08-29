@@ -201,6 +201,9 @@ export interface GameEntity extends EntitySummary {
 export interface MediaSample {
   name: string;
   text: string | null;
+  original_text: string | null;
+  localized_text: string | null;
+  text_label: string | null;
   asset: EntityComponentAsset | null;
 }
 
@@ -219,6 +222,8 @@ export interface AssetAssociation {
   event: string;
   entity: EntitySummary | null;
   text: string | null;
+  original_text: string | null;
+  localized_text: string | null;
 }
 
 export interface AssetAssociationPage {
@@ -243,6 +248,8 @@ export interface MediaItem {
   kind: MediaKind;
   groups: string[];
   texts: string[];
+  original_texts: string[];
+  localized_texts: string[];
   events: string[];
   slots: string[];
   entities: Array<{ id: string; display_name: string; kind: EntityKind }>;
