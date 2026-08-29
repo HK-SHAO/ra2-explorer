@@ -1965,6 +1965,7 @@ interface DisplaySoundAssociation {
 
 type EntityDetailTab = "sound" | "animation" | "data";
 type EntityAnimationTab = "body" | "weapon";
+type AudioDetailTab = "preview" | "associations" | "data";
 
 interface ActiveEntityAnimation {
   event: string;
@@ -2342,20 +2343,29 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   const [videoRequested, setVideoRequested] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
   const [frameMode, setFrameMode] = useState<"sequence" | "grid">("sequence");
-  const [audioDetailTab, setAudioDetailTab] = useState<"preview" | "associations" | "data">("preview");
+  const [audioDetailTab, setAudioDetailTab] = useState<AudioDetailTab>(() => {
+    const remembered = window.localStorage.getItem("ra2exp-audio-detail-tab-v1");
+    return remembered === "associations" || remembered === "data" ? remembered : "preview";
+  });
   const detailScroll = useRememberedScroll<HTMLElement>(scrollKey, associations?.items.length || 0);
+  function selectAudioDetailTab(next: AudioDetailTab) {
+    setAudioDetailTab(next);
+    window.localStorage.setItem("ra2exp-audio-detail-tab-v1", next);
+  }
   useEffect(() => {
     setPlayerColor("");
     setVideoRequested(false);
     setVideoFailed(false);
     setFrameMode("sequence");
-    setAudioDetailTab("preview");
   }, [asset?.id]);
   if (!asset) return <aside className="detail-panel panel empty-detail"><div className="empty-detail-icon"><Icon name="image" size={30} /></div><strong>选择资产</strong></aside>;
   const canPreview = imageFormats.includes(asset.format);
   const isText = ["ini", "map", "text", "csf"].includes(asset.format);
   const isAudio = audioFormats.includes(asset.format);
   const isModel = ["vxl", "hva"].includes(asset.format);
+  const activeAudioDetailTab = audioDetailTab === "associations" && associations !== null && associations.items.length === 0
+    ? "preview"
+    : audioDetailTab;
   const frameCount = metadata?.frame_count || 1;
   const activeFrame = metadata?.frames?.[frame];
   const activeLimb = metadata?.limbs?.[frame];
@@ -2389,9 +2399,9 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
       <div className="detail-title"><div className="detail-heading-line"><span className="format-pill">{formatLabels[asset.format] || asset.format.toUpperCase()}</span><h2 title={assetDisplayName(asset)}>{assetDisplayName(asset)}</h2></div><div className="detail-actions">{onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}{!isAudio && <a className="icon-button" href={api.contentUrl(asset.id)} title="导出原始文件" aria-label="导出原始文件"><Icon name="download" /></a>}</div></div>
 
       {isAudio && <div className="entity-detail-tabs asset-detail-tabs" role="tablist" aria-label="声音详细信息">
-        <button type="button" role="tab" id="audio-preview-tab" aria-controls="audio-preview-panel" aria-selected={audioDetailTab === "preview"} className={audioDetailTab === "preview" ? "active" : ""} onClick={() => setAudioDetailTab("preview")}>播放</button>
-        <button type="button" role="tab" id="audio-associations-tab" aria-controls="audio-associations-panel" aria-selected={audioDetailTab === "associations"} className={audioDetailTab === "associations" ? "active" : ""} disabled={!associations?.items.length} onClick={() => setAudioDetailTab("associations")}>关联 <em>{associations?.items.length || 0}</em></button>
-        <button type="button" role="tab" id="audio-data-tab" aria-controls="audio-data-panel" aria-selected={audioDetailTab === "data"} className={audioDetailTab === "data" ? "active" : ""} onClick={() => setAudioDetailTab("data")}>数据 <em>{metadataRows.length}</em></button>
+        <button type="button" role="tab" id="audio-preview-tab" aria-controls="audio-preview-panel" aria-selected={activeAudioDetailTab === "preview"} className={activeAudioDetailTab === "preview" ? "active" : ""} onClick={() => selectAudioDetailTab("preview")}>播放</button>
+        <button type="button" role="tab" id="audio-associations-tab" aria-controls="audio-associations-panel" aria-selected={activeAudioDetailTab === "associations"} className={activeAudioDetailTab === "associations" ? "active" : ""} disabled={associations !== null && associations.items.length === 0} onClick={() => selectAudioDetailTab("associations")}>关联 <em>{associations?.items.length || 0}</em></button>
+        <button type="button" role="tab" id="audio-data-tab" aria-controls="audio-data-panel" aria-selected={activeAudioDetailTab === "data"} className={activeAudioDetailTab === "data" ? "active" : ""} onClick={() => selectAudioDetailTab("data")}>数据 <em>{metadataRows.length}</em></button>
       </div>}
 
       {isModel && <div className="preview-block">
@@ -2416,7 +2426,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
         </div>
       )}
 
-      {isAudio && audioDetailTab === "preview" && <div className="audio-tab-panel" role="tabpanel" id="audio-preview-panel" aria-labelledby="audio-preview-tab"><div className="audio-preview compact-audio-preview"><CompactAudioPlayer assetId={asset.id} label={assetDisplayName(asset)} active={audioActive} onPlaybackChange={onAudioPlaybackChange} /><span className="audio-preview-meta">{metadata?.duration_seconds !== undefined ? formatDuration(metadata.duration_seconds) : ""}{metadata?.audio_codec ? ` · ${metadata.audio_codec}` : ""}</span><AudioDownloadAction assetId={asset.id} label={assetDisplayName(asset)} /></div></div>}
+      {isAudio && activeAudioDetailTab === "preview" && <div className="audio-tab-panel" role="tabpanel" id="audio-preview-panel" aria-labelledby="audio-preview-tab"><div className="audio-preview compact-audio-preview"><CompactAudioPlayer assetId={asset.id} label={assetDisplayName(asset)} active={audioActive} onPlaybackChange={onAudioPlaybackChange} /><span className="audio-preview-meta">{metadata?.duration_seconds !== undefined ? formatDuration(metadata.duration_seconds) : ""}{metadata?.audio_codec ? ` · ${metadata.audio_codec}` : ""}</span><AudioDownloadAction assetId={asset.id} label={assetDisplayName(asset)} /></div></div>}
 
       {asset.format === "video" && <div className="video-preview">
         {videoRequested && !videoFailed
@@ -2431,7 +2441,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
         {textAsset && <small>显示 {textAsset.returned_lines} / {textAsset.line_count} 行{textAsset.truncated ? " · 已截断" : ""}</small>}
       </div>}
 
-      {associations && associations.items.length > 0 && (!isAudio || audioDetailTab === "associations") && <div className="asset-associations" role={isAudio ? "tabpanel" : undefined} id={isAudio ? "audio-associations-panel" : undefined} aria-labelledby={isAudio ? "audio-associations-tab" : undefined}>
+      {associations && associations.items.length > 0 && (!isAudio || activeAudioDetailTab === "associations") && <div className="asset-associations" role={isAudio ? "tabpanel" : undefined} id={isAudio ? "audio-associations-panel" : undefined} aria-labelledby={isAudio ? "audio-associations-tab" : undefined}>
         <h3>关联事件</h3>
         <div>{associations.items.map((item, index) => <article key={`${item.scope}-${item.event}-${item.slot}-${index}`}>
           <span>{mediaSlotLabels[item.slot] || item.slot}</span>
@@ -2449,7 +2459,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
         {canChoosePalette && <label><span>配色表</span><select value={paletteId} onChange={(event) => setPaletteId(event.target.value)}><option value="">自动</option>{palettes.map((palette) => <option key={palette.id} value={palette.id}>{palette.display_name}</option>)}</select></label>}
       </div>}
 
-      {(!isAudio || audioDetailTab === "data") && <div className="metadata" role={isAudio ? "tabpanel" : undefined} id={isAudio ? "audio-data-panel" : undefined} aria-labelledby={isAudio ? "audio-data-tab" : undefined}>
+      {(!isAudio || activeAudioDetailTab === "data") && <div className="metadata" role={isAudio ? "tabpanel" : undefined} id={isAudio ? "audio-data-panel" : undefined} aria-labelledby={isAudio ? "audio-data-tab" : undefined}>
         <h3>资产信息</h3>
         <dl>{metadataRows.map((row) => <div className={`metadata-span-${ruleColumnSpan(row.label, row.value)}`} key={row.label}><dt>{row.label}</dt><dd className={row.tone || ""}>{row.value}</dd></div>)}</dl>
       </div>}
