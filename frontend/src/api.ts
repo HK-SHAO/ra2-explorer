@@ -91,6 +91,8 @@ export interface AssetMetadata {
   chunk_count?: number;
   color_count?: number;
   mode?: string;
+  theater?: string | null;
+  object_counts?: Record<string, number>;
 }
 
 export interface TextAsset {
@@ -132,11 +134,16 @@ export interface EntitySummary {
   voxel: boolean;
   renderable: boolean;
   component_count: number;
+  body_format: string | null;
+  media_kinds: Array<"voice" | "sound" | "animation">;
+  media_count: number;
   cost: string | null;
   strength: string | null;
   owner: string | null;
   primary: string | null;
 }
+
+export type AssetSort = "name_asc" | "name_desc" | "size_desc" | "size_asc";
 
 export interface EntityComponentAsset {
   id: string;
@@ -174,6 +181,8 @@ export interface EntityPreview {
   height?: number;
   limb_count?: number;
   voxel_count?: number;
+  source_frame_count?: number;
+  frame_indices?: number[];
   remap_range?: number[];
   warnings?: string[];
 }
@@ -183,7 +192,36 @@ export interface GameEntity extends EntitySummary {
   art: Record<string, string>;
   components: EntityComponent[];
   dependencies: EntityDependency[];
+  media: MediaAssociation[];
   preview: EntityPreview;
+}
+
+export interface MediaSample {
+  name: string;
+  text: string | null;
+  asset: EntityComponentAsset | null;
+}
+
+export interface MediaAssociation {
+  kind: "voice" | "sound" | "animation";
+  slot: string;
+  event: string;
+  source: string;
+  samples: MediaSample[];
+}
+
+export interface AssetAssociation {
+  scope: "entity" | "event";
+  kind: string;
+  slot: string;
+  event: string;
+  entity: EntitySummary | null;
+  text: string | null;
+}
+
+export interface AssetAssociationPage {
+  items: AssetAssociation[];
+  total: number;
 }
 
 export interface EntityPage {
@@ -259,11 +297,19 @@ export const api = {
       body: JSON.stringify({ path, name: name || null }),
     }),
   scanSource: (id: string) => request<Source>(`/api/sources/${id}/scan`, { method: "POST" }),
-  assets: (sourceId: string, query: string, formats: string[], offset = 0, limit = 500) => {
+  assets: (
+    sourceId: string,
+    query: string,
+    formats: string[],
+    offset = 0,
+    limit = 500,
+    sort: AssetSort = "name_asc",
+  ) => {
     const params = new URLSearchParams({
       source_id: sourceId,
       limit: String(limit),
       offset: String(offset),
+      sort,
     });
     if (query.trim()) params.set("q", query.trim());
     if (formats.length) params.set("formats", formats.join(","));
@@ -284,8 +330,27 @@ export const api = {
   entity: (sourceId: string, entityId: string) =>
     request<GameEntity>(
       `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}`,
-    ),
+    ).then((entity) => ({
+      ...entity,
+      body_format: entity.body_format ?? entity.components?.find((item) => item.role === "body")?.asset?.format ?? null,
+      media_kinds: entity.media_kinds ?? [],
+      media_count: entity.media_count ?? entity.media?.length ?? 0,
+      components: entity.components ?? [],
+      dependencies: entity.dependencies ?? [],
+      media: entity.media ?? [],
+      rules: entity.rules ?? {},
+      art: entity.art ?? {},
+      preview: entity.preview ?? {
+        format: null,
+        frame_count: 1,
+        facing_count: 1,
+        supports_facing: false,
+        supports_player_color: false,
+      },
+    })),
   asset: (id: string) => request<Asset>(`/api/assets/${id}`),
+  assetAssociations: (id: string) =>
+    request<AssetAssociationPage>(`/api/assets/${id}/associations`),
   stats: (sourceId: string) => request<Stats>(`/api/stats?source_id=${encodeURIComponent(sourceId)}`),
   palettes: (sourceId: string) =>
     request<Asset[]>(`/api/palettes?source_id=${encodeURIComponent(sourceId)}`),
@@ -306,6 +371,7 @@ export const api = {
     request<ReferenceStatus>("/api/reference-data/names/sync", { method: "POST" }),
   contentUrl: (assetId: string) => `/api/assets/${assetId}/content`,
   mediaUrl: (assetId: string) => `/api/assets/${assetId}/media`,
+  videoUrl: (assetId: string) => `/api/assets/${assetId}/video.mp4`,
   entityPreviewUrl: (
     sourceId: string,
     entityId: string,
@@ -330,8 +396,8 @@ export const api = {
     if (options.paletteId) params.set("palette_id", options.paletteId);
     return `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}/model.json?${params}`;
   },
-  assetModelUrl: (assetId: string, playerColor = "", paletteId = "") => {
-    const params = new URLSearchParams();
+  assetModelUrl: (assetId: string, frame = 0, playerColor = "", paletteId = "") => {
+    const params = new URLSearchParams({ frame: String(frame) });
     if (playerColor) params.set("player_color", playerColor);
     if (paletteId) params.set("palette_id", paletteId);
     return `/api/assets/${assetId}/model.json?${params}`;

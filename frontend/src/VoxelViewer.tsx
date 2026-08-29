@@ -8,6 +8,7 @@ export interface VoxelSceneData {
   frame_count: number;
   part_count: number;
   voxel_count: number;
+  visible_voxel_count?: number;
   bounds: { min: number[]; max: number[] };
   voxels: number[][];
 }
@@ -20,6 +21,7 @@ interface ViewerEngine {
   model: THREE.InstancedMesh | null;
   grid: THREE.GridHelper | null;
   resetView: (() => void) | null;
+  render: (() => void) | null;
 }
 
 export function VoxelViewer({ url, label }: { url: string; label: string }) {
@@ -32,11 +34,9 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
-    let animationFrame = 0;
     let resizeObserver: ResizeObserver | null = null;
     try {
       const scene = new THREE.Scene();
-      scene.fog = new THREE.FogExp2(0x101217, 0.035);
       const camera = new THREE.PerspectiveCamera(38, 1, 0.001, 10_000);
       const renderer = new THREE.WebGLRenderer({
         alpha: true,
@@ -44,25 +44,20 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
         powerPreference: "high-performance",
       });
       renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.NoToneMapping;
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.domElement.tabIndex = 0;
       renderer.domElement.setAttribute("aria-label", `${label} 交互式三维模型`);
       mount.appendChild(renderer.domElement);
 
       const controls = new OrbitControls(camera, renderer.domElement);
-      controls.enableDamping = true;
-      controls.dampingFactor = 0.075;
+      controls.enableDamping = false;
       controls.screenSpacePanning = true;
       controls.minDistance = 0.05;
       controls.maxDistance = 1_000;
 
-      scene.add(new THREE.HemisphereLight(0xcdd9ee, 0x29231f, 2.1));
-      const keyLight = new THREE.DirectionalLight(0xffffff, 2.4);
-      keyLight.position.set(4, 7, 5);
-      scene.add(keyLight);
-      const fillLight = new THREE.DirectionalLight(0xb4c7ff, 1.1);
-      fillLight.position.set(-5, 2, -3);
-      scene.add(fillLight);
+      const render = () => renderer.render(scene, camera);
+      controls.addEventListener("change", render);
 
       const engine: ViewerEngine = {
         scene,
@@ -72,6 +67,7 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
         model: null,
         grid: null,
         resetView: null,
+        render,
       };
       engineRef.current = engine;
 
@@ -81,23 +77,18 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
         renderer.setSize(width, height, false);
         camera.aspect = width / height;
         camera.updateProjectionMatrix();
+        render();
       };
       resizeObserver = new ResizeObserver(resize);
       resizeObserver.observe(mount);
       resize();
 
-      const animate = () => {
-        controls.update();
-        renderer.render(scene, camera);
-        animationFrame = requestAnimationFrame(animate);
-      };
-      animate();
+      render();
     } catch {
       setError("当前浏览器无法创建 WebGL 视图");
     }
 
     return () => {
-      cancelAnimationFrame(animationFrame);
       resizeObserver?.disconnect();
       const engine = engineRef.current;
       if (!engine) return;
@@ -123,7 +114,7 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
         return response.json() as Promise<VoxelSceneData>;
       })
       .then((scene) => {
-        if (scene.version !== 1 || !Array.isArray(scene.voxels)) {
+        if (![1, 2].includes(scene.version) || !Array.isArray(scene.voxels)) {
           throw new Error("模型数据版本不受支持");
         }
         setData(scene);
@@ -144,10 +135,7 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
     disposeModel(engine);
 
     const geometry = new THREE.BoxGeometry(1, 1, 1);
-    const material = new THREE.MeshStandardMaterial({
-      metalness: 0.03,
-      roughness: 0.74,
-    });
+    const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
     const model = new THREE.InstancedMesh(geometry, material, data.voxels.length);
     model.instanceMatrix.setUsage(THREE.StaticDrawUsage);
     const transform = new THREE.Object3D();
@@ -201,6 +189,7 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
       engine.controls.minDistance = Math.max(diameter * 0.08, 0.02);
       engine.controls.maxDistance = Math.max(diameter * 30, 20);
       engine.controls.update();
+      engine.render?.();
     };
     engine.resetView = resetView;
     resetView();
@@ -209,7 +198,6 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
   return (
     <div className="voxel-viewer" aria-busy={loading}>
       <div ref={mountRef} className="voxel-canvas" />
-      {data && !loading && <span className="voxel-count">{data.voxel_count.toLocaleString()} 体素</span>}
       {data && !loading && (
         <button type="button" className="voxel-reset" onClick={() => engineRef.current?.resetView?.()}>
           重置视角
@@ -241,4 +229,5 @@ function disposeModel(engine: ViewerEngine) {
     engine.grid = null;
   }
   engine.resetView = null;
+  engine.render = null;
 }

@@ -3,7 +3,9 @@ import { FormEvent, lazy, ReactNode, Suspense, useEffect, useMemo, useState } fr
 import {
   api,
   Asset,
+  AssetAssociationPage,
   AssetMetadata,
+  AssetSort,
   DiscoveryResult,
   EntityDependency,
   EntityKind,
@@ -11,7 +13,6 @@ import {
   GameEntity,
   GameInstallation,
   PlayerColor,
-  SemanticDiagnostics,
   Source,
   Stats,
   TextAsset,
@@ -73,7 +74,7 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
 
 const formatLabels: Record<string, string> = {
   shp: "SHP 动画",
-  pal: "PAL 调色板",
+  pal: "PAL 配色表",
   mix: "MIX 归档",
   ini: "INI 配置",
   csf: "CSF 文本",
@@ -171,6 +172,54 @@ const dependencyPropertyLabels: Record<string, string> = {
   radiation: "辐射",
 };
 
+const mediaSlotLabels: Record<string, string> = {
+  select: "选中",
+  move: "移动",
+  attack: "攻击",
+  feedback: "受击",
+  special_attack: "特殊攻击",
+  capture: "占领",
+  harvest: "采集",
+  die: "阵亡",
+  create: "建造完成",
+  deploy: "部署",
+  undeploy: "取消部署",
+  enter: "进入目标",
+  enter_transport: "进入载具",
+  leave_transport: "离开载具",
+  movement: "行驶",
+  start_moving: "开始移动",
+  stop_moving: "停止移动",
+  turret_rotate: "炮塔转动",
+  activate: "启动",
+  deactivate: "关闭",
+  cloak: "隐形",
+  uncloak: "解除隐形",
+  chrono_in: "超时空进入",
+  chrono_out: "超时空离开",
+  crashing: "坠毁",
+  impact_land: "撞击地面",
+  sinking: "沉没",
+  impact_water: "落水",
+  primary: "主武器",
+  secondary: "副武器",
+  elite_primary: "精英主武器",
+  elite_secondary: "精英副武器",
+  body_animation: "主体动画",
+  body_hva: "主体动作",
+  turret_hva: "炮塔动作",
+  barrel_hva: "炮管动作",
+};
+
+const mapObjectLabels: Record<string, string> = {
+  structure: "建筑",
+  unit: "载具",
+  infantry: "步兵",
+  aircraft: "航空器",
+  terrain: "地形对象",
+  waypoint: "路径点",
+};
+
 const playerColorLabels: Record<string, string> = {
   red: "红色",
   blue: "蓝色",
@@ -208,7 +257,10 @@ function stateLabel(state: Source["state"]) {
 }
 
 function assetIcon(format: string): IconName {
-  if (["shp", "tmp", "vxl", "pcx"].includes(format)) return "image";
+  if (["vxl", "hva"].includes(format)) return "unit";
+  if (["shp", "tmp", "pcx"].includes(format)) return "image";
+  if (format === "map") return "grid";
+  if (format === "video") return "play";
   if (format === "pal") return "swatch";
   if (format === "mix") return "archive";
   if (["wav", "aud", "bag_audio"].includes(format)) return "play";
@@ -216,11 +268,12 @@ function assetIcon(format: string): IconName {
 }
 
 type LayoutMode = "list" | "grid";
+type EntitySort = "name_asc" | "name_desc" | "cost_desc" | "strength_desc";
 
 const audioFormats = ["bag_audio", "wav", "aud"];
-const imageFormats = ["shp", "tmp", "pcx", "pal"];
+const imageFormats = ["shp", "tmp", "pcx", "pal", "map"];
 const defaultVisibleFormats = [
-  "vxl", "shp", "video", "map", "bag_audio", "wav", "aud", "tmp", "pcx", "ini", "csf", "text",
+  "vxl", "hva", "shp", "video", "bag_audio", "wav", "aud",
 ];
 const assetCategories: Array<{
   id: string;
@@ -228,21 +281,48 @@ const assetCategories: Array<{
   formats: string[];
   icon: IconName;
 }> = [
-  { id: "core", label: "核心素材", formats: ["vxl", "shp", "video", "map", ...audioFormats], icon: "spark" },
-  { id: "models", label: "单位模型", formats: ["vxl"], icon: "unit" },
   { id: "voices", label: "游戏语音", formats: ["bag_audio"], icon: "play" },
   { id: "sounds", label: "游戏音效", formats: ["wav", "aud"], icon: "play" },
-  { id: "animations", label: "动画", formats: ["shp", "video"], icon: "image" },
+  { id: "animations", label: "动画", formats: ["shp", "hva", "video"], icon: "image" },
   { id: "maps", label: "地图", formats: ["map"], icon: "grid" },
   { id: "images", label: "图像", formats: ["pcx"], icon: "image" },
   { id: "terrain", label: "地形素材", formats: ["tmp"], icon: "image" },
   { id: "rules", label: "规则文本", formats: ["ini", "csf", "text"], icon: "file" },
-  { id: "all", label: "全部资源", formats: [], icon: "archive" },
 ];
+
+const entityKindOrder: EntityKind[] = ["vehicle", "aircraft", "infantry", "building"];
+
+const entityTagLabels: Record<string, string> = {
+  "body:vxl": "三维体素",
+  "body:shp": "帧动画",
+  "media:voice": "带语音",
+  "media:sound": "带音效",
+  "media:animation": "带动画",
+};
+
+function entityTagMatches(entity: EntitySummary, tag: string) {
+  if (!tag) return true;
+  const [group, value] = tag.split(":", 2);
+  if (group === "body") return entity.body_format === value;
+  if (group === "media") return (entity.media_kinds ?? []).includes(value as "voice" | "sound" | "animation");
+  return true;
+}
+
+function sortEntities(entities: EntitySummary[], sort: EntitySort) {
+  const selected = [...entities];
+  const numeric = (value: string | null) => Number.parseInt(value || "0", 10) || 0;
+  selected.sort((left, right) => {
+    if (sort === "cost_desc") return numeric(right.cost) - numeric(left.cost) || left.display_name.localeCompare(right.display_name, "zh-CN");
+    if (sort === "strength_desc") return numeric(right.strength) - numeric(left.strength) || left.display_name.localeCompare(right.display_name, "zh-CN");
+    const compared = left.display_name.localeCompare(right.display_name, "zh-CN", { numeric: true });
+    return sort === "name_desc" ? -compared : compared;
+  });
+  return selected;
+}
 
 function initialVisibleFormats() {
   try {
-    const stored = JSON.parse(window.localStorage.getItem("ra2exp-visible-formats") || "null");
+    const stored = JSON.parse(window.localStorage.getItem("ra2exp-visible-formats-v2") || "null");
     if (Array.isArray(stored) && stored.every((item) => typeof item === "string")) return stored as string[];
   } catch {
     // Ignore invalid local preferences and use the product defaults.
@@ -251,7 +331,6 @@ function initialVisibleFormats() {
 }
 
 function categoryCount(stats: Stats, formats: string[]) {
-  if (!formats.length) return stats.total_assets;
   const selected = new Set(formats);
   return stats.formats.reduce(
     (total, item) => total + (selected.has(item.format) ? item.count : 0),
@@ -260,7 +339,7 @@ function categoryCount(stats: Stats, formats: string[]) {
 }
 
 function App() {
-  const [view, setView] = useState<"assets" | "entities">("assets");
+  const [view, setView] = useState<"assets" | "entities">("entities");
   const [sources, setSources] = useState<Source[]>([]);
   const [sourceId, setSourceId] = useState("");
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -270,7 +349,9 @@ function App() {
   const [palettes, setPalettes] = useState<Asset[]>([]);
   const [playerColors, setPlayerColors] = useState<PlayerColor[]>([]);
   const [assetQuery, setAssetQuery] = useState("");
-  const [assetCategory, setAssetCategory] = useState("core");
+  const [assetCategory, setAssetCategory] = useState("animations");
+  const [assetFormatTag, setAssetFormatTag] = useState("");
+  const [assetSort, setAssetSort] = useState<AssetSort>("name_asc");
   const [enabledFormats, setEnabledFormats] = useState<string[]>(initialVisibleFormats);
   const [layout, setLayout] = useState<LayoutMode>(() =>
     window.localStorage.getItem("ra2exp-layout") === "grid" ? "grid" : "list",
@@ -280,8 +361,9 @@ function App() {
   const [entityKinds, setEntityKinds] = useState<Array<{ kind: EntityKind; count: number }>>([]);
   const [entityKind, setEntityKind] = useState<EntityKind | "">("vehicle");
   const [entityQuery, setEntityQuery] = useState("");
-  const [entityAvailability, setEntityAvailability] = useState<"" | "true" | "false">("");
-  const [semanticDiagnostics, setSemanticDiagnostics] = useState<SemanticDiagnostics | null>(null);
+  const [entityAvailability, setEntityAvailability] = useState<"" | "true" | "false">("true");
+  const [entityTag, setEntityTag] = useState("");
+  const [entitySort, setEntitySort] = useState<EntitySort>("name_asc");
   const [selectedEntityId, setSelectedEntityId] = useState("");
   const [selectedEntity, setSelectedEntity] = useState<GameEntity | null>(null);
   const [entityLoading, setEntityLoading] = useState(false);
@@ -289,6 +371,7 @@ function App() {
   const [selectedId, setSelectedId] = useState("");
   const [selected, setSelected] = useState<Asset | null>(null);
   const [metadata, setMetadata] = useState<AssetMetadata | null>(null);
+  const [associations, setAssociations] = useState<AssetAssociationPage | null>(null);
   const [textAsset, setTextAsset] = useState<TextAsset | null>(null);
   const [textQuery, setTextQuery] = useState("");
   const [frame, setFrame] = useState(0);
@@ -301,13 +384,30 @@ function App() {
   const [addOpen, setAddOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [discovery, setDiscovery] = useState<DiscoveryResult>({ candidates: [], checked_locations: [], official_sources: [] });
+  const [discoveryLoaded, setDiscoveryLoaded] = useState(false);
 
   const activeSource = sources.find((item) => item.id === sourceId) ?? null;
   const sourceRevision = activeSource?.scanned_at || "";
-  const selectedCategory = assetCategories.find((item) => item.id === assetCategory) || assetCategories[0];
-  const assetFormats = (selectedCategory.formats.length ? selectedCategory.formats : enabledFormats)
+  const visibleCategories = assetCategories.filter((item) =>
+    item.formats.some((formatName) => enabledFormats.includes(formatName)),
+  );
+  const selectedCategory = visibleCategories.find((item) => item.id === assetCategory)
+    || visibleCategories[0]
+    || null;
+  const selectedCategoryId = selectedCategory?.id || "";
+  const categoryFormats = (selectedCategory?.formats || [])
     .filter((formatName) => enabledFormats.includes(formatName));
+  const assetFormats = assetFormatTag && categoryFormats.includes(assetFormatTag)
+    ? [assetFormatTag]
+    : categoryFormats;
   const assetFormatKey = assetFormats.join(",");
+  const visibleEntities = useMemo(
+    () => sortEntities(entities.filter((entity) => entityTagMatches(entity, entityTag)), entitySort),
+    [entities, entityTag, entitySort],
+  );
+  const entityTags = Object.keys(entityTagLabels)
+    .map((tag) => ({ tag, count: entities.filter((entity) => entityTagMatches(entity, tag)).length }))
+    .filter((item) => item.count > 0);
 
   function updateLayout(next: LayoutMode) {
     setLayout(next);
@@ -317,8 +417,46 @@ function App() {
   function updateEnabledFormats(next: string[]) {
     const unique = [...new Set(next)];
     setEnabledFormats(unique);
-    window.localStorage.setItem("ra2exp-visible-formats", JSON.stringify(unique));
+    window.localStorage.setItem("ra2exp-visible-formats-v2", JSON.stringify(unique));
   }
+
+  function selectEntityKind(kind: EntityKind) {
+    setView("entities");
+    setEntityKind(kind);
+    setEntityTag("");
+  }
+
+  function selectAssetCategory(category: string) {
+    setView("assets");
+    setAssetCategory(category);
+    setAssetFormatTag("");
+  }
+
+  function openAddSource() {
+    setAddOpen(true);
+    if (discoveryLoaded) return;
+    setDiscoveryLoaded(true);
+    api.discovery()
+      .then(setDiscovery)
+      .catch(() => setDiscovery({ candidates: [], checked_locations: [], official_sources: [] }));
+  }
+
+  useEffect(() => {
+    if (selectedCategoryId && selectedCategoryId !== assetCategory) {
+      setAssetCategory(selectedCategoryId);
+    }
+  }, [assetCategory, selectedCategoryId]);
+
+  useEffect(() => {
+    if (assetFormatTag && !categoryFormats.includes(assetFormatTag)) setAssetFormatTag("");
+  }, [assetFormatTag, categoryFormats]);
+
+  useEffect(() => {
+    if (view !== "entities" || entityLoading) return;
+    if (!visibleEntities.some((entity) => entity.id === selectedEntityId)) {
+      setSelectedEntityId(visibleEntities[0]?.id || "");
+    }
+  }, [view, entityLoading, visibleEntities, selectedEntityId]);
 
   async function refreshSources(preferredId?: string) {
     const next = await api.sources();
@@ -330,13 +468,11 @@ function App() {
   useEffect(() => {
     Promise.all([
       api.sources(),
-      api.discovery().catch(() => ({ candidates: [], checked_locations: [], official_sources: [] })),
       api.playerColors().catch(() => []),
     ])
-      .then(([nextSources, nextDiscovery, nextPlayerColors]) => {
+      .then(([nextSources, nextPlayerColors]) => {
         setSources(nextSources);
         setSourceId(nextSources[0]?.id || "");
-        setDiscovery(nextDiscovery);
         setPlayerColors(nextPlayerColors);
       })
       .catch((reason: Error) => setError(reason.message))
@@ -348,7 +484,7 @@ function App() {
     setSelected(null);
     setSelectedEntityId("");
     setSelectedEntity(null);
-    setSemanticDiagnostics(null);
+    setAssociations(null);
     setAssets([]);
     setEntities([]);
     setTotal(0);
@@ -370,15 +506,6 @@ function App() {
   }, [sourceId, sourceRevision]);
 
   useEffect(() => {
-    if (!sourceId || view !== "entities") return;
-    let cancelled = false;
-    api.semanticDiagnostics(sourceId)
-      .then((result) => !cancelled && setSemanticDiagnostics(result))
-      .catch((reason: Error) => !cancelled && setError(reason.message));
-    return () => { cancelled = true; };
-  }, [sourceId, sourceRevision, view]);
-
-  useEffect(() => {
     if (!sourceId || view !== "assets") return;
     if (!assetFormats.length) {
       setAssets([]);
@@ -392,7 +519,7 @@ function App() {
     setAssets([]);
     setTotal(0);
     const timer = window.setTimeout(() => {
-      api.assets(sourceId, assetQuery, assetFormatKey ? assetFormatKey.split(",") : [])
+      api.assets(sourceId, assetQuery, assetFormatKey ? assetFormatKey.split(",") : [], 0, 500, assetSort)
         .then((page) => {
           if (cancelled) return;
           setAssets(page.items);
@@ -414,7 +541,7 @@ function App() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [sourceId, sourceRevision, assetQuery, assetFormatKey, view]);
+  }, [sourceId, sourceRevision, assetQuery, assetFormatKey, assetSort, view]);
 
   useEffect(() => {
     if (!sourceId || view !== "entities") return;
@@ -484,8 +611,23 @@ function App() {
   }, [selectedId]);
 
   useEffect(() => {
-    if (!playing || selected?.format !== "shp" || !metadata?.frame_count || metadata.frame_count < 2) return;
-    const timer = window.setInterval(() => setFrame((current) => (current + 1) % metadata.frame_count!), 140);
+    setAssociations(null);
+    if (!selected || ![...audioFormats, "shp", "hva", "vxl", "video"].includes(selected.format)) {
+      return;
+    }
+    let cancelled = false;
+    api.assetAssociations(selected.id)
+      .then((result) => !cancelled && setAssociations(result))
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [selected]);
+
+  useEffect(() => {
+    if (!playing || !selected || !["shp", "hva"].includes(selected.format) || !metadata?.frame_count || metadata.frame_count < 2) return;
+    const timer = window.setInterval(
+      () => setFrame((current) => (current + 1) % metadata.frame_count!),
+      selected.format === "hva" ? 350 : 140,
+    );
     return () => window.clearInterval(timer);
   }, [playing, metadata, selected]);
 
@@ -536,7 +678,7 @@ function App() {
     if (assetPageLoading || assets.length >= total || !sourceId || !assetFormats.length) return;
     setAssetPageLoading(true);
     try {
-      const page = await api.assets(sourceId, assetQuery, assetFormats, assets.length);
+      const page = await api.assets(sourceId, assetQuery, assetFormats, assets.length, 500, assetSort);
       setAssets((current) => {
         const known = new Set(current.map((asset) => asset.id));
         return [...current, ...page.items.filter((asset) => !known.has(asset.id))];
@@ -558,12 +700,12 @@ function App() {
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark" aria-hidden="true"><span>R</span><i /></div>
-          <div><strong>RA2 Explorer</strong><small>本地资产工作台</small></div>
+          <div><strong>RA2 Explorer</strong></div>
         </div>
         <div className="topbar-actions">
           {activeSource && <span className={`source-status ${activeSource.state}`}><i />{stateLabel(activeSource.state)}</span>}
-          <button className="button ghost compact" onClick={() => setAddOpen(true)}><Icon name="folder" />添加目录</button>
-          <button className="button ghost compact settings-button" onClick={() => setSettingsOpen(true)}><Icon name="settings" />素材设置</button>
+          <button className="button ghost compact" onClick={openAddSource}><Icon name="folder" />添加目录</button>
+          <button className="button ghost compact settings-button" onClick={() => setSettingsOpen(true)}><Icon name="settings" />显示设置</button>
           <button className="button primary compact" disabled={busy || !activeSource} onClick={() => activeSource && runAction(() => api.scanSource(activeSource.id), "目录索引已更新")}><Icon name="refresh" />重新扫描</button>
         </div>
       </header>
@@ -572,7 +714,7 @@ function App() {
         <EmptyLibrary
           busy={busy}
           discoveries={discovery.candidates}
-          onAdd={() => setAddOpen(true)}
+          onAdd={openAddSource}
           onImport={(installation) => runAction(
             () => api.addSource(installation.path, installation.name),
             `${installation.edition} 已导入`,
@@ -581,53 +723,32 @@ function App() {
       ) : (
         <main className="workspace">
           <aside className="source-panel panel">
-            <section className="source-heading">
-              <span className="eyebrow">当前资料库</span>
+            {sources.length > 1 && <section className="source-heading">
               <label className="source-select-wrap">
                 <select value={sourceId} onChange={(event) => setSourceId(event.target.value)} aria-label="选择资料库">
                   {sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}
                 </select>
                 <Icon name="chevron" size={15} />
               </label>
-            </section>
+            </section>}
 
-            <section className="summary-grid" aria-label="索引统计">
-              {view === "assets" ? <>
-                <div><strong>{stats.total_assets.toLocaleString("zh-CN")}</strong><span>资产</span></div>
-                <div><strong>{activeSource?.archive_count.toLocaleString("zh-CN")}</strong><span>归档</span></div>
-              </> : <>
-                <div><strong>{semanticDiagnostics?.entity_count.toLocaleString("zh-CN") || "—"}</strong><span>实体</span></div>
-                <div><strong>{semanticDiagnostics ? `${semanticDiagnostics.renderable_percent}%` : "—"}</strong><span>可预览</span></div>
-              </>}
-            </section>
-
-            <div className="view-switch" role="group" aria-label="浏览方式">
-              <button className={view === "assets" ? "active" : ""} onClick={() => setView("assets")}><Icon name="archive" size={15} />资源文件</button>
-              <button className={view === "entities" ? "active" : ""} onClick={() => setView("entities")}><Icon name="unit" size={16} />游戏单位</button>
-            </div>
-
-            {view === "assets" ? <nav className="format-nav" aria-label="素材分类" tabIndex={0}>
-              {assetCategories.map((item) => (
-                <button key={item.id} className={assetCategory === item.id ? "active" : ""} onClick={() => setAssetCategory(item.id)}>
-                  <span><Icon name={item.icon} />{item.label}</span><em>{categoryCount(stats, (item.formats.length ? item.formats : enabledFormats).filter((formatName) => enabledFormats.includes(formatName)))}</em>
+            <nav className="library-tree" aria-label="浏览分类" tabIndex={0}>
+              <section className="tree-branch">
+                <div className="tree-parent"><Icon name="unit" /><strong>单位</strong><em>{entityKinds.reduce((count, item) => count + item.count, 0)}</em></div>
+                <div className="tree-children">
+                  {entityKindOrder.map((kind) => {
+                    const count = entityKinds.find((item) => item.kind === kind)?.count || 0;
+                    return <button key={kind} className={view === "entities" && entityKind === kind ? "active" : ""} onClick={() => selectEntityKind(kind)}><span>{entityKindLabels[kind]}</span><em>{count}</em></button>;
+                  })}
+                </div>
+              </section>
+              {visibleCategories.map((item) => (
+                <button key={item.id} className={`tree-leaf ${view === "assets" && assetCategory === item.id ? "active" : ""}`} onClick={() => selectAssetCategory(item.id)}>
+                  <span><Icon name={item.icon} />{item.label}</span><em>{categoryCount(stats, item.formats.filter((formatName) => enabledFormats.includes(formatName)))}</em>
                 </button>
               ))}
-            </nav> : <nav className="format-nav entity-kind-nav" aria-label="单位类型" tabIndex={0}>
-              <button className={!entityKind ? "active" : ""} onClick={() => setEntityKind("")}><span><Icon name="unit" />全部单位</span><em>{entityKinds.reduce((sum, item) => sum + item.count, 0)}</em></button>
-              {entityKinds.map((item) => (
-                <button key={item.kind} className={entityKind === item.kind ? "active" : ""} onClick={() => setEntityKind(item.kind)}>
-                  <span><Icon name="unit" />{entityKindLabels[item.kind]}</span><em>{item.count}</em>
-                </button>
-              ))}
-            </nav>}
+            </nav>
 
-            {view === "entities" && <SemanticCoverageCard
-              diagnostics={semanticDiagnostics}
-              onShowMissing={() => {
-                setEntityKind("");
-                setEntityAvailability("false");
-              }}
-            />}
           </aside>
 
           {view === "assets" ? <><section className="asset-panel panel">
@@ -635,6 +756,20 @@ function App() {
               <label className="search-box"><Icon name="search" /><input value={assetQuery} onChange={(event) => setAssetQuery(event.target.value)} placeholder="搜索名称或 CRC…" aria-label="搜索资产" />{assetQuery && <button onClick={() => setAssetQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</label>
               <span className="result-count">显示 {assets.length} / {total}</span>
               <LayoutToggle layout={layout} onChange={updateLayout} />
+            </div>
+            <div className="filter-strip">
+              <div className="tag-filter" role="group" aria-label="按格式筛选">
+                {categoryFormats.length > 1 && <button className={!assetFormatTag ? "active" : ""} onClick={() => setAssetFormatTag("")}>不限格式</button>}
+                {categoryFormats.map((formatName) => <button key={formatName} className={assetFormatTag === formatName || categoryFormats.length === 1 ? "active" : ""} onClick={() => setAssetFormatTag(categoryFormats.length === 1 ? "" : formatName)}>
+                  {formatLabels[formatName] || formatName.toUpperCase()}<em>{stats.formats.find((item) => item.format === formatName)?.count || 0}</em>
+                </button>)}
+              </div>
+              <label className="sort-control"><span>排序</span><select value={assetSort} onChange={(event) => setAssetSort(event.target.value as AssetSort)}>
+                <option value="name_asc">名称 A–Z</option>
+                <option value="name_desc">名称 Z–A</option>
+                <option value="size_desc">体积从大到小</option>
+                <option value="size_asc">体积从小到大</option>
+              </select></label>
             </div>
             {layout === "list" && <div className="list-heading"><span>资产</span><span>大小</span></div>}
             <div className={`asset-list ${layout === "grid" ? "asset-grid" : ""}`} tabIndex={0} aria-label="资产列表" onScroll={(event) => { const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void loadMoreAssets(); }}>
@@ -648,7 +783,7 @@ function App() {
               )) : assets.map((asset) => <AssetGridCard key={asset.id} asset={asset} selected={selectedId === asset.id} onSelect={setSelectedId} />)}
               {assets.length < total && <button className="load-more" disabled={assetPageLoading} onClick={() => void loadMoreAssets()}>{assetPageLoading ? "正在载入…" : `载入更多（剩余 ${(total - assets.length).toLocaleString("zh-CN")}）`}</button>}
               {assetPageLoading && assets.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在载入资产…</strong></div>}
-              {!assetPageLoading && assets.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的资产</strong><span>尝试清除关键词或切换分类。</span><button onClick={() => { setAssetQuery(""); setAssetCategory("core"); }}>清除筛选</button></div>}
+              {!assetPageLoading && assets.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的资产</strong><button onClick={() => { setAssetQuery(""); setAssetFormatTag(""); }}>清除筛选</button></div>}
             </div>
           </section>
 
@@ -667,16 +802,22 @@ function App() {
             setPaletteId={setPaletteId}
             playerColors={playerColors}
             previewUrl={previewUrl}
+            associations={associations}
           />
           </> : <>
             <EntityListPanel
-              entities={entities}
+              entities={visibleEntities}
               total={entityTotal}
               loading={entityLoading}
               query={entityQuery}
               setQuery={setEntityQuery}
               availability={entityAvailability}
               setAvailability={setEntityAvailability}
+              tags={entityTags}
+              selectedTag={entityTag}
+              setSelectedTag={setEntityTag}
+              sort={entitySort}
+              setSort={setEntitySort}
               selectedId={selectedEntityId}
               setSelectedId={setSelectedEntityId}
               sourceId={sourceId}
@@ -687,7 +828,6 @@ function App() {
               sourceId={sourceId}
               entity={selectedEntity}
               loading={entityDetailLoading}
-              palettes={palettes}
               playerColors={playerColors}
             />
           </>}
@@ -711,9 +851,7 @@ function EmptyLibrary({ busy, discoveries, onAdd, onImport }: {
   return (
     <main className="empty-library">
       <div className="empty-visual" aria-hidden="true"><div className="disc"><span /><i /><b /></div><div className="scan-line" /></div>
-      <span className="eyebrow">欢迎来到本地资料库</span>
-      <h1>把尘封的战场资产<br />重新带到眼前</h1>
-      <p>只读扫描你合法安装的《红色警戒 2》目录，解析 MIX、SHP、VXL、TMP、CSF 与音频；游戏文件始终留在本机。</p>
+      <h1>导入 RA2 游戏目录</h1>
       {discoveries.length > 0 && <div className="detected-installs">
         {discoveries.slice(0, 2).map((installation) => <button key={installation.path} disabled={busy} onClick={() => onImport(installation)}>
           <Icon name="folder" /><span><strong>{installation.edition}</strong><small>{installation.path}</small></span><em>导入</em>
@@ -736,7 +874,7 @@ function LayoutToggle({ layout, onChange }: { layout: LayoutMode; onChange: (lay
 }
 
 function AssetGridCard({ asset, selected, onSelect }: { asset: Asset; selected: boolean; onSelect: (id: string) => void }) {
-  const hasThumbnail = ["shp", "vxl", "tmp", "pcx", "pal"].includes(asset.format);
+  const hasThumbnail = ["shp", "vxl", "tmp", "pcx", "pal", "map"].includes(asset.format);
   const isAudio = audioFormats.includes(asset.format);
   return (
     <button className={`asset-card ${selected ? "selected" : ""}`} onClick={() => onSelect(asset.id)}>
@@ -750,27 +888,7 @@ function AssetGridCard({ asset, selected, onSelect }: { asset: Asset; selected: 
   );
 }
 
-function SemanticCoverageCard({ diagnostics, onShowMissing }: {
-  diagnostics: SemanticDiagnostics | null;
-  onShowMissing: () => void;
-}) {
-  const missing = diagnostics ? diagnostics.entity_count - diagnostics.renderable_count : 0;
-  return (
-    <section className="reference-card semantic-card" aria-label="语义覆盖">
-      <div className="reference-title"><Icon name="unit" /><span>语义覆盖</span></div>
-      {diagnostics ? <>
-        <dl>
-          <div><dt>组件关联</dt><dd>{diagnostics.resolved_component_count} / {diagnostics.component_count}</dd></div>
-          <div><dt>本地化</dt><dd>{diagnostics.localized_percent}%</dd></div>
-          <div><dt>未解析依赖</dt><dd className={diagnostics.unresolved_dependency_count ? "warning" : ""}>{diagnostics.unresolved_dependency_count}</dd></div>
-        </dl>
-        <button disabled={!missing} onClick={onShowMissing}>查看 {missing} 个缺少主体的实体<Icon name="chevron" size={13} /></button>
-      </> : <p>正在分析规则与资源关联…</p>}
-    </section>
-  );
-}
-
-function EntityListPanel({ entities, total, loading, query, setQuery, availability, setAvailability, selectedId, setSelectedId, sourceId, layout, setLayout }: {
+function EntityListPanel({ entities, total, loading, query, setQuery, availability, setAvailability, tags, selectedTag, setSelectedTag, sort, setSort, selectedId, setSelectedId, sourceId, layout, setLayout }: {
   entities: EntitySummary[];
   total: number;
   loading: boolean;
@@ -778,6 +896,11 @@ function EntityListPanel({ entities, total, loading, query, setQuery, availabili
   setQuery: (value: string) => void;
   availability: "" | "true" | "false";
   setAvailability: (value: "" | "true" | "false") => void;
+  tags: Array<{ tag: string; count: number }>;
+  selectedTag: string;
+  setSelectedTag: (value: string) => void;
+  sort: EntitySort;
+  setSort: (value: EntitySort) => void;
   selectedId: string;
   setSelectedId: (id: string) => void;
   sourceId: string;
@@ -787,17 +910,25 @@ function EntityListPanel({ entities, total, loading, query, setQuery, availabili
   return (
     <section className="asset-panel entity-panel panel">
       <div className="asset-toolbar">
-        <label className="search-box"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索中文名、单位 ID、武器或阵营…" aria-label="搜索游戏单位" />{query && <button onClick={() => setQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</label>
-        <select className="entity-filter" value={availability} onChange={(event) => setAvailability(event.target.value as "" | "true" | "false")} aria-label="按预览状态筛选">
-          <option value="">全部状态</option>
-          <option value="true">可预览</option>
-          <option value="false">缺少主体</option>
-        </select>
+        <label className="search-box"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索中文名、单位 ID、武器或阵营…" aria-label="搜索单位" />{query && <button onClick={() => setQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</label>
         <span className="result-count">显示 {entities.length} / {total}</span>
         <LayoutToggle layout={layout} onChange={setLayout} />
       </div>
-      {layout === "list" && <div className="list-heading entity-list-heading"><span>游戏单位</span><span>类型</span><span>数值</span></div>}
-      <div className={`asset-list ${layout === "grid" ? "asset-grid entity-grid" : ""}`} tabIndex={0} aria-label="游戏单位列表">
+      <div className="filter-strip">
+        <div className="tag-filter" role="group" aria-label="按单位特征筛选">
+          <button className={availability === "true" ? "active" : ""} onClick={() => setAvailability(availability === "true" ? "" : "true")}>可预览</button>
+          <button className={availability === "false" ? "active" : ""} onClick={() => setAvailability(availability === "false" ? "" : "false")}>缺少主体</button>
+          {tags.map((item) => <button key={item.tag} className={selectedTag === item.tag ? "active" : ""} onClick={() => setSelectedTag(selectedTag === item.tag ? "" : item.tag)}>{entityTagLabels[item.tag]}<em>{item.count}</em></button>)}
+        </div>
+        <label className="sort-control"><span>排序</span><select value={sort} onChange={(event) => setSort(event.target.value as EntitySort)}>
+          <option value="name_asc">名称 A–Z</option>
+          <option value="name_desc">名称 Z–A</option>
+          <option value="cost_desc">造价从高到低</option>
+          <option value="strength_desc">生命值从高到低</option>
+        </select></label>
+      </div>
+      {layout === "list" && <div className="list-heading entity-list-heading"><span>单位</span><span>类型</span><span>数值</span></div>}
+      <div className={`asset-list ${layout === "grid" ? "asset-grid entity-grid" : ""}`} tabIndex={0} aria-label="单位列表">
         {layout === "list" ? entities.map((entity) => (
           <button key={entity.id} className={`asset-row entity-row ${selectedId === entity.id ? "selected" : ""}`} onClick={() => setSelectedId(entity.id)}>
             <span className={`file-icon entity-icon ${entity.renderable ? "ready" : "missing"}`}><Icon name="unit" /></span>
@@ -808,7 +939,7 @@ function EntityListPanel({ entities, total, loading, query, setQuery, availabili
           </button>
         )) : entities.map((entity) => <EntityGridCard key={entity.id} entity={entity} sourceId={sourceId} selected={selectedId === entity.id} onSelect={setSelectedId} />)}
         {loading && entities.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在解析规则实体…</strong></div>}
-        {!loading && entities.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的单位</strong><span>尝试清除关键词或预览状态。</span><button onClick={() => { setQuery(""); setAvailability(""); }}>清除筛选</button></div>}
+        {!loading && entities.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的单位</strong><button onClick={() => { setQuery(""); setAvailability("true"); setSelectedTag(""); }}>清除筛选</button></div>}
       </div>
     </section>
   );
@@ -825,17 +956,15 @@ function EntityGridCard({ entity, sourceId, selected, onSelect }: { entity: Enti
   );
 }
 
-function EntityDetailPanel({ sourceId, entity, loading, palettes, playerColors }: {
+function EntityDetailPanel({ sourceId, entity, loading, playerColors }: {
   sourceId: string;
   entity: GameEntity | null;
   loading: boolean;
-  palettes: Asset[];
   playerColors: PlayerColor[];
 }) {
   const [frame, setFrame] = useState(0);
   const [facing, setFacing] = useState(0);
   const [playerColor, setPlayerColor] = useState("");
-  const [paletteId, setPaletteId] = useState("");
   const [playing, setPlaying] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
   const frameCount = Math.max(1, entity?.preview.frame_count || 1);
@@ -844,7 +973,6 @@ function EntityDetailPanel({ sourceId, entity, loading, palettes, playerColors }
     setFrame(0);
     setFacing(0);
     setPlayerColor("");
-    setPaletteId("");
     setPlaying(false);
     setPreviewFailed(false);
   }, [entity?.id]);
@@ -858,21 +986,24 @@ function EntityDetailPanel({ sourceId, entity, loading, palettes, playerColors }
   const previewUrl = useMemo(() => entity?.renderable ? api.entityPreviewUrl(
     sourceId,
     entity.id,
-    { frame, facing, playerColor, paletteId, scale: 4 },
-  ) : "", [sourceId, entity, frame, facing, playerColor, paletteId]);
+    { frame, facing, playerColor, scale: 4 },
+  ) : "", [sourceId, entity, frame, facing, playerColor]);
 
   useEffect(() => setPreviewFailed(false), [previewUrl]);
 
   if (loading) return <aside className="detail-panel panel empty-detail"><div className="radar small"><span /></div><strong>正在读取单位详情…</strong></aside>;
-  if (!entity) return <aside className="detail-panel panel empty-detail"><div className="empty-detail-icon"><Icon name="unit" size={30} /></div><strong>选择一个游戏单位</strong><span>查看组合预览、规则和实际组件</span></aside>;
+  if (!entity) return <aside className="detail-panel panel empty-detail"><div className="empty-detail-icon"><Icon name="unit" size={30} /></div><strong>选择单位</strong></aside>;
   const rules = Object.entries(entity.rules).filter(([key]) => ruleLabels[key]);
+  const dependencyGroups = [...new Set(entity.dependencies.map((item) => item.slot))].map(
+    (slot) => ({ slot, items: entity.dependencies.filter((item) => item.slot === slot) }),
+  );
   return (
     <aside className="detail-panel entity-detail panel">
       <div className="detail-title"><div><span className="format-pill">{entityKindLabels[entity.kind]}</span><h2 title={entity.display_name}>{entity.display_name}</h2><small>{entity.id} · {entity.internal_name}</small></div></div>
 
       {entity.renderable ? <div className="preview-block entity-preview">
         {entity.voxel
-          ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor, paletteId })} label={entity.display_name} />
+          ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} />
           : <div className="preview-stage shp"><div className="preview-rulers horizontal" /><div className="preview-rulers vertical" />{previewFailed ? <div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div> : <img key={previewUrl} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} />}</div>}
         {frameCount > 1 && <div className="frame-controls">
           <button className="play-button" onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : "play"} size={16} /></button>
@@ -882,14 +1013,19 @@ function EntityDetailPanel({ sourceId, entity, loading, palettes, playerColors }
         <div className="entity-render-options">
           {!entity.voxel && entity.preview.supports_facing && <label><span>朝向</span><select value={facing} onChange={(event) => setFacing(Number(event.target.value))}>{Array.from({ length: 8 }, (_, index) => <option key={index} value={index}>{index * 45}°</option>)}</select></label>}
           {entity.preview.supports_player_color && <label><span>阵营色</span><select value={playerColor} onChange={(event) => setPlayerColor(event.target.value)}><option value="">原始色</option>{playerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
-          {palettes.length > 0 && <label><span>调色板</span><select value={paletteId} onChange={(event) => setPaletteId(event.target.value)}><option value="">自动</option>{palettes.map((palette) => <option key={palette.id} value={palette.id}>{palette.display_name}</option>)}</select></label>}
         </div>
-      </div> : <div className="unsupported-preview"><Icon name="unit" size={34} /><strong>缺少主体资产</strong><span>可在组件列表核对期望文件名。</span></div>}
+      </div> : <div className="unsupported-preview"><Icon name="unit" size={34} /><strong>缺少主体资产</strong></div>}
 
-      <div className="entity-identity">
-        <span>规则映射</span>
-        <strong><code>{entity.id}</code><i>→</i><code>{entity.image}</code></strong>
-        <small>{entity.voxel ? "VXL 多部件单位" : "SHP 帧动画单位"} · {entity.component_count} 个已关联组件{entity.preview.frame_count > 1 ? ` · ${entity.preview.frame_count} 帧` : ""}</small>
+      <div className="entity-tags" aria-label="单位资源摘要">
+        <span>{entity.voxel ? "VXL 三维模型" : "SHP 帧动画"}</span>
+        <span><code>{entity.id}</code> → <code>{entity.image}</code></span>
+        <span>{entity.component_count} 个组件</span>
+        {entity.preview.frame_count > 1 && <span>{entity.preview.frame_count} 个有效帧</span>}
+        {entity.preview.source_frame_count !== undefined
+          && entity.preview.source_frame_count !== entity.preview.frame_count
+          && <span>源文件 {entity.preview.source_frame_count} 帧</span>}
+        {entity.preview.voxel_count !== undefined
+          && <span>{entity.preview.voxel_count.toLocaleString("zh-CN")} 体素</span>}
       </div>
 
       <div className="metadata entity-rules">
@@ -899,38 +1035,57 @@ function EntityDetailPanel({ sourceId, entity, loading, palettes, playerColors }
         </dl>
       </div>
 
-      {entity.dependencies.length > 0 && <div className="entity-dependencies">
-        <h3>战斗依赖</h3>
-        <div className="dependency-list">
-          {entity.dependencies.map((dependency, index) => <article className={dependency.resolved ? "" : "unresolved"} key={`${dependency.slot}-${dependency.kind}-${dependency.id}-${index}`}>
-            <header><span>{dependencySlotLabels[dependency.slot]} · {dependencyKindLabels[dependency.kind]}</span><em>{dependency.resolved ? "已解析" : "缺少规则节"}</em></header>
-            <code>{dependency.id}</code>
-            {dependency.parent && <small>来自 {dependency.parent}</small>}
-            {Object.keys(dependency.properties).length > 0 && <dl>{Object.entries(dependency.properties).map(([key, value]) => <div key={key}><dt>{dependencyPropertyLabels[key] || key}</dt><dd title={value}>{value}</dd></div>)}</dl>}
+      {entity.media.length > 0 && <details className="entity-section compact-section">
+        <summary><span>关联声音与动画</span><em>{entity.media.length}</em></summary>
+        <div className="media-association-list">
+          {entity.media.map((association) => <article key={`${association.kind}-${association.slot}-${association.event}`}>
+            <header><span>{mediaSlotLabels[association.slot] || association.slot}</span><code>{association.event}</code></header>
+            {association.samples.map((sample) => <div className="media-sample" key={`${association.event}-${sample.name}`}>
+              <strong>{sample.name}</strong>
+              {sample.text && <p>{sample.text}</p>}
+              {sample.asset && audioFormats.includes(sample.asset.format)
+                && <audio controls preload="none" src={api.mediaUrl(sample.asset.id)} />}
+              {sample.asset && !audioFormats.includes(sample.asset.format)
+                && <a href={api.contentUrl(sample.asset.id)}>{sample.asset.display_name}</a>}
+            </div>)}
           </article>)}
+        </div>
+      </details>}
+
+      {dependencyGroups.length > 0 && <div className="entity-dependencies">
+        <h3>战斗依赖</h3>
+        <div className="dependency-groups">
+          {dependencyGroups.map((group) => <details key={group.slot}>
+            <summary><span>{dependencySlotLabels[group.slot]}</span><strong>{group.items[0]?.id}</strong><em>{group.items.length}</em></summary>
+            <div className="dependency-compact">
+              {group.items.map((dependency, index) => <article className={dependency.resolved ? "" : "unresolved"} key={`${dependency.kind}-${dependency.id}-${index}`}>
+                <header><span>{dependencyKindLabels[dependency.kind]}</span><code>{dependency.id}</code>{!dependency.resolved && <em>缺少规则节</em>}</header>
+                {Object.keys(dependency.properties).length > 0 && <div className="property-tags">{Object.entries(dependency.properties).map(([key, value]) => <span key={key} title={value}><b>{dependencyPropertyLabels[key] || key}</b>{value}</span>)}</div>}
+              </article>)}
+            </div>
+          </details>)}
         </div>
       </div>}
 
       <div className="entity-components">
         <h3>实际组件</h3>
-        <div>
-          {entity.components.map((component) => component.asset ? <a key={component.role} href={api.contentUrl(component.asset.id)}>
-            <span className={`file-icon format-${component.asset.format}`}><Icon name={assetIcon(component.asset.format)} size={15} /></span>
-            <span><strong>{componentRoleLabels[component.role] || component.role}</strong><small>{component.asset.display_name}</small></span>
-            <em>{formatBytes(component.asset.size)}</em>
-            <Icon name="download" size={14} />
-          </a> : <div className="missing-component" key={component.role}>
-            <span className="file-icon"><Icon name="file" size={15} /></span>
-            <span><strong>{componentRoleLabels[component.role] || component.role}</strong><small>{component.expected_name}</small></span>
-            <em>未找到</em>
-          </div>)}
+        <div className="component-chips">
+          {entity.components.map((component) => component.asset ? <a key={component.role} href={api.contentUrl(component.asset.id)} title={`${component.asset.virtual_path} · ${formatBytes(component.asset.size)}`}>
+            <Icon name={assetIcon(component.asset.format)} size={14} />
+            <strong>{componentRoleLabels[component.role] || component.role}</strong>
+            <span>{component.asset.display_name}</span>
+          </a> : <span className="missing-component" key={component.role} title={component.expected_name}>
+            <Icon name="file" size={14} />
+            <strong>{componentRoleLabels[component.role] || component.role}</strong>
+            <span>未找到</span>
+          </span>)}
         </div>
       </div>
     </aside>
   );
 }
 
-function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, frame, setFrame, playing, setPlaying, palettes, paletteId, setPaletteId, playerColors, previewUrl }: {
+function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, frame, setFrame, playing, setPlaying, palettes, paletteId, setPaletteId, playerColors, previewUrl, associations }: {
   asset: Asset | null;
   metadata: AssetMetadata | null;
   textAsset: TextAsset | null;
@@ -945,29 +1100,44 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   setPaletteId: (id: string) => void;
   playerColors: PlayerColor[];
   previewUrl: string;
+  associations: AssetAssociationPage | null;
 }) {
   const [playerColor, setPlayerColor] = useState("");
-  useEffect(() => setPlayerColor(""), [asset?.id]);
-  if (!asset) return <aside className="detail-panel panel empty-detail"><div className="empty-detail-icon"><Icon name="image" size={30} /></div><strong>选择一个资产</strong><span>在这里查看预览与技术信息</span></aside>;
+  const [videoRequested, setVideoRequested] = useState(false);
+  const [videoFailed, setVideoFailed] = useState(false);
+  useEffect(() => {
+    setPlayerColor("");
+    setVideoRequested(false);
+    setVideoFailed(false);
+  }, [asset?.id]);
+  if (!asset) return <aside className="detail-panel panel empty-detail"><div className="empty-detail-icon"><Icon name="image" size={30} /></div><strong>选择资产</strong></aside>;
   const canPreview = imageFormats.includes(asset.format);
   const isText = ["ini", "map", "text", "csf"].includes(asset.format);
   const isAudio = audioFormats.includes(asset.format);
+  const isModel = ["vxl", "hva"].includes(asset.format);
   const frameCount = metadata?.frame_count || 1;
   const activeFrame = metadata?.frames?.[frame];
   const activeLimb = metadata?.limbs?.[frame];
-  const hasFrameControl = ["shp", "tmp"].includes(asset.format) && frameCount > 1;
-  const canChoosePalette = ["shp", "vxl", "tmp"].includes(asset.format) && palettes.length > 0;
+  const hasFrameControl = ["shp", "tmp", "hva"].includes(asset.format) && frameCount > 1;
+  const canChoosePalette = ["shp", "vxl", "hva", "tmp"].includes(asset.format) && palettes.length > 0;
   return (
     <aside className="detail-panel panel">
       <div className="detail-title"><div><span className="format-pill">{formatLabels[asset.format] || asset.format.toUpperCase()}</span><h2 title={asset.display_name}>{asset.display_name}</h2></div><a className="icon-button" href={api.contentUrl(asset.id)} title="导出原始文件" aria-label="导出原始文件"><Icon name="download" /></a></div>
 
-      {asset.format === "vxl" && <div className="preview-block"><VoxelPreview url={api.assetModelUrl(asset.id, playerColor, paletteId)} label={asset.display_name} /></div>}
+      {isModel && <div className="preview-block">
+        <VoxelPreview url={api.assetModelUrl(asset.id, frame, playerColor, paletteId)} label={asset.display_name} />
+        {asset.format === "hva" && hasFrameControl && <div className="frame-controls">
+          <button className="play-button" onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : "play"} size={16} /></button>
+          <input type="range" min="0" max={frameCount - 1} value={Math.min(frame, frameCount - 1)} onChange={(event) => setFrame(Number(event.target.value))} aria-label="当前动画帧" />
+          <span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(frameCount).padStart(2, "0")}</span>
+        </div>}
+      </div>}
 
       {canPreview && (
         <div className="preview-block">
           <div className={`preview-stage ${asset.format}`}><div className="preview-rulers horizontal" /><div className="preview-rulers vertical" /><img key={previewUrl} src={previewUrl} alt={`${asset.display_name} 预览`} /></div>
           {hasFrameControl && <div className="frame-controls">
-            <button className="play-button" disabled={asset.format !== "shp"} onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : assetIcon(asset.format)} size={16} /></button>
+            <button className="play-button" disabled={asset.format === "tmp"} onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : assetIcon(asset.format)} size={16} /></button>
             <input type="range" min="0" max={Math.max(0, frameCount - 1)} value={Math.min(frame, frameCount - 1)} onChange={(event) => setFrame(Number(event.target.value))} aria-label={asset.format === "vxl" ? "当前部件" : asset.format === "tmp" ? "当前地块" : "当前帧"} />
             <span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(frameCount).padStart(2, "0")}</span>
           </div>}
@@ -976,24 +1146,43 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
 
       {isAudio && <div className="audio-preview"><div><Icon name="play" size={25} /><span><strong>音频预览</strong><small>{metadata?.audio_codec || (metadata?.audio_format === 17 ? "IMA ADPCM → PCM16" : "PCM 音频")}</small></span></div><audio controls preload="metadata" src={api.mediaUrl(asset.id)}>浏览器不支持音频播放。</audio></div>}
 
+      {asset.format === "video" && <div className="video-preview">
+        {videoRequested && !videoFailed
+          ? <video controls autoPlay preload="metadata" src={api.videoUrl(asset.id)} onLoadedData={() => setVideoFailed(false)} onError={() => setVideoFailed(true)}>浏览器不支持视频播放。</video>
+          : <button type="button" className="button primary" onClick={() => { setVideoFailed(false); setVideoRequested(true); }}><Icon name="play" />{videoFailed ? "重试转换" : "转换并播放"}</button>}
+        {videoFailed && <strong className="video-error">视频转换失败</strong>}
+      </div>}
+
       {isText && <div className="text-preview">
         <label><Icon name="search" size={14} /><input value={textQuery} onChange={(event) => setTextQuery(event.target.value)} placeholder="在当前文件中筛选…" /></label>
         <pre>{textAsset?.text || "正在读取文本…"}</pre>
         {textAsset && <small>显示 {textAsset.returned_lines} / {textAsset.line_count} 行{textAsset.truncated ? " · 已截断" : ""}</small>}
       </div>}
 
-      {!canPreview && !isText && !isAudio && asset.format !== "vxl" && <div className="unsupported-preview"><Icon name={assetIcon(asset.format)} size={34} /><strong>{formatLabels[asset.format] || asset.format.toUpperCase()}</strong></div>}
+      {associations && associations.items.length > 0 && <div className="asset-associations">
+        <h3>关联事件</h3>
+        <div>{associations.items.map((item, index) => <article key={`${item.scope}-${item.event}-${item.slot}-${index}`}>
+          <span>{mediaSlotLabels[item.slot] || item.slot}</span>
+          <strong>{item.entity?.display_name || item.event}</strong>
+          {item.entity && <code>{item.event}</code>}
+          {item.text && <p>{item.text}</p>}
+        </article>)}</div>
+      </div>}
 
-      {(canChoosePalette || asset.format === "vxl") && <div className="entity-render-options asset-render-options">
-        {asset.format === "vxl" && <label><span>阵营色</span><select value={playerColor} onChange={(event) => setPlayerColor(event.target.value)}><option value="">原始色</option>{playerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
-        {canChoosePalette && <label><span>调色板</span><select value={paletteId} onChange={(event) => setPaletteId(event.target.value)}><option value="">自动</option>{palettes.map((palette) => <option key={palette.id} value={palette.id}>{palette.display_name}</option>)}</select></label>}
+      {!canPreview && !isText && !isAudio && !isModel && asset.format !== "video" && <div className="unsupported-preview"><Icon name={assetIcon(asset.format)} size={34} /><strong>{formatLabels[asset.format] || asset.format.toUpperCase()}</strong></div>}
+
+      {(canChoosePalette || isModel) && <div className="entity-render-options asset-render-options">
+        {isModel && <label><span>阵营色</span><select value={playerColor} onChange={(event) => setPlayerColor(event.target.value)}><option value="">原始色</option>{playerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
+        {canChoosePalette && <label><span>配色表</span><select value={paletteId} onChange={(event) => setPaletteId(event.target.value)}><option value="">自动</option>{palettes.map((palette) => <option key={palette.id} value={palette.id}>{palette.display_name}</option>)}</select></label>}
       </div>}
 
       <div className="metadata">
         <h3>资产信息</h3>
         <dl>
           <div><dt>文件大小</dt><dd>{formatBytes(asset.size)}</dd></div>
-          {metadata?.width !== undefined && metadata?.height !== undefined && <div><dt>画布 / 地块</dt><dd>{metadata.width} × {metadata.height} px</dd></div>}
+          {metadata?.width !== undefined && metadata?.height !== undefined && <div><dt>{asset.format === "map" ? "地图尺寸" : "画布 / 地块"}</dt><dd>{metadata.width} × {metadata.height}{asset.format === "map" ? " 格" : " px"}</dd></div>}
+          {metadata?.theater && <div><dt>地图环境</dt><dd>{metadata.theater}</dd></div>}
+          {metadata?.object_counts && <div><dt>地图对象</dt><dd>{Object.entries(metadata.object_counts).map(([kind, count]) => `${mapObjectLabels[kind] || kind} ${count}`).join(" · ")}</dd></div>}
           {metadata?.template_width !== undefined && <div><dt>模板网格</dt><dd>{metadata.template_width} × {metadata.template_height} · {metadata.tile_count} 个地块</dd></div>}
           {metadata?.frame_count !== undefined && <div><dt>{asset.format === "vxl" ? "部件数" : "帧 / 槽位"}</dt><dd>{metadata.frame_count}</dd></div>}
           {activeFrame && <div><dt>当前帧</dt><dd>{activeFrame.width} × {activeFrame.height} · 压缩 {activeFrame.compression}</dd></div>}
@@ -1035,8 +1224,7 @@ function FormatSettingsDialog({ formats, enabled, onChange, onClose }: {
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="dialog format-settings" role="dialog" aria-modal="true" aria-labelledby="format-settings-title">
-        <div className="dialog-header"><div className="dialog-icon"><Icon name="settings" /></div><div><span className="eyebrow">素材范围</span><h2 id="format-settings-title">显示与载入</h2></div><button type="button" onClick={onClose} aria-label="关闭"><Icon name="close" /></button></div>
-        <p>仅载入已启用格式的资产列表。</p>
+        <div className="dialog-header"><div className="dialog-icon"><Icon name="settings" /></div><div><h2 id="format-settings-title">显示与载入</h2></div><button type="button" onClick={onClose} aria-label="关闭"><Icon name="close" /></button></div>
         <div className="format-settings-actions">
           <button type="button" onClick={() => onChange(available.filter((item) => defaultVisibleFormats.includes(item)))}>常用素材</button>
           <button type="button" onClick={() => onChange(available)}>全部启用</button>
@@ -1067,12 +1255,10 @@ function AddSourceDialog({ discoveries, busy, onClose, onSubmit }: { discoveries
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
       <form className="dialog" onSubmit={submit}>
-        <div className="dialog-header"><div className="dialog-icon"><Icon name="folder" /></div><div><span className="eyebrow">只读扫描</span><h2>添加资源目录</h2></div><button type="button" onClick={onClose} disabled={busy} aria-label="关闭"><Icon name="close" /></button></div>
-        <p>粘贴 Steam、EA App 或 Mod 的本机目录。扫描只会读取文件并将索引写入 RA2 Explorer 自己的数据目录。</p>
+        <div className="dialog-header"><div className="dialog-icon"><Icon name="folder" /></div><div><h2>添加资源目录</h2></div><button type="button" onClick={onClose} disabled={busy} aria-label="关闭"><Icon name="close" /></button></div>
         {discoveries.length > 0 && <div className="dialog-discoveries"><span>自动发现</span>{discoveries.map((installation) => <button type="button" key={installation.path} onClick={() => { setPath(installation.path); setName(installation.name); }}><Icon name="folder" size={15} /><span><strong>{installation.edition}</strong><small>{installation.provider} · {installation.path}</small></span><em>选择</em></button>)}</div>}
         <label><span>目录路径 <b>必填</b></span><input autoFocus value={path} onChange={(event) => setPath(event.target.value)} placeholder="例如 D:\SteamLibrary\steamapps\common\Command & Conquer Red Alert II" /></label>
         <label><span>显示名称 <em>可选</em></span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="例如 Steam 原版" /></label>
-        <div className="dialog-note"><Icon name="info" size={16} /><span>RA2 Explorer 不包含商业游戏文件；请先通过 Steam 或 EA App 合法安装。</span></div>
         <div className="dialog-actions"><button type="button" className="button ghost" disabled={busy} onClick={onClose}>取消</button><button type="submit" className="button primary" disabled={busy || !path.trim()}>{busy ? "正在扫描…" : "添加并扫描"}</button></div>
       </form>
     </div>
