@@ -151,6 +151,10 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert media_items[0]["asset"]["display_name"] == "fixture.wav"
     assert media_items[0]["description"] == "Ready for the test."
     assert media_items[0]["groups"] == ["unit_voice"]
+    assert client.get(
+        "/api/media",
+        params={"source_id": source["id"], "sort": "random"},
+    ).status_code == 422
 
     entity = client.get(f"/api/entities/{source['id']}/DemoVehicle")
     assert entity.status_code == 200
@@ -161,6 +165,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert components["cameo"]["asset"]["display_name"] == "fixture.shp"
     assert entity_body["preview"]["frame_count"] == 4
     assert entity_body["preview"]["supports_facing"] is True
+    assert entity_body["preview"]["supports_player_color"] is True
     dependencies = {(item["kind"], item["id"]): item for item in entity_body["dependencies"]}
     assert len(entity_body["dependencies"]) == 3
     assert dependencies[("weapon", "DemoCannon")]["properties"]["damage"] == "75"

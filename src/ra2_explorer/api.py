@@ -225,16 +225,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         q: str | None = Query(default=None, max_length=200),
         kind: str | None = Query(default=None),
         group: str | None = Query(default=None, max_length=64),
+        sort: str = Query(default="name_asc", max_length=24),
         limit: int = Query(default=500, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, object]:
         if kind is not None and kind not in {"voice", "sound", "unknown"}:
             raise HTTPException(status_code=422, detail="未知音频类型")
+        if sort not in {"name_asc", "name_desc", "description_asc"}:
+            raise HTTPException(status_code=422, detail="未知音频排序方式")
         return services.semantic.list_media(
             source_id,
             query=q,
             kind=kind,
             group=group,
+            sort=sort,
             limit=limit,
             offset=offset,
         )

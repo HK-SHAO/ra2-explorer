@@ -364,6 +364,7 @@ class SemanticLibrary:
         query: str | None = None,
         kind: str | None = None,
         group: str | None = None,
+        sort: str = "name_asc",
         limit: int = 500,
         offset: int = 0,
     ) -> dict[str, object]:
@@ -383,6 +384,19 @@ class SemanticLibrary:
         if query:
             needle = query.casefold()
             items = [item for item in items if needle in _media_search_text(item)]
+        if sort == "description_asc":
+            items.sort(
+                key=lambda item: (
+                    item.get("description") is None,
+                    str(item.get("description") or "").casefold(),
+                    str(item["asset"]["display_name"]).casefold(),  # type: ignore[index]
+                )
+            )
+        else:
+            items.sort(
+                key=lambda item: str(item["asset"]["display_name"]).casefold(),  # type: ignore[index]
+                reverse=sort == "name_desc",
+            )
         total = len(items)
         return {
             "items": items[offset : offset + limit],
@@ -643,7 +657,9 @@ class SemanticLibrary:
             "frame_count": 0 if body is None else 1,
             "facing_count": 8 if entity.voxel else _positive_int(entity.art.get("facings"), 1),
             "supports_facing": bool(body and body["format"] == "vxl"),
-            "supports_player_color": _yes(entity.art.get("remapable")),
+            # Every VXL carries an explicit remap range. Some retail ART sections omit
+            # Remapable even though the renderer can apply that range (for example DDBX).
+            "supports_player_color": entity.voxel or _yes(entity.art.get("remapable")),
         }
         if body is None:
             return base
@@ -1049,12 +1065,13 @@ def _build_media_items(
         if kind == "unknown":
             groups = ["unclassified"]
         asset_stem = str(state["asset"]["display_name"]).rsplit(".", 1)[0].casefold()
-        if (
-            kind == "voice"
-            and "other_voice" in groups
-            and re.match(r"^[a-z]\d{2}[_-]p\d+", asset_stem)
-        ):
-            groups[groups.index("other_voice")] = "mission_voice"
+        mission_match = re.match(r"^([a-z])(\d{2})[_-]p(\d+)", asset_stem)
+        if kind == "voice" and mission_match and "unit_voice" not in groups:
+            if "other_voice" in groups:
+                groups.remove("other_voice")
+            if "mission_voice" not in groups:
+                groups.append("mission_voice")
+                groups.sort()
         texts = sorted(state["texts"], key=str.casefold)
         events = sorted(state["events"], key=str.casefold)
         entity_refs = sorted(
@@ -1062,10 +1079,22 @@ def _build_media_items(
             key=lambda item: (item["display_name"].casefold(), item["id"].casefold()),
         )
         description = texts[0] if texts else None
-        if description is None and entity_refs:
+        if description is None and mission_match:
+            campaign = {
+                "a": "盟军",
+                "s": "苏军",
+                "y": "尤里",
+            }.get(mission_match.group(1), "战役")
+            description = (
+                f"{campaign}任务 {int(mission_match.group(2))}"
+                f" · 第 {int(mission_match.group(3))} 段"
+            )
+        elif description is None and entity_refs:
             description = str(entity_refs[0]["display_name"])
             if events:
                 description += f" · {events[0]}"
+        elif description is None and "eva_voice" in groups and events:
+            description = f"EVA 播报 · {events[0]}"
         elif description is None and events:
             description = events[0]
         items.append(

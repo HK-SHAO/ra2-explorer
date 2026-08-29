@@ -14,6 +14,7 @@ import {
   GameInstallation,
   MediaItem,
   MediaKind,
+  MediaSort,
   PlayerColor,
   Source,
   Stats,
@@ -400,6 +401,7 @@ function ExplorerApp() {
   const [mediaKindCounts, setMediaKindCounts] = useState<Array<{ kind: MediaKind; count: number }>>([]);
   const [mediaGroup, setMediaGroup] = useState("");
   const [mediaLoading, setMediaLoading] = useState(false);
+  const [mediaSort, setMediaSort] = useState<MediaSort>("name_asc");
   const [playingMediaId, setPlayingMediaId] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [selected, setSelected] = useState<Asset | null>(null);
@@ -541,11 +543,17 @@ function ExplorerApp() {
       return;
     }
     let cancelled = false;
-    Promise.all([api.stats(sourceId), api.palettes(sourceId)])
-      .then(([nextStats, nextPalettes]) => {
+    Promise.all([
+      api.stats(sourceId),
+      api.palettes(sourceId),
+      api.media(sourceId, "", "voice", "", 0, 1),
+    ])
+      .then(([nextStats, nextPalettes, mediaFacets]) => {
         if (cancelled) return;
         setStats(nextStats);
         setPalettes(nextPalettes);
+        setMediaGroups(mediaFacets.groups);
+        setMediaKindCounts(mediaFacets.kinds);
       })
       .catch((reason: Error) => !cancelled && setError(reason.message));
     return () => { cancelled = true; };
@@ -597,7 +605,7 @@ function ExplorerApp() {
     setMediaTotal(0);
     setPlayingMediaId("");
     const timer = window.setTimeout(() => {
-      api.media(sourceId, assetQuery, mediaKind, mediaGroup)
+      api.media(sourceId, assetQuery, mediaKind, mediaGroup, 0, 500, mediaSort)
         .then((page) => {
           if (cancelled) return;
           setMediaItems(page.items);
@@ -615,7 +623,7 @@ function ExplorerApp() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [sourceId, sourceRevision, assetQuery, mediaKind, mediaGroup, view, isMediaCategory]);
+  }, [sourceId, sourceRevision, assetQuery, mediaKind, mediaGroup, mediaSort, view, isMediaCategory]);
 
   useEffect(() => {
     if (!sourceId || view !== "entities") return;
@@ -770,7 +778,7 @@ function ExplorerApp() {
     if (mediaLoading || mediaItems.length >= mediaTotal || !sourceId) return;
     setMediaLoading(true);
     try {
-      const page = await api.media(sourceId, assetQuery, mediaKind, mediaGroup, mediaItems.length);
+      const page = await api.media(sourceId, assetQuery, mediaKind, mediaGroup, mediaItems.length, 500, mediaSort);
       setMediaItems((current) => {
         const known = new Set(current.map((item) => item.asset.id));
         return [...current, ...page.items.filter((item) => !known.has(item.asset.id))];
@@ -871,6 +879,8 @@ function ExplorerApp() {
             selectedId={selectedId}
             onSelect={(id) => { setSelectedId(id); setPlayingMediaId((current) => current === id ? "" : id); }}
             playingId={playingMediaId}
+            sort={mediaSort}
+            setSort={setMediaSort}
             layout={layout}
             setLayout={updateLayout}
             onLoadMore={loadMoreMedia}
@@ -1017,7 +1027,7 @@ function AssetGridCard({ asset, selected, onSelect }: { asset: Asset; selected: 
   );
 }
 
-function MediaListPanel({ items, total, loading, query, setQuery, groups, selectedGroup, setSelectedGroup, selectedId, onSelect, playingId, layout, setLayout, onLoadMore }: {
+function MediaListPanel({ items, total, loading, query, setQuery, groups, selectedGroup, setSelectedGroup, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore }: {
   items: MediaItem[];
   total: number;
   loading: boolean;
@@ -1029,6 +1039,8 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
   selectedId: string;
   onSelect: (id: string) => void;
   playingId: string;
+  sort: MediaSort;
+  setSort: (sort: MediaSort) => void;
   layout: LayoutMode;
   setLayout: (layout: LayoutMode) => void;
   onLoadMore: () => Promise<void>;
@@ -1046,6 +1058,7 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
           <button className={!selectedGroup ? "active" : ""} onClick={() => setSelectedGroup("")}>全部</button>
           {groups.map((group) => <button key={group.group} className={selectedGroup === group.group ? "active" : ""} onClick={() => setSelectedGroup(selectedGroup === group.group ? "" : group.group)}>{mediaGroupLabels[group.group] || group.group}<em>{group.count}</em></button>)}
         </div>
+        <label className="sort-control"><span>排序</span><select value={sort} onChange={(event) => setSort(event.target.value as MediaSort)}><option value="name_asc">文件名 A–Z</option><option value="name_desc">文件名 Z–A</option><option value="description_asc">说明 A–Z</option></select></label>
       </div>
       {layout === "list" && <div className="list-heading media-list-heading"><span>声音</span><span>关联</span></div>}
       <div className={`asset-list ${layout === "grid" ? "asset-grid media-grid" : ""}`} tabIndex={0} aria-label="声音列表" onScroll={(event) => { const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void onLoadMore(); }}>
@@ -1100,7 +1113,7 @@ function EntityListPanel({ entities, total, loading, query, setQuery, tags, sele
       <div className="filter-strip">
         <div className="entity-filter-groups">
           <div className="tag-filter" role="group" aria-label="按阵营筛选">
-            {sides.map((side) => <button key={side.id} className={selectedSide === side.id ? "active" : ""} onClick={() => setSelectedSide(selectedSide === side.id ? "" : side.id)}>{sideLabels[side.id] || side.id}<em>{side.count}</em></button>)}
+            {sides.map((side) => <button key={side.id} className={selectedSide === side.id ? "active" : ""} onClick={() => { const next = selectedSide === side.id ? "" : side.id; setSelectedSide(next); if (next && countries.find((country) => country.id === selectedCountry)?.side !== next) setSelectedCountry(""); }}>{sideLabels[side.id] || side.id}<em>{side.count}</em></button>)}
           </div>
           <div className="tag-filter" role="group" aria-label="按国家筛选">
             {countries.filter((country) => !selectedSide || country.side === selectedSide).map((country) => <button key={country.id} className={selectedCountry === country.id ? "active" : ""} onClick={() => setSelectedCountry(selectedCountry === country.id ? "" : country.id)}>{country.display_name}<em>{country.count}</em></button>)}

@@ -236,6 +236,7 @@ export interface EntityPage {
 }
 
 export type MediaKind = "voice" | "sound" | "unknown";
+export type MediaSort = "name_asc" | "name_desc" | "description_asc";
 
 export interface MediaItem {
   asset: EntityComponentAsset;
@@ -359,12 +360,15 @@ export const api = {
     kind: MediaKind,
     group = "",
     offset = 0,
+    limit = 500,
+    sort: MediaSort = "name_asc",
   ) => {
     const params = new URLSearchParams({
       source_id: sourceId,
       kind,
-      limit: "500",
+      limit: String(limit),
       offset: String(offset),
+      sort,
     });
     if (query.trim()) params.set("q", query.trim());
     if (group) params.set("group", group);
