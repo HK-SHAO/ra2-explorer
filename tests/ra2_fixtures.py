@@ -89,6 +89,7 @@ def create_fixture_installation(target: Path) -> Path:
         b"\r\n[DemoWarhead]\r\n"
         b"Verses=100%,80%,60%\r\n"
         b"AnimList=IMPACT1,IMPACT2,IMPACT3,IMPACT4\r\n"
+        b"SplashList=IMPACT1,IMPACT2\r\n"
         b"Wall=yes\r\n"
         b"\r\n[DemoDeath]\r\n"
         b"Damage=50\r\n"

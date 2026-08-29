@@ -365,7 +365,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .entity-detail-tabs em { min-width: 20px; padding: 2px 5px; border-radius: 10px; color: #90959e; background: #24272d; font-size: 11px; font-style: normal; }
 .entity-tab-panel { min-width: 0; margin-top: 10px; }
 .entity-tab-panel > .entity-section:first-child { margin-top: 0; }
-.animation-kind-tabs { display: inline-grid; grid-template-columns: repeat(var(--animation-tab-count, 2), minmax(106px, 1fr)); gap: 3px; margin: 0 9px 8px; padding: 3px; border: 1px solid var(--line-soft); border-radius: 3px; background: #15171b; }
+.animation-kind-tabs { width: calc(100% - 18px); display: grid; grid-template-columns: repeat(var(--animation-tab-count, 2), minmax(0, 1fr)); gap: 3px; margin: 0 9px 8px; padding: 3px; border: 1px solid var(--line-soft); border-radius: 3px; background: #15171b; }
 .animation-kind-tabs button { min-width: 0; height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 10px; border: 1px solid transparent; border-radius: 2px; color: #858a94; background: transparent; font-size: 12px; cursor: pointer; }
 .animation-kind-tabs button:hover:not(:disabled) { color: #d4d6da; background: #202329; }
 .animation-kind-tabs button.active { border-color: #713733; color: #f0f1f2; background: #281b1d; }
@@ -375,6 +375,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .entity-composite-stage > .preview-stage, .entity-composite-stage > .voxel-viewer { width: 100%; height: 100%; min-height: inherit; }
 .entity-preview-controls { position: absolute; z-index: 5; left: 50%; bottom: 10px; width: min(calc(100% - 20px), 620px); display: flex; align-items: stretch; justify-content: center; gap: 6px; transform: translateX(-50%); }
 .entity-preview-controls > .frame-controls { min-width: 0; flex: 1 1 auto; border-top: 1px solid var(--line); border-radius: 3px; background: rgba(22,24,28,.91); box-shadow: 0 5px 18px rgba(0,0,0,.28); backdrop-filter: blur(5px); }
+.animation-candidate-control { min-width: 0; min-height: 43px; flex: 0 1 190px; display: grid; grid-template-columns: auto minmax(72px, 1fr); align-items: center; gap: 7px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 3px; color: #858a94; background: rgba(22,24,28,.94); box-shadow: 0 5px 18px rgba(0,0,0,.28); font-size: 12px; backdrop-filter: blur(5px); }
+.animation-candidate-control select { min-width: 0; width: 100%; height: 29px; padding: 0 6px; overflow: hidden; border: 1px solid #3b3f47; border-radius: 2px; outline: 0; color: #d3d5d9; background: #111317; font: 12px/1 "Cascadia Mono", Consolas, monospace; text-overflow: ellipsis; }
+.entity-detail-narrow .animation-candidate-control { flex-basis: 108px; grid-template-columns: minmax(0, 1fr); }
+.entity-detail-narrow .animation-candidate-control > span { display: none; }
 .entity-effect-overlay { position: absolute; z-index: 3; inset: 0; overflow: hidden; pointer-events: none; transition: opacity 40ms linear; }
 .entity-effect-overlay.hidden { opacity: 0; }
 .entity-effect-overlay.visible { opacity: 1; }

@@ -170,7 +170,7 @@ export type EntityDependencyKind = "weapon" | "projectile" | "warhead";
 export interface EntityDependency {
   id: string;
   kind: EntityDependencyKind;
-  slot: "primary" | "secondary" | "elite_primary" | "elite_secondary";
+  slot: string;
   parent: string | null;
   resolved: boolean;
   properties: Record<string, string>;
@@ -228,8 +228,12 @@ export interface MediaAssociation {
   slot: string;
   event: string;
   source: string;
-  role: "body" | "construction" | "operation" | "weapon" | "impact" | null;
+  role: "body" | "construction" | "operation" | "weapon" | "impact" | "destruction" | "debris" | null;
   aliases?: string[];
+  selection: "damage" | "random" | "first" | null;
+  selected_sample: string | null;
+  selection_value: number | null;
+  rule_field: string | null;
   samples: MediaSample[];
 }
 

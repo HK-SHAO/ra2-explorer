@@ -277,6 +277,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
         if item["kind"] == "animation" and item["role"] == "impact"
     )
     assert weapon_animation["samples"][0]["asset"]["display_name"] == "infantry.shp"
+    assert weapon_animation["rule_field"] == "WeaponType.Anim"
     assert impact_animation["samples"][0]["asset"]["display_name"] == "infantry.shp"
     assert [sample["name"] for sample in impact_animation["samples"]] == [
         "IMPACT1",
@@ -287,6 +288,14 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert impact_animation["selection"] == "damage"
     assert impact_animation["selection_value"] == 75
     assert impact_animation["selected_sample"] == "IMPACT4"
+    assert impact_animation["rule_field"] == "WarheadType.AnimList"
+    splash_animation = next(
+        item
+        for item in entity_body["media"]
+        if item["kind"] == "animation"
+        and item["rule_field"] == "WarheadType.SplashList"
+    )
+    assert splash_animation["selected_sample"] == "IMPACT2"
     destruction_animation = next(
         item
         for item in entity_body["media"]
@@ -295,12 +304,14 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert destruction_animation["slot"] == "destruction"
     assert destruction_animation["selection_value"] == 50
     assert destruction_animation["selected_sample"] == "DEATH3"
+    assert destruction_animation["rule_field"] == "WarheadType.AnimList"
     debris_animation = next(
         item
         for item in entity_body["media"]
         if item["kind"] == "animation" and item["role"] == "debris"
     )
     assert debris_animation["selection"] == "random"
+    assert debris_animation["rule_field"] == "General.MetallicDebris"
     assert [sample["name"] for sample in debris_animation["samples"]] == [
         "DEBRIS1",
         "DEBRIS2",
@@ -353,6 +364,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     )
     assert walk_animation["slot"] == "body_sequence"
     assert walk_animation["role"] == "body"
+    assert walk_animation["rule_field"] == "Sequence.walk"
     assert walk_animation["samples"][0]["animation"] == {
         "start_frame": 0,
         "frame_count": 2,

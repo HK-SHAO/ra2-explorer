@@ -263,6 +263,7 @@ class MediaAssociation:
     selection: str | None = None
     selected_sample: str | None = None
     selection_value: int | None = None
+    rule_field: str | None = None
 
     def as_dict(
         self, language: GameLanguage = DEFAULT_GAME_LANGUAGE
@@ -277,6 +278,7 @@ class MediaAssociation:
             "selection": self.selection,
             "selected_sample": self.selected_sample,
             "selection_value": self.selection_value,
+            "rule_field": self.rule_field,
             "samples": [sample.as_dict(language) for sample in self.samples],
         }
 
@@ -1637,7 +1639,7 @@ def _resolve_media(
     body_asset: dict[str, Any] | None,
 ) -> tuple[MediaAssociation, ...]:
     associations: list[MediaAssociation] = []
-    seen: set[tuple[str, str, str, str]] = set()
+    seen: set[tuple[str, str, str, str, str]] = set()
 
     def add(association: MediaAssociation) -> None:
         key = (
@@ -1645,6 +1647,7 @@ def _resolve_media(
             association.slot,
             association.event.casefold(),
             association.source.casefold(),
+            (association.rule_field or "").casefold(),
         )
         if association.samples and key not in seen:
             seen.add(key)
@@ -1697,25 +1700,31 @@ def _resolve_media(
                             if dependency.slot == "destruction"
                             else "weapon"
                         ),
+                        rule_field="WeaponType.Anim",
                     )
                 )
         elif dependency.kind == "warhead":
-            animations = tuple(
-                dict.fromkeys(_references(dependency.properties.get("animation_list")))
+            weapon = weapon_dependencies.get(
+                (dependency.slot, (dependency.parent or "").casefold())
             )
-            if animations:
-                weapon = weapon_dependencies.get(
-                    (dependency.slot, (dependency.parent or "").casefold())
+            damage = _integer(weapon.properties.get("damage")) if weapon else None
+            if damage is not None and dependency.slot == "destruction":
+                try:
+                    modifier = float(rules.get("deathweapondamagemodifier", "1"))
+                except ValueError:
+                    modifier = 1.0
+                damage = int(damage * modifier)
+            random_selection = _yes(dependency.properties.get("em_effect"))
+            if damage is not None and damage <= 0 and not random_selection:
+                continue
+            for property_name, rule_field in (
+                ("animation_list", "WarheadType.AnimList"),
+                ("splash_list", "WarheadType.SplashList"),
+            ):
+                animations = tuple(
+                    dict.fromkeys(_references(dependency.properties.get(property_name)))
                 )
-                damage = _integer(weapon.properties.get("damage")) if weapon else None
-                if damage is not None and dependency.slot == "destruction":
-                    try:
-                        modifier = float(rules.get("deathweapondamagemodifier", "1"))
-                    except ValueError:
-                        modifier = 1.0
-                    damage = int(damage * modifier)
-                random_selection = _yes(dependency.properties.get("em_effect"))
-                if damage is not None and damage <= 0 and not random_selection:
+                if not animations:
                     continue
                 selected_index = (
                     min(max(damage or 0, 0) // 25, len(animations) - 1)
@@ -1750,6 +1759,7 @@ def _resolve_media(
                         ),
                         selected_sample=selected_animation,
                         selection_value=damage,
+                        rule_field=rule_field,
                     )
                 )
 
@@ -1758,6 +1768,7 @@ def _resolve_media(
         debris_types = tuple(dict.fromkeys(_references(rules.get("debristypes"))))
         debris_animations = tuple(dict.fromkeys(_references(rules.get("debrisanims"))))
         debris_samples: tuple[MediaSample, ...] = ()
+        debris_rule_field = "TechnoType.DebrisTypes"
         if debris_types:
             resolved = []
             for reference in debris_types:
@@ -1779,6 +1790,11 @@ def _resolve_media(
                     )
                 )
             )
+            debris_rule_field = (
+                "TechnoType.DebrisAnims"
+                if debris_animations
+                else "General.MetallicDebris"
+            )
             debris_samples = tuple(
                 sample
                 for reference in references
@@ -1796,6 +1812,7 @@ def _resolve_media(
                     selection="random",
                     selected_sample=debris_samples[0].name,
                     selection_value=max_debris,
+                    rule_field=debris_rule_field,
                 )
             )
 
@@ -1812,6 +1829,7 @@ def _resolve_media(
                     entity_id,
                     _animation_samples(animation, art_sections, assets),
                     role=role,
+                    rule_field=f"ArtType.{field}",
                 )
             )
     sequence_name = entity_art.get("sequence")
@@ -1835,6 +1853,7 @@ def _resolve_media(
                         ),
                     ),
                     role="body",
+                    rule_field=f"Sequence.{event}",
                 )
             )
     return _merge_duplicate_body_sequences(associations)

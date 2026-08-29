@@ -212,11 +212,12 @@ const dependencyKindLabels: Record<EntityDependency["kind"], string> = {
   warhead: "弹头",
 };
 
-const dependencySlotLabels: Record<EntityDependency["slot"], string> = {
+const dependencySlotLabels: Record<string, string> = {
   primary: "主武器",
   secondary: "副武器",
   elite_primary: "精英主武器",
   elite_secondary: "精英副武器",
+  destruction: "DeathWeapon",
 };
 
 const dependencyPropertyLabels: Record<string, string> = {
@@ -280,6 +281,7 @@ const mediaSlotLabels: Record<string, string> = {
   secondary: "副武器",
   elite_primary: "精英主武器",
   elite_secondary: "精英副武器",
+  destruction: "DeathWeapon",
   body_animation: "主体动画",
   body_hva: "主体动作",
   turret_hva: "炮塔动作",
@@ -300,6 +302,19 @@ const mediaSlotLabels: Record<string, string> = {
   underroofdooranim: "屋顶门",
   bibshape: "地基",
 };
+
+function numberedWeaponSlotLabel(slot: string) {
+  const match = /^(elite_)?weapon_(\d+)$/.exec(slot);
+  return match ? `${match[1] ? "精英" : ""}武器 ${match[2]}` : null;
+}
+
+function mediaSlotLabel(slot: string) {
+  return mediaSlotLabels[slot] || numberedWeaponSlotLabel(slot) || slot;
+}
+
+function dependencySlotLabel(slot: string) {
+  return dependencySlotLabels[slot] || numberedWeaponSlotLabel(slot) || slot;
+}
 
 const animationEventLabels: Record<string, string> = {
   ready: "准备",
@@ -339,6 +354,16 @@ const animationEventLabels: Record<string, string> = {
 
 function animationEventLabel(event: string) {
   return animationEventLabels[event.toLowerCase()] || event;
+}
+
+function animationEventTitle(event: string) {
+  const label = animationEventLabel(event);
+  return label === event ? event : `${event} · ${label}`;
+}
+
+function ruleFieldName(ruleField: string | null) {
+  const fields = ruleField?.split(".") || [];
+  return fields[fields.length - 1] || "动画引用";
 }
 
 const mediaGroupLabels: Record<string, string> = {
@@ -1522,12 +1547,12 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
       return <button key={item.asset.id} className={`asset-row media-row ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onClick={() => onSelect(item.asset.id)}>
         <span className="file-icon format-audio"><Icon name={playingId === item.asset.id ? "pause" : "play"} /></span>
         <span className="asset-main"><strong>{mediaPrimaryText(item)}</strong>{(mediaSecondaryText(item) || item.texts.length > 1) && <small>{mediaSecondaryText(item)}{item.texts.length > 1 ? `${mediaSecondaryText(item) ? " · " : ""}${item.texts.length} 条文本` : ""}</small>}</span>
-        <span className="media-links">{item.entities.slice(0, 2).map((entity) => entity.display_name).join(" · ") || item.slots.slice(0, 2).map((slot) => mediaSlotLabels[slot] || slot).join(" · ") || "未关联"}</span>
+        <span className="media-links">{item.entities.slice(0, 2).map((entity) => entity.display_name).join(" · ") || item.slots.slice(0, 2).map(mediaSlotLabel).join(" · ") || "未关联"}</span>
         <Icon name="chevron" size={15} />
       </button>;
     }
     return <button key={item.asset.id} className={`asset-card media-card ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onClick={() => onSelect(item.asset.id)}>
-      <span className="asset-card-copy"><strong title={mediaPrimaryText(item)}>{mediaPrimaryText(item)}</strong>{mediaSecondaryText(item) && <small title={mediaSecondaryText(item)}>{mediaSecondaryText(item)}</small>}<em>{item.slots.slice(0, 2).map((slot) => mediaSlotLabels[slot] || slot).join(" · ") || "未分类"}</em></span>
+      <span className="asset-card-copy"><strong title={mediaPrimaryText(item)}>{mediaPrimaryText(item)}</strong>{mediaSecondaryText(item) && <small title={mediaSecondaryText(item)}>{mediaSecondaryText(item)}</small>}<em>{item.slots.slice(0, 2).map(mediaSlotLabel).join(" · ") || "未分类"}</em></span>
     </button>;
   }
 
@@ -1546,7 +1571,7 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
           </div>
           {eventTypes.length > 0 && <div className="tag-filter event-type-filter" role="group" aria-label="按事件类型筛选">
             <button className={!selectedEventType ? "active" : ""} onClick={() => setSelectedEventType("")}>全部事件</button>
-            {eventTypes.map((eventType) => <button key={eventType.event_type} className={selectedEventType === eventType.event_type ? "active" : ""} onClick={() => setSelectedEventType(selectedEventType === eventType.event_type ? "" : eventType.event_type)}>{mediaSlotLabels[eventType.event_type] || eventType.event_type}<em>{eventType.count}</em></button>)}
+            {eventTypes.map((eventType) => <button key={eventType.event_type} className={selectedEventType === eventType.event_type ? "active" : ""} onClick={() => setSelectedEventType(selectedEventType === eventType.event_type ? "" : eventType.event_type)}>{mediaSlotLabel(eventType.event_type)}<em>{eventType.count}</em></button>)}
           </div>}
         </div>
         <div className="media-filter-actions">
@@ -1779,13 +1804,23 @@ function animationCardSamples(association: MediaAssociation, facing: number) {
     const selected = directionalAnimationSample(association.samples, facing);
     return selected ? [selected] : [];
   }
+  if (association.selection) {
+    const configured = association.samples.find((sample) => sample.name === association.selected_sample);
+    const selected = (configured?.asset ? configured : null)
+      || association.samples.find((sample) => sample.asset)
+      || configured
+      || association.samples[0];
+    return selected ? [selected] : [];
+  }
   return association.samples;
 }
 
 function animationRoleTab(kind: EntityKind, role: MediaAssociation["role"], slot: string): EntityAnimationTab {
   if (role === "construction") return kind === "building" ? "construction" : "body";
   if (role === "operation") return kind === "building" ? "operation" : "body";
-  if (role === "weapon" || role === "impact") return "weapon";
+  if (role === "weapon") return "weapon";
+  if (role === "impact") return "impact";
+  if (role === "destruction" || role === "debris") return "destruction";
   return role === "body" || slot === "body_sequence" ? "body" : "weapon";
 }
 
@@ -1794,6 +1829,7 @@ function animationAssociationTab(kind: EntityKind, association: MediaAssociation
 }
 
 function animationAssociationCount(association: MediaAssociation) {
+  if (association.selection) return 1;
   const directional = association.samples.filter((sample) => sample.animation?.direction);
   return directional.length > 1 && directional.length === association.samples.length
     ? 1
@@ -1804,13 +1840,18 @@ function defaultEntityAnimationTab(entity: GameEntity | null): EntityAnimationTa
   if (!entity) return "body";
   const associations = entity.media.filter((association) => association.kind === "animation");
   const order: EntityAnimationTab[] = entity.kind === "building"
-    ? ["construction", "operation", "weapon"]
-    : ["body", "weapon"];
+    ? ["construction", "operation", "weapon", "impact", "destruction"]
+    : ["body", "weapon", "impact", "destruction"];
   return order.find((tab) => associations.some((association) => animationAssociationTab(entity.kind, association) === tab))
     || (entity.kind !== "building" && entity.preview.frame_count > 1 ? "body" : "weapon");
 }
 
 function animationFireFlh(art: Record<string, string>, slot: string) {
+  const numbered = /^(?:elite_)?weapon_(\d+)$/.exec(slot);
+  if (numbered) {
+    const values = (art[`weapon_${numbered[1]}_flh`] || "").split(",").map((value) => Number(value.trim()));
+    if (values.length >= 3 && values.every((value) => Number.isFinite(value))) return values.slice(0, 3);
+  }
   const secondary = slot.includes("secondary");
   const elite = slot.includes("elite");
   const fields = secondary
@@ -1829,7 +1870,7 @@ function animationEffectAnchor(
   slot: string,
   facing: number,
 ) {
-  if (role === "operation") return { x: 50, y: 50 };
+  if (role === "operation" || role === "destruction" || role === "debris") return { x: 50, y: 50 };
   const radians = (((facing % 8) + 8) % 8) * Math.PI / 4;
   if (role === "impact") {
     return { x: 50 + Math.sin(radians) * 24, y: 54 - Math.cos(radians) * 12 };
@@ -1847,13 +1888,8 @@ function animationEffectAnchor(
 }
 
 function animationAssociationTitle(association: MediaAssociation) {
-  if (association.role === "body" || association.slot === "body_sequence") return animationEventLabel(association.event);
-  const slot = mediaSlotLabels[association.slot] || association.slot;
-  if (association.role === "weapon") return `${slot}开火`;
-  if (association.role === "impact") return `${slot}命中`;
-  if (association.role === "construction") return "建造";
-  if (association.role === "operation") return mediaSlotLabels[association.slot] || animationEventLabel(association.event);
-  return animationEventLabel(association.event);
+  if (association.role === "body" || association.slot === "body_sequence") return animationEventTitle(association.event);
+  return `${ruleFieldName(association.rule_field)} · ${association.event}`;
 }
 
 function animationAssociationMeta(association: MediaAssociation, sample: MediaSample) {
@@ -1865,10 +1901,19 @@ function animationAssociationMeta(association: MediaAssociation, sample: MediaSa
       ? ` · ${sample.animation.frame_count} 帧`
       : "";
   const bodyPrefix = association.aliases?.length
-    ? `${association.aliases.length + 1} 个事件共用`
-    : mediaSlotLabels[association.slot] || association.slot;
-  const prefix = association.role === "body" ? bodyPrefix : association.event;
-  return `${prefix}${frameSuffix}${sample.asset ? "" : " · 未解析"}`;
+    ? `${association.rule_field || "Sequence"} · ${association.aliases.length + 1} 个事件共用`
+    : association.rule_field || mediaSlotLabel(association.slot);
+  const selectionSuffix = association.selection === "damage"
+    ? ` · Damage=${association.selection_value ?? "?"} · ${association.samples.length} 个候选`
+    : association.selection === "random"
+      ? ` · ${association.rule_field === "WarheadType.AnimList" ? "EMEffect 随机" : `MaxDebris=${association.selection_value ?? "?"}`} · ${association.samples.length} 个候选`
+      : association.selection === "first" && association.samples.length > 1
+        ? ` · 预览首项 · ${association.samples.length} 个候选`
+        : "";
+  const prefix = association.role === "body"
+    ? bodyPrefix
+    : `[${association.source}] · ${mediaSlotLabel(association.slot)} · ${sample.name}`;
+  return `${prefix}${frameSuffix}${selectionSuffix}${sample.asset ? "" : " · 未解析"}`;
 }
 
 function animationAssociationAliasTitle(association: MediaAssociation) {
@@ -2229,13 +2274,14 @@ interface DisplaySoundAssociation {
 }
 
 type EntityDetailTab = "sound" | "animation" | "data";
-type EntityAnimationTab = "body" | "construction" | "operation" | "weapon";
+type EntityAnimationTab = "body" | "construction" | "operation" | "weapon" | "impact" | "destruction";
 type AudioDetailTab = "associations" | "data";
 
 interface ActiveEntityAnimation {
   event: string;
   slot: string;
   source: string;
+  ruleField: string | null;
   role: MediaAssociation["role"];
   sample: MediaSample;
 }
@@ -2308,13 +2354,21 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
   const weaponAnimationAssociations = animationAssociations.filter(
     (association) => animationAssociationTab(entityKind, association) === "weapon",
   );
+  const impactAnimationAssociations = animationAssociations.filter(
+    (association) => animationAssociationTab(entityKind, association) === "impact",
+  );
+  const destructionAnimationAssociations = animationAssociations.filter(
+    (association) => animationAssociationTab(entityKind, association) === "destruction",
+  );
   const activeAnimationFrames = useMemo(
     () => animationSourceFrames(activeAnimation?.sample, animationMetadata, facing),
     [activeAnimation, animationMetadata, facing],
   );
   const activeAnimationIsBody = activeAnimation?.role === "body" || activeAnimation?.slot === "body_sequence";
-  const activeAnimationReplacesBody = activeAnimationIsBody || activeAnimation?.role === "construction";
-  const effectBodyAssociation = activeAnimation && ["weapon", "impact"].includes(activeAnimation.role || "")
+  const activeAnimationReplacesBody = activeAnimationIsBody
+    || activeAnimation?.role === "construction"
+    || (activeAnimation?.role === "debris" && ["vxl", "hva"].includes(activeAnimation.sample.asset?.format || ""));
+  const effectBodyAssociation = activeAnimation?.role === "weapon"
     ? effectBodySequence(animationAssociations, activeAnimation.slot)
     : null;
   const effectBodySample = effectBodyAssociation?.samples.find((sample) => sample.asset) || null;
@@ -2363,7 +2417,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
 
   useEffect(() => {
     if (!playing || frameCount < 2) return;
-    const timer = window.setInterval(() => setFrame((current) => (current + 1) % frameCount), entity?.voxel ? 500 : 160);
+    const timer = window.setInterval(() => setFrame((current) => (current + 1) % frameCount), entity?.voxel ? 240 : 160);
     return () => window.clearInterval(timer);
   }, [playing, frameCount, entity?.voxel]);
 
@@ -2412,7 +2466,8 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
     const association = animationAssociations.find(
       (item) => item.slot === activeAnimation.slot
         && item.source === activeAnimation.source
-        && item.event === activeAnimation.event,
+        && item.event === activeAnimation.event
+        && item.rule_field === activeAnimation.ruleField,
     );
     const directional = association?.samples.filter((sample) => sample.animation?.direction) || [];
     const sample = association && directional.length > 1 && directional.length === association.samples.length
@@ -2455,11 +2510,15 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
   const soundCount = soundAssociations.reduce((count, association) => count + association.samples.length, 0);
   const hasBodySequences = bodyAnimationAssociations.length > 0;
   const hasRawBodyAnimation = entity.kind !== "building" && frameCount > 1 && !hasBodySequences;
+  const rawBodyAnimationTitle = "主体 HVA 时间轴";
+  const rawBodyAnimationMeta = `${frameCount} 帧 · HVA 逐帧变换`;
   const animationGroups: Record<EntityAnimationTab, MediaAssociation[]> = {
     body: bodyAnimationAssociations,
     construction: constructionAnimationAssociations,
     operation: operationAnimationAssociations,
     weapon: weaponAnimationAssociations,
+    impact: impactAnimationAssociations,
+    destruction: destructionAnimationAssociations,
   };
   const animationCounts: Record<EntityAnimationTab, number> = {
     body: bodyAnimationAssociations.reduce((count, association) => count + animationAssociationCount(association), 0)
@@ -2467,12 +2526,16 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
     construction: constructionAnimationAssociations.reduce((count, association) => count + animationAssociationCount(association), 0),
     operation: operationAnimationAssociations.reduce((count, association) => count + animationAssociationCount(association), 0),
     weapon: weaponAnimationAssociations.reduce((count, association) => count + animationAssociationCount(association), 0),
+    impact: impactAnimationAssociations.reduce((count, association) => count + animationAssociationCount(association), 0),
+    destruction: destructionAnimationAssociations.reduce((count, association) => count + animationAssociationCount(association), 0),
   };
   const animationTabLabels: Record<EntityAnimationTab, string> = {
-    body: "主体动作",
-    construction: "建造",
-    operation: "运行",
-    weapon: entity.kind === "building" ? "武器效果" : "武器动画",
+    body: entity.voxel ? "HVA" : "Sequence",
+    construction: "Buildup",
+    operation: "ArtType 动画",
+    weapon: "Weapon Anim",
+    impact: "AnimList / SplashList",
+    destruction: "DeathWeapon / Debris",
   };
   const animationTabs = (Object.keys(animationCounts) as EntityAnimationTab[]).filter(
     (tab) => animationCounts[tab] > 0,
@@ -2483,9 +2546,13 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
     ? animationAssociations.find(
       (association) => association.slot === activeAnimation.slot
         && association.source === activeAnimation.source
-        && association.event === activeAnimation.event,
+        && association.event === activeAnimation.event
+        && association.rule_field === activeAnimation.ruleField,
     )
     : undefined;
+  const activeAnimationCandidates = activeAnimationAssociation?.selection && activeAnimationAssociation.samples.length > 1
+    ? activeAnimationAssociation.samples.filter((sample) => sample.asset)
+    : [];
   const activeAnimationTitle = activeAnimationAssociation
     ? animationAssociationTitle(activeAnimationAssociation)
     : animationEventLabel(activeAnimation?.event || "主体动作");
@@ -2552,6 +2619,10 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
                   {frameMode === "sequence" && <><button className="play-button" onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={frameCount - 1} value={Math.min(frame, frameCount - 1)} onChange={(event) => setFrame(Number(event.target.value))} aria-label="当前动画帧" /><span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(frameCount).padStart(2, "0")}</span></>}
                   <div className="frame-mode-toggle"><button className={frameMode === "sequence" ? "active" : ""} onClick={() => setFrameMode("sequence")} title="顺序播放"><Icon name="play" size={14} /></button><button className={frameMode === "grid" ? "active" : ""} onClick={() => { setPlaying(false); setFrameMode("grid"); }} title="全部帧"><Icon name="grid" size={14} /></button></div>
                 </div>}
+              {activeAnimation && activeAnimationCandidates.length > 1 && <label className="animation-candidate-control"><span>候选</span><select aria-label="动画候选" value={activeAnimation.sample.name} onChange={(event) => {
+                const sample = activeAnimationCandidates.find((candidate) => candidate.name === event.target.value);
+                if (sample) setActiveAnimation((current) => current ? { ...current, sample } : current);
+              }}>{activeAnimationCandidates.map((sample) => <option value={sample.name} key={sample.name}>{sample.name}</option>)}</select></label>}
               {activeAnimationAsset && <button type="button" className="return-body-action" onClick={() => { setActiveAnimation(null); setPlaying(hasRawBodyAnimation); }}>返回主体</button>}
             </div>}
             <div className="entity-render-options compact-render-options">
@@ -2572,7 +2643,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
           {detailTab === "sound" && <section className="entity-tab-panel entity-sounds" role="tabpanel" id="entity-sound-panel" aria-labelledby="entity-sound-tab">
             <div className={`media-association-list ${associationLayout === "grid" ? "media-association-grid" : ""}`}>
               {soundAssociations.map((association) => <article key={`${association.kind}-${association.event}`}>
-                <header><span className="media-association-slots">{association.slots.map((slot) => <strong key={slot}>{mediaSlotLabels[slot] || slot}</strong>)}</span><code>{association.event}</code><em>{association.samples.length}</em></header>
+                <header><span className="media-association-slots">{association.slots.map((slot) => <strong key={slot}>{mediaSlotLabel(slot)}</strong>)}</span><code>{association.event}</code><em>{association.samples.length}</em></header>
                 <div>{association.samples.map((sample) => <EntitySoundSample sample={sample} key={`${association.event}-${sample.asset?.id || sample.name}`} />)}</div>
               </article>)}
             </div>
@@ -2583,8 +2654,8 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
               {animationTabs.map((tab) => <button type="button" role="tab" id={`entity-${tab}-animation-tab`} aria-controls={`entity-${tab}-animation-panel`} aria-selected={animationTab === tab} className={animationTab === tab ? "active" : ""} onClick={() => selectAnimationTab(tab)} key={tab}>{animationTabLabels[tab]} <em>{animationCounts[tab]}</em></button>)}
             </div>}
             <div id={`entity-${animationTab}-animation-panel`} role="tabpanel" aria-labelledby={`entity-${animationTab}-animation-tab`} className={`animation-association-list ${associationLayout === "grid" ? "animation-association-grid" : ""}`}>
-              {animationTab === "body" && hasRawBodyAnimation && <button type="button" className={!activeAnimation ? "active" : ""} onClick={() => { setActiveAnimation(null); setFrameMode("sequence"); setPlaying(true); }}><span className="animation-thumbnail body-action"><Icon name="unit" size={24} /></span><span><strong>全部主体帧</strong><small>{frameCount} 帧 · 顺序预览</small></span><Icon name="play" size={16} /></button>}
-              {visibleAnimationAssociations.flatMap((association) => animationCardSamples(association, facing).map((sample, index) => <button type="button" disabled={!sample.asset} className={activeAnimation?.event === association.event && activeAnimation.slot === association.slot && activeAnimation.source === association.source && activeAnimation.sample.name === sample.name ? "active" : ""} onClick={() => { if (!sample.asset) return; setPlaying(false); setActiveAnimation({ event: association.event, slot: association.slot, source: association.source, role: association.role, sample }); }} key={`${association.slot}-${association.source}-${association.event}-${sample.name}-${index}`}>
+              {animationTab === "body" && hasRawBodyAnimation && <button type="button" className={!activeAnimation ? "active" : ""} onClick={() => { setActiveAnimation(null); setFrameMode("sequence"); setPlaying(true); }}><span className="animation-thumbnail body-action"><Icon name="unit" size={24} /></span><span><strong>{rawBodyAnimationTitle}</strong><small>{rawBodyAnimationMeta}</small></span><Icon name="play" size={16} /></button>}
+              {visibleAnimationAssociations.flatMap((association) => animationCardSamples(association, facing).map((sample, index) => <button type="button" disabled={!sample.asset} className={activeAnimation?.event === association.event && activeAnimation.slot === association.slot && activeAnimation.source === association.source && activeAnimation.ruleField === association.rule_field && activeAnimation.sample.name === sample.name ? "active" : ""} onClick={() => { if (!sample.asset) return; setPlaying(false); setActiveAnimation({ event: association.event, slot: association.slot, source: association.source, ruleField: association.rule_field, role: association.role, sample }); }} key={`${association.slot}-${association.source}-${association.rule_field}-${association.event}-${sample.name}-${index}`}>
                 <span className={`animation-thumbnail ${association.role === "body" || association.role === "construction" ? "body-action" : ""}`}>{sample.asset && ["shp", "tmp", "pcx"].includes(sample.asset.format) ? <img loading="lazy" src={api.previewUrl(sample.asset.id, sample.animation?.start_frame || 0, "", 2, playerColor)} alt="" /> : <Icon name="image" size={24} />}</span>
                 <span><strong>{animationAssociationTitle(association)}</strong><small title={animationAssociationAliasTitle(association)}>{animationAssociationMeta(association, sample)}</small></span><Icon name="play" size={16} />
               </button>))}
@@ -2608,7 +2679,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
               <h3>战斗依赖</h3>
               <div className="dependency-groups">
                 {dependencyGroups.map((group) => <details key={group.slot}>
-                  <summary><span>{dependencySlotLabels[group.slot]}</span><strong>{group.items[0]?.id}</strong><em>{group.items.length}</em></summary>
+                  <summary><span>{dependencySlotLabel(group.slot)}</span><strong>{group.items[0]?.id}</strong><em>{group.items.length}</em></summary>
                   <div className="dependency-compact">
                     {group.items.map((dependency, index) => <article className={dependency.resolved ? "" : "unresolved"} key={`${dependency.kind}-${dependency.id}-${index}`}>
                       <header><span>{dependencyKindLabels[dependency.kind]}</span><code>{dependency.id}</code>{!dependency.resolved && <em>缺少规则节</em>}</header>
@@ -2797,7 +2868,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
       {associations && associations.items.length > 0 && (!isAudio || activeAudioDetailTab === "associations") && <div className="asset-associations" role={isAudio ? "tabpanel" : undefined} id={isAudio ? "audio-associations-panel" : undefined} aria-labelledby={isAudio ? "audio-associations-tab" : undefined}>
         <h3>关联事件</h3>
         <div>{associations.items.map((item, index) => <article key={`${item.scope}-${item.event}-${item.slot}-${index}`}>
-          <span>{mediaSlotLabels[item.slot] || item.slot}</span>
+          <span>{mediaSlotLabel(item.slot)}</span>
           <strong>{item.entity?.display_name || item.event}</strong>
           {item.entity && <code>{item.event}</code>}
           {(item.original_text || item.text) && <p><b>原文</b>{item.original_text || item.text}</p>}
