@@ -1,4 +1,17 @@
-import { FormEvent, lazy, ReactNode, Suspense, useEffect, useMemo, useState } from "react";
+import {
+  CSSProperties,
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  lazy,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  Suspense,
+  UIEvent as ReactUIEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   api,
@@ -29,7 +42,9 @@ function VoxelPreview({ url, label }: { url: string; label: string }) {
 }
 
 type IconName =
+  | "aircraft"
   | "archive"
+  | "building"
   | "chevron"
   | "close"
   | "download"
@@ -37,6 +52,7 @@ type IconName =
   | "folder"
   | "grid"
   | "image"
+  | "infantry"
   | "info"
   | "list"
   | "pause"
@@ -44,13 +60,17 @@ type IconName =
   | "popout"
   | "search"
   | "settings"
+  | "sound"
   | "spark"
   | "swatch"
-  | "unit";
+  | "unit"
+  | "voice";
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
+    aircraft: <><path d="m3 14 8-3V5l2-2 1 8 7 3v2l-7-1.5-1 6.5h-2l-1-6.5L3 16z" /></>,
     archive: <><path d="M4 7.5h16v12H4z" /><path d="M3 4.5h18v3H3zM9 11h6" /></>,
+    building: <><path d="M5 21V4h10v17M15 9h4v12M8 8h4M8 12h4M8 16h4M3 21h18" /></>,
     chevron: <path d="m9 18 6-6-6-6" />,
     close: <><path d="m6 6 12 12M18 6 6 18" /></>,
     download: <><path d="M12 3v12m0 0 4-4m-4 4-4-4" /><path d="M5 20h14" /></>,
@@ -58,6 +78,7 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     folder: <path d="M3 6h7l2 2h9v11H3z" />,
     grid: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
     image: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="m4 17 5-4 4 3 3-2 4 3" /></>,
+    infantry: <><circle cx="12" cy="5" r="2" /><path d="M12 7v6m0-3-4 3m4-3 4 3m-4 0-3 7m3-7 3 7" /></>,
     info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10h.01" /></>,
     list: <><path d="M8 6h13M8 12h13M8 18h13" /><path d="M3 6h.01M3 12h.01M3 18h.01" /></>,
     pause: <><path d="M9 7v10M15 7v10" /></>,
@@ -65,9 +86,11 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     popout: <><path d="M13 4h7v7M20 4l-9 9" /><path d="M18 13v7H4V6h7" /></>,
     search: <><circle cx="11" cy="11" r="7" /><path d="m16 16 5 5" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 9 19.37a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-1.55-1.03H3v-4h.08A1.7 1.7 0 0 0 4.63 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63a1.7 1.7 0 0 0 1-1.55V3h4v.08A1.7 1.7 0 0 0 15 4.63a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9a1.7 1.7 0 0 0 1.55 1.03H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z" /></>,
+    sound: <><path d="M4 10h3l4-4v12l-4-4H4zM15 9c1.5 1.5 1.5 4.5 0 6M18 6c3.5 3.5 3.5 8.5 0 12" /></>,
     spark: <><path d="m12 3 1.1 4.2L17 9l-3.9 1.8L12 15l-1.1-4.2L7 9l3.9-1.8z" /><path d="m19 15 .6 2.4L22 18.5l-2.4 1.1L19 22l-.6-2.4-2.4-1.1 2.4-1.1z" /></>,
     swatch: <><path d="M4 4h6v16H4zM10 7h5v13h-5zM15 10h5v10h-5z" /><path d="M7 16h.01M12.5 16h.01M17.5 16h.01" /></>,
     unit: <><path d="M5 10h11l3 3v4H5z" /><path d="M8 10V7h6l2 3M14 7l3-2M4 17h16" /><circle cx="8" cy="18" r="2" /><circle cx="17" cy="18" r="2" /></>,
+    voice: <><path d="M5 5h14v11H9l-4 4z" /><path d="M9 9h6M9 12h4" /></>,
   };
   return (
     <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -285,6 +308,23 @@ type LayoutMode = "list" | "grid";
 type DetailPlacement = "right" | "bottom";
 type EntitySort = "name_asc" | "name_desc" | "cost_desc" | "strength_desc";
 
+type BrowsingLocation = {
+  view: "assets" | "entities";
+  sourceId: string;
+  assetCategory: string;
+  assetFormatTag: string;
+  mediaGroup: string;
+  entityKind: EntityKind;
+  entitySide: string;
+  selectedAssetId: string;
+  selectedEntityId: string;
+  assetQuery: string;
+  entityQuery: string;
+  assetSort: AssetSort;
+  entitySort: EntitySort;
+  mediaSort: MediaSort;
+};
+
 const audioFormats = ["bag_audio", "wav", "aud"];
 const imageFormats = ["shp", "tmp", "pcx", "pal", "map"];
 const defaultVisibleFormats = [
@@ -306,6 +346,83 @@ const assetCategories: Array<{
 ];
 
 const entityKindOrder: EntityKind[] = ["vehicle", "aircraft", "infantry", "building"];
+const entityKindIcons: Record<EntityKind, IconName> = {
+  vehicle: "unit",
+  aircraft: "aircraft",
+  infantry: "infantry",
+  building: "building",
+};
+
+function readBrowsingLocation(): Partial<BrowsingLocation> {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem("ra2exp-browsing-location-v1") || "null");
+    return stored && typeof stored === "object" ? stored as Partial<BrowsingLocation> : {};
+  } catch {
+    return {};
+  }
+}
+
+function readStoredNumber(key: string, fallback: number, minimum: number, maximum: number) {
+  const parsed = Number.parseInt(window.localStorage.getItem(key) || "", 10);
+  return Number.isFinite(parsed) ? Math.min(maximum, Math.max(minimum, parsed)) : fallback;
+}
+
+function audioDisplayName(value: string) {
+  return value.replace(/\.(?:wav|aud)$/i, "");
+}
+
+function assetDisplayName(asset: Pick<Asset, "display_name" | "format">) {
+  return audioFormats.includes(asset.format) ? audioDisplayName(asset.display_name) : asset.display_name;
+}
+
+function ruleColumnSpan(label: string, value: string) {
+  const width = [...`${label}${value}`].reduce(
+    (total, character) => total + (character.charCodeAt(0) > 255 ? 2 : 1),
+    0,
+  );
+  return width > 72 ? 3 : width > 34 ? 2 : 1;
+}
+
+function useRememberedScroll<T extends HTMLElement = HTMLDivElement>(key: string, itemCount: number) {
+  const ref = useRef<T>(null);
+  const activeKey = useRef("");
+  const target = useRef(0);
+  const restoring = useRef(false);
+  const ready = useRef(false);
+
+  if (activeKey.current !== key) {
+    activeKey.current = key;
+    target.current = key
+      ? Math.max(0, Number.parseInt(window.localStorage.getItem(`ra2exp-scroll:${key}`) || "0", 10) || 0)
+      : 0;
+    restoring.current = target.current > 0;
+    ready.current = false;
+  }
+
+  useEffect(() => {
+    if (!key || !ref.current) return;
+    ready.current = false;
+    ref.current.scrollTop = target.current;
+    const frame = window.requestAnimationFrame(() => {
+      if (!ref.current || activeKey.current !== key) return;
+      ref.current.scrollTop = target.current;
+      restoring.current = Math.abs(ref.current.scrollTop - target.current) >= 2;
+      ready.current = true;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [key, itemCount]);
+
+  function remember(event: ReactUIEvent<HTMLDivElement>) {
+    if (!key || !ready.current) return;
+    const top = event.currentTarget.scrollTop;
+    if (restoring.current && Math.abs(top - target.current) >= 2) return;
+    restoring.current = false;
+    target.current = top;
+    window.localStorage.setItem(`ra2exp-scroll:${key}`, String(Math.round(top)));
+  }
+
+  return { ref, remember };
+}
 
 function sortEntities(entities: EntitySummary[], sort: EntitySort) {
   const selected = [...entities];
@@ -338,7 +455,10 @@ function categoryCount(stats: Stats, formats: string[]) {
 }
 
 function ExplorerApp() {
-  const [view, setView] = useState<"assets" | "entities">("entities");
+  const [rememberedLocation] = useState(readBrowsingLocation);
+  const [view, setView] = useState<"assets" | "entities">(
+    rememberedLocation.view === "assets" ? "assets" : "entities",
+  );
   const [sources, setSources] = useState<Source[]>([]);
   const [sourceId, setSourceId] = useState("");
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -347,10 +467,10 @@ function ExplorerApp() {
   const [stats, setStats] = useState<Stats>({ total_assets: 0, formats: [] });
   const [palettes, setPalettes] = useState<Asset[]>([]);
   const [playerColors, setPlayerColors] = useState<PlayerColor[]>([]);
-  const [assetQuery, setAssetQuery] = useState("");
-  const [assetCategory, setAssetCategory] = useState("animations");
-  const [assetFormatTag, setAssetFormatTag] = useState("");
-  const [assetSort, setAssetSort] = useState<AssetSort>("name_asc");
+  const [assetQuery, setAssetQuery] = useState(rememberedLocation.assetQuery || "");
+  const [assetCategory, setAssetCategory] = useState(rememberedLocation.assetCategory || "animations");
+  const [assetFormatTag, setAssetFormatTag] = useState(rememberedLocation.assetFormatTag || "");
+  const [assetSort, setAssetSort] = useState<AssetSort>(rememberedLocation.assetSort || "name_asc");
   const [enabledFormats, setEnabledFormats] = useState<string[]>(initialVisibleFormats);
   const [layout, setLayout] = useState<LayoutMode>(() =>
     window.localStorage.getItem("ra2exp-layout") === "grid" ? "grid" : "list",
@@ -360,11 +480,15 @@ function ExplorerApp() {
   );
   const [entities, setEntities] = useState<EntitySummary[]>([]);
   const [entityKinds, setEntityKinds] = useState<Array<{ kind: EntityKind; count: number }>>([]);
-  const [entityKind, setEntityKind] = useState<EntityKind | "">("vehicle");
-  const [entityQuery, setEntityQuery] = useState("");
-  const [entitySide, setEntitySide] = useState("");
-  const [entitySort, setEntitySort] = useState<EntitySort>("name_asc");
-  const [selectedEntityId, setSelectedEntityId] = useState("");
+  const [entityKind, setEntityKind] = useState<EntityKind | "">(
+    entityKindOrder.includes(rememberedLocation.entityKind as EntityKind)
+      ? rememberedLocation.entityKind as EntityKind
+      : "vehicle",
+  );
+  const [entityQuery, setEntityQuery] = useState(rememberedLocation.entityQuery || "");
+  const [entitySide, setEntitySide] = useState(rememberedLocation.entitySide || "");
+  const [entitySort, setEntitySort] = useState<EntitySort>(rememberedLocation.entitySort || "name_asc");
+  const [selectedEntityId, setSelectedEntityId] = useState(rememberedLocation.selectedEntityId || "");
   const [selectedEntity, setSelectedEntity] = useState<GameEntity | null>(null);
   const [entityLoading, setEntityLoading] = useState(false);
   const [entityDetailLoading, setEntityDetailLoading] = useState(false);
@@ -372,11 +496,11 @@ function ExplorerApp() {
   const [mediaTotal, setMediaTotal] = useState(0);
   const [mediaGroups, setMediaGroups] = useState<Array<{ group: string; count: number }>>([]);
   const [mediaKindCounts, setMediaKindCounts] = useState<Array<{ kind: MediaKind; count: number }>>([]);
-  const [mediaGroup, setMediaGroup] = useState("");
+  const [mediaGroup, setMediaGroup] = useState(rememberedLocation.mediaGroup || "");
   const [mediaLoading, setMediaLoading] = useState(false);
-  const [mediaSort, setMediaSort] = useState<MediaSort>("name_asc");
+  const [mediaSort, setMediaSort] = useState<MediaSort>(rememberedLocation.mediaSort || "name_asc");
   const [playingMediaId, setPlayingMediaId] = useState("");
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(rememberedLocation.selectedAssetId || "");
   const [selected, setSelected] = useState<Asset | null>(null);
   const [metadata, setMetadata] = useState<AssetMetadata | null>(null);
   const [associations, setAssociations] = useState<AssetAssociationPage | null>(null);
@@ -391,6 +515,15 @@ function ExplorerApp() {
   const [notice, setNotice] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => window.localStorage.getItem("ra2exp-sidebar-collapsed") === "true",
+  );
+  const [detailBottomSize, setDetailBottomSize] = useState(
+    () => readStoredNumber("ra2exp-detail-bottom-size", Math.round(window.innerHeight * 0.42), 220, 900),
+  );
+  const [detailRightSize, setDetailRightSize] = useState(
+    () => readStoredNumber("ra2exp-detail-right-size", 430, 320, 900),
+  );
   const [discovery, setDiscovery] = useState<DiscoveryResult>({ candidates: [], checked_locations: [], official_sources: [] });
   const [discoveryLoaded, setDiscoveryLoaded] = useState(false);
 
@@ -425,6 +558,15 @@ function ExplorerApp() {
     ),
     [kindEntities, entitySide, entitySort],
   );
+  const detailSize = detailPlacement === "bottom" ? detailBottomSize : detailRightSize;
+  const workspaceStyle = {
+    "--sidebar-width": sidebarCollapsed ? "58px" : "224px",
+    "--detail-panel-size": `${detailSize}px`,
+  } as CSSProperties;
+  const assetScrollKey = [sourceId, selectedCategoryId, assetFormatTag, assetQuery, assetSort, layout]
+    .map((value) => encodeURIComponent(value))
+    .join(":");
+  const assetListScroll = useRememberedScroll(`assets:${assetScrollKey}`, assets.length);
 
   function updateLayout(next: LayoutMode) {
     setLayout(next);
@@ -436,11 +578,97 @@ function ExplorerApp() {
     window.localStorage.setItem("ra2exp-detail-placement", next);
   }
 
+  function updateSidebarCollapsed(next: boolean) {
+    setSidebarCollapsed(next);
+    window.localStorage.setItem("ra2exp-sidebar-collapsed", String(next));
+  }
+
+  function clampDetailSize(value: number, placement: DetailPlacement, bounds: DOMRect) {
+    if (placement === "bottom") {
+      return Math.round(Math.min(Math.max(220, bounds.height - 246), Math.max(220, value)));
+    }
+    const sidebarWidth = sidebarCollapsed ? 58 : 224;
+    return Math.round(Math.min(
+      Math.max(320, bounds.width - sidebarWidth - 366),
+      Math.max(320, value),
+    ));
+  }
+
+  function setCurrentDetailSize(value: number, placement: DetailPlacement, persist = false) {
+    if (placement === "bottom") setDetailBottomSize(value);
+    else setDetailRightSize(value);
+    if (persist) window.localStorage.setItem(`ra2exp-detail-${placement}-size`, String(value));
+  }
+
+  function beginDetailResize(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const placement = detailPlacement;
+    const bounds = event.currentTarget.parentElement!.getBoundingClientRect();
+    let latest = detailSize;
+    const previousCursor = document.body.style.cursor;
+    const previousSelection = document.body.style.userSelect;
+    document.body.style.cursor = placement === "bottom" ? "row-resize" : "col-resize";
+    document.body.style.userSelect = "none";
+    const move = (moveEvent: PointerEvent) => {
+      const requested = placement === "bottom"
+        ? bounds.bottom - moveEvent.clientY
+        : bounds.right - moveEvent.clientX;
+      latest = clampDetailSize(requested, placement, bounds);
+      setCurrentDetailSize(latest, placement);
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousSelection;
+      setCurrentDetailSize(latest, placement, true);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+  }
+
+  function resizeDetailWithKeyboard(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const grows = detailPlacement === "bottom" ? event.key === "ArrowUp" : event.key === "ArrowLeft";
+    const shrinks = detailPlacement === "bottom" ? event.key === "ArrowDown" : event.key === "ArrowRight";
+    if (!grows && !shrinks) return;
+    event.preventDefault();
+    const bounds = event.currentTarget.parentElement!.getBoundingClientRect();
+    const next = clampDetailSize(detailSize + (grows ? 20 : -20), detailPlacement, bounds);
+    setCurrentDetailSize(next, detailPlacement, true);
+  }
+
   function updateEnabledFormats(next: string[]) {
     const unique = [...new Set(next)];
     setEnabledFormats(unique);
     window.localStorage.setItem("ra2exp-visible-formats-v2", JSON.stringify(unique));
   }
+
+  useEffect(() => {
+    if (loading || !sourceId) return;
+    const location: BrowsingLocation = {
+      view,
+      sourceId,
+      assetCategory,
+      assetFormatTag,
+      mediaGroup,
+      entityKind: entityKind || "vehicle",
+      entitySide,
+      selectedAssetId: selectedId,
+      selectedEntityId,
+      assetQuery,
+      entityQuery,
+      assetSort,
+      entitySort,
+      mediaSort,
+    };
+    window.localStorage.setItem("ra2exp-browsing-location-v1", JSON.stringify(location));
+  }, [
+    loading, sourceId, view, assetCategory, assetFormatTag, mediaGroup, entityKind,
+    entitySide, selectedId, selectedEntityId, assetQuery, entityQuery, assetSort,
+    entitySort, mediaSort,
+  ]);
 
   function selectEntityKind(kind: EntityKind) {
     setView("entities");
@@ -500,7 +728,9 @@ function ExplorerApp() {
     ])
       .then(([nextSources, nextPlayerColors]) => {
         setSources(nextSources);
-        setSourceId(nextSources[0]?.id || "");
+        setSourceId(nextSources.some((source) => source.id === rememberedLocation.sourceId)
+          ? rememberedLocation.sourceId || ""
+          : nextSources[0]?.id || "");
         setPlayerColors(nextPlayerColors);
       })
       .catch((reason: Error) => setError(reason.message))
@@ -508,9 +738,7 @@ function ExplorerApp() {
   }, []);
 
   useEffect(() => {
-    setSelectedId("");
     setSelected(null);
-    setSelectedEntityId("");
     setSelectedEntity(null);
     setAssociations(null);
     setAssets([]);
@@ -611,7 +839,6 @@ function ExplorerApp() {
     let cancelled = false;
     setEntityLoading(true);
     setEntities([]);
-    setSelectedEntityId("");
     setSelectedEntity(null);
     const timer = window.setTimeout(() => {
       api.entities(sourceId, entityQuery, "", "true")
@@ -787,14 +1014,16 @@ function ExplorerApp() {
           )}
         />
       ) : (
-        <main className={`workspace detail-${detailPlacement}`}>
+        <main className={`workspace detail-${detailPlacement} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`} style={workspaceStyle}>
           <aside className="source-panel panel">
             <div className="sidebar-brand">
               <div className="brand-mark" aria-hidden="true"><span>R</span><i /></div>
               <strong>RA2 Explorer</strong>
+              <button className="sidebar-toggle" type="button" onClick={() => updateSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? "展开导航" : "收起导航"} aria-label={sidebarCollapsed ? "展开导航" : "收起导航"}><Icon name="chevron" size={16} /></button>
             </div>
             {sources.length > 1 && <section className="source-heading">
-              <label className="source-select-wrap">
+              <label className="source-select-wrap" title="选择资料库">
+                <Icon name="archive" size={17} />
                 <select value={sourceId} onChange={(event) => setSourceId(event.target.value)} aria-label="选择资料库">
                   {sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}
                 </select>
@@ -808,7 +1037,7 @@ function ExplorerApp() {
                 <div className="tree-children">
                   {entityKindOrder.map((kind) => {
                     const count = entityKinds.find((item) => item.kind === kind)?.count || 0;
-                    return <button key={kind} className={view === "entities" && entityKind === kind ? "active" : ""} onClick={() => selectEntityKind(kind)}><span>{entityKindLabels[kind]}</span><em>{count}</em></button>;
+                    return <button key={kind} title={entityKindLabels[kind]} className={view === "entities" && entityKind === kind ? "active" : ""} onClick={() => selectEntityKind(kind)}><span><Icon name={entityKindIcons[kind]} /><b>{entityKindLabels[kind]}</b></span><em>{count}</em></button>;
                   })}
                 </div>
               </section>
@@ -816,25 +1045,25 @@ function ExplorerApp() {
                 <div className="tree-parent"><Icon name="play" /><strong>声音</strong><em>{mediaKindCounts.reduce((count, item) => count + item.count, 0) || categoryCount(stats, audioFormats)}</em></div>
                 <div className="tree-children">
                   {visibleCategories.filter((item) => ["voices", "sounds"].includes(item.id)).map((item) => <div className="tree-child-group" key={item.id}>
-                    <button className={view === "assets" && assetCategory === item.id && !mediaGroup ? "active" : ""} onClick={() => selectAssetCategory(item.id)}><span>{item.label}</span><em>{mediaKindCounts.find((count) => count.kind === (item.id === "voices" ? "voice" : "sound"))?.count || 0}</em></button>
-                    {view === "assets" && assetCategory === item.id && mediaGroups.filter((group) => group.group.endsWith(item.id === "voices" ? "_voice" : "_sound")).map((group) => <button className={`tree-grandchild ${mediaGroup === group.group ? "active" : ""}`} key={group.group} onClick={() => setMediaGroup(mediaGroup === group.group ? "" : group.group)}><span>{mediaGroupLabels[group.group] || group.group}</span><em>{group.count}</em></button>)}
+                    <button title={item.label} className={view === "assets" && assetCategory === item.id && !mediaGroup ? "active" : ""} onClick={() => selectAssetCategory(item.id)}><span><Icon name={item.id === "voices" ? "voice" : "sound"} /><b>{item.label}</b></span><em>{mediaKindCounts.find((count) => count.kind === (item.id === "voices" ? "voice" : "sound"))?.count || 0}</em></button>
+                    {view === "assets" && assetCategory === item.id && mediaGroups.filter((group) => group.group.endsWith(item.id === "voices" ? "_voice" : "_sound")).map((group) => <button title={mediaGroupLabels[group.group] || group.group} className={`tree-grandchild ${mediaGroup === group.group ? "active" : ""}`} key={group.group} onClick={() => setMediaGroup(mediaGroup === group.group ? "" : group.group)}><span><Icon name={item.id === "voices" ? "voice" : "sound"} /><b>{mediaGroupLabels[group.group] || group.group}</b></span><em>{group.count}</em></button>)}
                   </div>)}
                 </div>
               </section>}
               {visibleCategories.some((item) => item.id === "animations") && <section className="tree-branch">
                 <div className="tree-parent"><Icon name="image" /><strong>动画</strong><em>{categoryCount(stats, ["shp", "hva", "video"])}</em></div>
                 <div className="tree-children">
-                  <button className={view === "assets" && assetCategory === "animations" && !assetFormatTag ? "active" : ""} onClick={() => selectAssetCategory("animations")}><span>全部动画</span><em>{categoryCount(stats, ["shp", "hva", "video"])}</em></button>
-                  {["shp", "hva", "video"].filter((formatName) => enabledFormats.includes(formatName)).map((formatName) => <button className={view === "assets" && assetCategory === "animations" && assetFormatTag === formatName ? "active" : ""} key={formatName} onClick={() => { setView("assets"); setAssetCategory("animations"); setAssetFormatTag(formatName); }}><span>{formatLabels[formatName]}</span><em>{stats.formats.find((item) => item.format === formatName)?.count || 0}</em></button>)}
+                  <button title="全部动画" className={view === "assets" && assetCategory === "animations" && !assetFormatTag ? "active" : ""} onClick={() => selectAssetCategory("animations")}><span><Icon name="image" /><b>全部动画</b></span><em>{categoryCount(stats, ["shp", "hva", "video"])}</em></button>
+                  {["shp", "hva", "video"].filter((formatName) => enabledFormats.includes(formatName)).map((formatName) => <button title={formatLabels[formatName]} className={view === "assets" && assetCategory === "animations" && assetFormatTag === formatName ? "active" : ""} key={formatName} onClick={() => { setView("assets"); setAssetCategory("animations"); setAssetFormatTag(formatName); }}><span><Icon name={assetIcon(formatName)} /><b>{formatLabels[formatName]}</b></span><em>{stats.formats.find((item) => item.format === formatName)?.count || 0}</em></button>)}
                 </div>
               </section>}
               {visibleCategories.filter((item) => !["voices", "sounds", "animations"].includes(item.id)).map((item) => (
-                <button key={item.id} className={`tree-leaf ${view === "assets" && assetCategory === item.id ? "active" : ""}`} onClick={() => selectAssetCategory(item.id)}>
-                  <span><Icon name={item.icon} />{item.label}</span><em>{categoryCount(stats, item.formats.filter((formatName) => enabledFormats.includes(formatName)))}</em>
+                <button key={item.id} title={item.label} className={`tree-leaf ${view === "assets" && assetCategory === item.id ? "active" : ""}`} onClick={() => selectAssetCategory(item.id)}>
+                  <span><Icon name={item.icon} /><b>{item.label}</b></span><em>{categoryCount(stats, item.formats.filter((formatName) => enabledFormats.includes(formatName)))}</em>
                 </button>
               ))}
             </nav>
-            <button className="sidebar-settings" type="button" onClick={() => setSettingsOpen(true)}><Icon name="settings" />显示设置</button>
+            <button className="sidebar-settings" type="button" onClick={() => setSettingsOpen(true)} title="显示设置"><Icon name="settings" /><span>显示设置</span></button>
           </aside>
 
           {view === "assets" ? <>{isMediaCategory ? <MediaListPanel
@@ -854,6 +1083,7 @@ function ExplorerApp() {
             layout={layout}
             setLayout={updateLayout}
             onLoadMore={loadMoreMedia}
+            scrollKey={`media:${assetScrollKey}:${mediaGroup}`}
           /> : <section className="asset-panel panel">
             <div className="asset-toolbar">
               <label className="search-box"><Icon name="search" /><input value={assetQuery} onChange={(event) => setAssetQuery(event.target.value)} placeholder="搜索名称或 CRC…" aria-label="搜索资产" />{assetQuery && <button onClick={() => setAssetQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</label>
@@ -874,12 +1104,11 @@ function ExplorerApp() {
                 <option value="size_asc">体积从小到大</option>
               </select></label>
             </div>
-            {layout === "list" && <div className="list-heading"><span>资产</span><span>大小</span></div>}
-            <div className={`asset-list ${layout === "grid" ? "asset-grid" : ""}`} tabIndex={0} aria-label="资产列表" onScroll={(event) => { const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void loadMoreAssets(); }}>
+            <div ref={assetListScroll.ref} className={`asset-list ${layout === "grid" ? "asset-grid" : "list-columns"}`} tabIndex={0} aria-label="资产列表" onScroll={(event) => { assetListScroll.remember(event); const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void loadMoreAssets(); }}>
               {layout === "list" ? assets.map((asset) => (
                 <button key={asset.id} className={`asset-row ${selectedId === asset.id ? "selected" : ""}`} onClick={() => setSelectedId(asset.id)}>
                   <span className={`file-icon format-${asset.format}`}><Icon name={assetIcon(asset.format)} /></span>
-                  <span className="asset-main"><strong>{asset.display_name}</strong><small>{formatLabels[asset.format] || asset.format.toUpperCase()}</small></span>
+                  <span className="asset-main"><strong>{assetDisplayName(asset)}</strong><small>{formatLabels[asset.format] || asset.format.toUpperCase()}</small></span>
                   <span className="asset-size">{formatBytes(asset.size)}</span>
                   <Icon name="chevron" size={15} />
                 </button>
@@ -889,6 +1118,8 @@ function ExplorerApp() {
               {!assetPageLoading && assets.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的资产</strong><button onClick={() => { setAssetQuery(""); setAssetFormatTag(""); }}>清除筛选</button></div>}
             </div>
           </section>}
+
+          <div className="workspace-resizer" role="separator" tabIndex={0} aria-label="调整详情区域大小" aria-orientation={detailPlacement === "bottom" ? "horizontal" : "vertical"} aria-valuenow={detailSize} onPointerDown={beginDetailResize} onKeyDown={resizeDetailWithKeyboard}><span /></div>
 
           <DetailPanel
             asset={selected}
@@ -907,6 +1138,7 @@ function ExplorerApp() {
             previewUrl={previewUrl}
             associations={associations}
             wide={detailPlacement === "bottom"}
+            scrollKey={`asset:${sourceId}:${selectedId}`}
             onPopout={() => window.open(`/?detail=asset&asset_id=${encodeURIComponent(selectedId)}`, `ra2exp-asset-${selectedId}`, "popup=yes,width=1100,height=780")}
           />
           </> : <>
@@ -926,13 +1158,16 @@ function ExplorerApp() {
               setSelectedSide={setEntitySide}
               layout={layout}
               setLayout={updateLayout}
+              scrollKey={`entities:${sourceId}:${entityKind}:${entitySide}:${entityQuery}:${entitySort}:${layout}`}
             />
+            <div className="workspace-resizer" role="separator" tabIndex={0} aria-label="调整详情区域大小" aria-orientation={detailPlacement === "bottom" ? "horizontal" : "vertical"} aria-valuenow={detailSize} onPointerDown={beginDetailResize} onKeyDown={resizeDetailWithKeyboard}><span /></div>
             <EntityDetailPanel
               sourceId={sourceId}
               entity={selectedEntity}
               loading={entityDetailLoading}
               playerColors={playerColors}
               wide={detailPlacement === "bottom"}
+              scrollKey={`entity:${sourceId}:${selectedEntityId}`}
               onPopout={() => window.open(`/?detail=entity&source_id=${encodeURIComponent(sourceId)}&entity_id=${encodeURIComponent(selectedEntityId)}`, `ra2exp-entity-${selectedEntityId}`, "popup=yes,width=1100,height=780")}
             />
           </>}
@@ -988,7 +1223,7 @@ function AssetGridCard({ asset, selected, onSelect }: { asset: Asset; selected: 
           : isAudio ? <span className="audio-glyph" aria-hidden="true">{[4, 11, 7, 17, 12, 20, 9, 14, 5, 10].map((height, index) => <i key={index} style={{ height }} />)}</span>
             : <Icon name={assetIcon(asset.format)} size={32} />}
       </span>
-      <span className="asset-card-copy"><strong title={asset.display_name}>{asset.display_name}</strong><small>{formatLabels[asset.format] || asset.format.toUpperCase()} · {formatBytes(asset.size)}</small></span>
+      <span className="asset-card-copy"><strong title={assetDisplayName(asset)}>{assetDisplayName(asset)}</strong><small>{formatLabels[asset.format] || asset.format.toUpperCase()} · {formatBytes(asset.size)}</small></span>
     </button>
   );
 }
@@ -997,17 +1232,18 @@ function mediaPrimaryText(item: MediaItem) {
   return item.localized_texts[0]
     || item.description
     || item.original_texts[0]
-    || item.asset.display_name;
+    || assetDisplayName(item.asset);
 }
 
 function mediaSecondaryText(item: MediaItem) {
   const primary = mediaPrimaryText(item);
-  return [item.original_texts.find((text) => text !== primary), item.asset.display_name]
+  return [...new Set([item.original_texts.find((text) => text !== primary), assetDisplayName(item.asset)])]
     .filter((text): text is string => Boolean(text))
+    .filter((text) => text !== primary)
     .join(" · ");
 }
 
-function MediaListPanel({ items, total, loading, query, setQuery, groups, selectedGroup, setSelectedGroup, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore }: {
+function MediaListPanel({ items, total, loading, query, setQuery, groups, selectedGroup, setSelectedGroup, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore, scrollKey }: {
   items: MediaItem[];
   total: number;
   loading: boolean;
@@ -1024,8 +1260,10 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
   layout: LayoutMode;
   setLayout: (layout: LayoutMode) => void;
   onLoadMore: () => Promise<void>;
+  scrollKey: string;
 }) {
   const playing = items.find((item) => item.asset.id === playingId) || null;
+  const listScroll = useRememberedScroll(scrollKey, items.length);
   return (
     <section className="asset-panel media-panel panel">
       <div className="asset-toolbar">
@@ -1040,27 +1278,26 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
         </div>
         <label className="sort-control"><span>排序</span><select value={sort} onChange={(event) => setSort(event.target.value as MediaSort)}><option value="name_asc">文件名 A–Z</option><option value="name_desc">文件名 Z–A</option><option value="description_asc">说明 A–Z</option></select></label>
       </div>
-      {layout === "list" && <div className="list-heading media-list-heading"><span>声音</span><span>关联</span></div>}
-      <div className={`asset-list ${layout === "grid" ? "asset-grid media-grid" : ""}`} tabIndex={0} aria-label="声音列表" onScroll={(event) => { const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void onLoadMore(); }}>
+      <div ref={listScroll.ref} className={`asset-list ${layout === "grid" ? "asset-grid media-grid" : "list-columns"}`} tabIndex={0} aria-label="声音列表" onScroll={(event) => { listScroll.remember(event); const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void onLoadMore(); }}>
         {layout === "list" ? items.map((item) => <button key={item.asset.id} className={`asset-row media-row ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onClick={() => onSelect(item.asset.id)}>
           <span className="file-icon format-audio"><Icon name={playingId === item.asset.id ? "pause" : "play"} /></span>
-          <span className="asset-main"><strong>{mediaPrimaryText(item)}</strong><small>{mediaSecondaryText(item)}{item.texts.length > 1 ? ` · ${item.texts.length} 条文本` : ""}</small></span>
+          <span className="asset-main"><strong>{mediaPrimaryText(item)}</strong>{(mediaSecondaryText(item) || item.texts.length > 1) && <small>{mediaSecondaryText(item)}{item.texts.length > 1 ? `${mediaSecondaryText(item) ? " · " : ""}${item.texts.length} 条文本` : ""}</small>}</span>
           <span className="media-links">{item.entities.slice(0, 2).map((entity) => entity.display_name).join(" · ") || item.events.slice(0, 2).join(" · ") || "未关联"}</span>
           <Icon name="chevron" size={15} />
         </button>) : items.map((item) => <button key={item.asset.id} className={`asset-card media-card ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onClick={() => onSelect(item.asset.id)}>
           <span className="asset-card-preview format-audio"><span className="audio-glyph" aria-hidden="true">{[4, 11, 7, 17, 12, 20, 9, 14, 5, 10].map((height, index) => <i key={index} style={{ height }} />)}</span><Icon name={playingId === item.asset.id ? "pause" : "play"} size={20} /></span>
-          <span className="asset-card-copy"><strong title={mediaPrimaryText(item)}>{mediaPrimaryText(item)}</strong><small title={mediaSecondaryText(item)}>{mediaSecondaryText(item)}</small></span>
+          <span className="asset-card-copy"><strong title={mediaPrimaryText(item)}>{mediaPrimaryText(item)}</strong>{mediaSecondaryText(item) && <small title={mediaSecondaryText(item)}>{mediaSecondaryText(item)}</small>}</span>
         </button>)}
         {items.length < total && <button className="load-more" disabled={loading} onClick={() => void onLoadMore()}>{loading ? "正在载入…" : `载入更多（剩余 ${(total - items.length).toLocaleString("zh-CN")}）`}</button>}
         {loading && items.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在建立声音关联…</strong></div>}
         {!loading && items.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的声音</strong><button onClick={() => { setQuery(""); setSelectedGroup(""); }}>清除筛选</button></div>}
       </div>
-      {playing && <div className="media-now-playing"><div><Icon name="play" /><span><strong>{mediaPrimaryText(playing)}</strong><small>{mediaSecondaryText(playing)}</small></span></div><audio key={playing.asset.id} controls autoPlay preload="metadata" src={api.mediaUrl(playing.asset.id)} onEnded={() => undefined} /></div>}
+      {playing && <div className="media-now-playing"><div><Icon name="play" /><span><strong>{mediaPrimaryText(playing)}</strong>{mediaSecondaryText(playing) && <small>{mediaSecondaryText(playing)}</small>}</span></div><audio key={playing.asset.id} controls autoPlay preload="metadata" src={api.mediaUrl(playing.asset.id)} onEnded={() => undefined} /></div>}
     </section>
   );
 }
 
-function EntityListPanel({ entities, total, loading, query, setQuery, sort, setSort, selectedId, setSelectedId, sourceId, sides, selectedSide, setSelectedSide, layout, setLayout }: {
+function EntityListPanel({ entities, total, loading, query, setQuery, sort, setSort, selectedId, setSelectedId, sourceId, sides, selectedSide, setSelectedSide, layout, setLayout, scrollKey }: {
   entities: EntitySummary[];
   total: number;
   loading: boolean;
@@ -1076,7 +1313,9 @@ function EntityListPanel({ entities, total, loading, query, setQuery, sort, setS
   setSelectedSide: (value: string) => void;
   layout: LayoutMode;
   setLayout: (layout: LayoutMode) => void;
+  scrollKey: string;
 }) {
+  const listScroll = useRememberedScroll(scrollKey, entities.length);
   return (
     <section className="asset-panel entity-panel panel">
       <div className="asset-toolbar">
@@ -1095,8 +1334,7 @@ function EntityListPanel({ entities, total, loading, query, setQuery, sort, setS
           <option value="strength_desc">生命值从高到低</option>
         </select></label>
       </div>
-      {layout === "list" && <div className="list-heading entity-list-heading"><span>单位</span><span>类型</span><span>数值</span></div>}
-      <div className={`asset-list ${layout === "grid" ? "asset-grid entity-grid" : ""}`} tabIndex={0} aria-label="单位列表">
+      <div ref={listScroll.ref} onScroll={listScroll.remember} className={`asset-list ${layout === "grid" ? "asset-grid entity-grid" : "list-columns"}`} tabIndex={0} aria-label="单位列表">
         {layout === "list" ? entities.map((entity) => (
           <button key={entity.id} className={`asset-row entity-row ${selectedId === entity.id ? "selected" : ""}`} onClick={() => setSelectedId(entity.id)}>
             <span className={`file-icon entity-icon ${entity.renderable ? "ready" : "missing"}`}><Icon name="unit" /></span>
@@ -1133,27 +1371,30 @@ function EntitySoundSample({ sample }: { sample: MediaSample }) {
   const localizedText = sample.localized_text && sample.localized_text !== originalText
     ? sample.localized_text
     : null;
+  const displayName = audioDisplayName(sample.asset?.display_name || sample.name);
+  const internalName = audioDisplayName(sample.name);
   return <div className="media-sample">
     <div className="media-sample-main">
-      <span><strong>{sample.asset?.display_name || sample.name}</strong>{sample.asset?.display_name !== sample.name && <code>{sample.name}</code>}</span>
+      <span><strong>{displayName}</strong>{displayName !== internalName && <code>{internalName}</code>}</span>
       {sample.asset && audioFormats.includes(sample.asset.format)
         ? <audio controls preload="none" src={api.mediaUrl(sample.asset.id)} />
         : <em>音频未解析</em>}
     </div>
-    <div className="media-sample-text">
-      <span><b>原文</b>{originalText || "暂无文本"}</span>
-      <span><b>中文</b>{localizedText || "暂无译文"}</span>
-    </div>
+    {(originalText || localizedText) && <div className="media-sample-text">
+      {originalText && <span><b>原文</b>{originalText}</span>}
+      {localizedText && <span><b>中文</b>{localizedText}</span>}
+    </div>}
   </div>;
 }
 
-function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = false, onPopout }: {
+function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = false, onPopout, scrollKey = "" }: {
   sourceId: string;
   entity: GameEntity | null;
   loading: boolean;
   playerColors: PlayerColor[];
   wide?: boolean;
   onPopout?: () => void;
+  scrollKey?: string;
 }) {
   const [frame, setFrame] = useState(0);
   const [facing, setFacing] = useState(0);
@@ -1167,6 +1408,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
   const [animationPlaying, setAnimationPlaying] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
   const frameCount = Math.max(1, entity?.preview.frame_count || 1);
+  const detailScroll = useRememberedScroll<HTMLElement>(scrollKey, entity ? entity.components.length + entity.media.length : 0);
 
   useEffect(() => {
     setFrame(0);
@@ -1249,9 +1491,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
     (slot) => ({ slot, items: entity.dependencies.filter((item) => item.slot === slot) }),
   );
   return (
-    <aside className={`detail-panel entity-detail panel ${wide ? "entity-detail-wide" : "entity-detail-narrow"}`}>
-      <div className="detail-title"><div><h2 title={entity.display_name}>{entity.display_name}</h2><small>{entity.id} · {entity.internal_name}</small></div><div className="detail-actions"><LayoutToggle layout={associationLayout} onChange={setAssociationLayout} />{onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}</div></div>
-
+    <aside ref={detailScroll.ref} onScroll={detailScroll.remember} className={`detail-panel entity-detail panel ${wide ? "entity-detail-wide" : "entity-detail-narrow"}`}>
       <div className="entity-detail-body">
         <div className="entity-preview-column">
           {entity.renderable ? <div className="preview-block entity-preview">
@@ -1279,6 +1519,8 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
         </div>
 
         <div className="entity-detail-sections">
+      <div className="detail-title entity-detail-title"><div className="detail-heading-line"><h2 title={entity.display_name}>{entity.display_name}</h2><small>{entity.id} · {entity.internal_name}</small></div><div className="detail-actions"><LayoutToggle layout={associationLayout} onChange={setAssociationLayout} />{onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}</div></div>
+
       {soundCount > 0 && <details className="entity-section compact-section entity-sounds" open>
         <summary><span>关联声音</span><em>{soundCount}</em></summary>
         <div className={`media-association-list ${associationLayout === "grid" ? "media-association-grid" : ""}`}>
@@ -1309,7 +1551,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
 
       {rules.length > 0 && <details className="entity-section compact-section entity-rules">
         <summary><span>规则属性</span><em>{rules.length}</em></summary>
-        <div className="metadata"><dl>{rules.map(([key, value]) => <div key={key}><dt>{ruleLabels[key]}</dt><dd>{value}</dd></div>)}</dl></div>
+        <div className="metadata"><dl>{rules.map(([key, value]) => <div className={`rule-span-${ruleColumnSpan(ruleLabels[key], value)}`} key={key}><dt>{ruleLabels[key]}</dt><dd>{value}</dd></div>)}</dl></div>
       </details>}
 
       {dependencyGroups.length > 0 && <div className="entity-dependencies">
@@ -1349,7 +1591,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
   );
 }
 
-function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, frame, setFrame, playing, setPlaying, palettes, paletteId, setPaletteId, playerColors, previewUrl, associations, wide = false, onPopout }: {
+function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, frame, setFrame, playing, setPlaying, palettes, paletteId, setPaletteId, playerColors, previewUrl, associations, wide = false, onPopout, scrollKey = "" }: {
   asset: Asset | null;
   metadata: AssetMetadata | null;
   textAsset: TextAsset | null;
@@ -1367,11 +1609,13 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   associations: AssetAssociationPage | null;
   wide?: boolean;
   onPopout?: () => void;
+  scrollKey?: string;
 }) {
   const [playerColor, setPlayerColor] = useState("");
   const [videoRequested, setVideoRequested] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
   const [frameMode, setFrameMode] = useState<"sequence" | "grid">("sequence");
+  const detailScroll = useRememberedScroll<HTMLElement>(scrollKey, associations?.items.length || 0);
   useEffect(() => {
     setPlayerColor("");
     setVideoRequested(false);
@@ -1391,8 +1635,8 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   const originalTexts = [...new Set((associations?.items || []).map((item) => item.original_text || item.text).filter((item): item is string => Boolean(item)))];
   const localizedTexts = [...new Set((associations?.items || []).map((item) => item.localized_text).filter((item): item is string => Boolean(item)))];
   return (
-    <aside className={`detail-panel asset-detail panel ${wide ? "detail-panel-wide" : "detail-panel-narrow"}`}>
-      <div className="detail-title"><div><span className="format-pill">{formatLabels[asset.format] || asset.format.toUpperCase()}</span><h2 title={asset.display_name}>{asset.display_name}</h2></div><div className="detail-actions">{onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}<a className="icon-button" href={api.contentUrl(asset.id)} title="导出原始文件" aria-label="导出原始文件"><Icon name="download" /></a></div></div>
+    <aside ref={detailScroll.ref} onScroll={detailScroll.remember} className={`detail-panel asset-detail panel ${wide ? "detail-panel-wide" : "detail-panel-narrow"}`}>
+      <div className="detail-title"><div className="detail-heading-line"><span className="format-pill">{formatLabels[asset.format] || asset.format.toUpperCase()}</span><h2 title={assetDisplayName(asset)}>{assetDisplayName(asset)}</h2></div><div className="detail-actions">{onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}<a className="icon-button" href={api.contentUrl(asset.id)} title="导出原始文件" aria-label="导出原始文件"><Icon name="download" /></a></div></div>
 
       {isModel && <div className="preview-block">
         {frameMode === "grid" && asset.format === "hva" && frameCount > 1
@@ -1466,8 +1710,8 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
           {metadata?.entry_count !== undefined && <div><dt>配置结构</dt><dd>{metadata.section_count} 节 · {metadata.entry_count} 项</dd></div>}
           {metadata?.encoding && <div><dt>文本编码</dt><dd>{metadata.encoding}</dd></div>}
           {metadata?.duration_seconds !== undefined && <div><dt>音频</dt><dd>{formatDuration(metadata.duration_seconds)} · {metadata.sample_rate?.toLocaleString("zh-CN")} Hz · {metadata.bits_per_sample} bit</dd></div>}
-          {isAudio && <div><dt>原文文本</dt><dd className="metadata-text">{originalTexts.join("\n") || "—"}</dd></div>}
-          {isAudio && <div><dt>中文文本</dt><dd className="metadata-text">{localizedTexts.join("\n") || "—"}</dd></div>}
+          {isAudio && originalTexts.length > 0 && <div><dt>原文文本</dt><dd className="metadata-text">{originalTexts.join("\n")}</dd></div>}
+          {isAudio && localizedTexts.length > 0 && <div><dt>中文文本</dt><dd className="metadata-text">{localizedTexts.join("\n")}</dd></div>}
           <div><dt>来源</dt><dd>{asset.storage_kind === "loose" ? "松散文件" : asset.storage_kind === "bag" ? "音频包" : "MIX 归档"}</dd></div>
           {asset.crc !== null && <div><dt>CRC</dt><dd className="mono">{crcLabel(asset.crc)}</dd></div>}
           <div><dt>识别</dt><dd>{asset.confidence === "name" ? "名称库匹配" : asset.confidence === "content" ? "内容探测" : asset.confidence === "filename" ? "文件名" : asset.confidence === "index" ? "音频索引" : "未知"}</dd></div>
