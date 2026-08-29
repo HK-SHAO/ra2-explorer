@@ -355,6 +355,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .entity-detail-tabs em { min-width: 20px; padding: 2px 5px; border-radius: 10px; color: #90959e; background: #24272d; font-size: 11px; font-style: normal; }
 .entity-tab-panel { min-width: 0; margin-top: 10px; }
 .entity-tab-panel > .entity-section:first-child { margin-top: 0; }
+.animation-kind-tabs { display: inline-grid; grid-template-columns: repeat(2, minmax(116px, 1fr)); gap: 3px; margin: 0 9px 8px; padding: 3px; border: 1px solid var(--line-soft); border-radius: 3px; background: #15171b; }
+.animation-kind-tabs button { min-width: 0; height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 10px; border: 1px solid transparent; border-radius: 2px; color: #858a94; background: transparent; font-size: 12px; cursor: pointer; }
+.animation-kind-tabs button:hover:not(:disabled) { color: #d4d6da; background: #202329; }
+.animation-kind-tabs button.active { border-color: #713733; color: #f0f1f2; background: #281b1d; }
+.animation-kind-tabs button:disabled { opacity: .35; cursor: default; }
+.animation-kind-tabs em { min-width: 19px; padding: 1px 5px; border-radius: 10px; color: #969ba4; background: #292c32; font-size: 11px; font-style: normal; text-align: center; }
 .entity-composite-stage { position: relative; min-width: 0; min-height: 180px; overflow: hidden; }
 .entity-composite-stage > .preview-stage, .entity-composite-stage > .voxel-viewer { width: 100%; height: 100%; min-height: inherit; }
 .entity-effect-overlay { position: absolute; z-index: 3; inset: 0; overflow: hidden; pointer-events: none; transition: opacity 40ms linear; }
