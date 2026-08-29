@@ -9,10 +9,10 @@ description: Apply the mandatory ra2-explorer repository development workflow wh
 
 ## 开发命令行环境
 
-1. 开发、构建、测试、检查、运行、文件操作和项目脚本强制使用本机 `cmd.exe`，不得使用 Git Bash 执行这些命令。
-2. `git status`、`git diff`、`git add`、`git commit` 等所有 Git 相关操作强制在本机 Git Bash 中执行，不得从 `cmd.exe` 或 PowerShell 直接调用 Git。
-3. 不使用 PowerShell 作为项目开发命令行，避免其编码、转义、命令别名和脚本语义差异影响结果。
-4. 命令、路径和文档示例必须与上述 shell 分工一致；同一项文件操作不得跨 shell 拼接，也不得把 Git Bash 扩展为通用开发 shell。
+1. 开发、构建、测试、检查、运行、文件操作、项目脚本和 Git 操作全部强制使用本机 `cmd.exe`。
+2. `git status`、`git diff`、`git add`、`git commit` 等 Git 命令直接在 `cmd.exe` 中执行，不得为 Git 单独启动 Git Bash。
+3. 不使用 PowerShell 或 Git Bash 作为项目开发命令行，避免编码、转义、命令别名和脚本语义差异影响结果。
+4. 命令、路径和文档示例必须使用 `cmd.exe` 语法；同一项操作不得跨 shell 拼接。
 
 ## 命令执行效率与进程管理
 
