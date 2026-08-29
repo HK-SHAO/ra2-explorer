@@ -261,8 +261,9 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert entity_body["preview"]["supports_facing"] is True
     assert entity_body["preview"]["supports_player_color"] is True
     dependencies = {(item["kind"], item["id"]): item for item in entity_body["dependencies"]}
-    assert len(entity_body["dependencies"]) == 3
+    assert len(entity_body["dependencies"]) == 9
     assert dependencies[("weapon", "DemoCannon")]["properties"]["damage"] == "75"
+    assert dependencies[("weapon", "DemoAltCannon")]["slot"] == "weapon_1"
     assert dependencies[("projectile", "DemoShell")]["resolved"] is True
     assert dependencies[("warhead", "DemoWarhead")]["resolved"] is True
     weapon_animation = next(
@@ -277,7 +278,33 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     )
     assert weapon_animation["samples"][0]["asset"]["display_name"] == "infantry.shp"
     assert impact_animation["samples"][0]["asset"]["display_name"] == "infantry.shp"
-    assert len(impact_animation["samples"]) == 1
+    assert [sample["name"] for sample in impact_animation["samples"]] == [
+        "IMPACT1",
+        "IMPACT2",
+        "IMPACT3",
+        "IMPACT4",
+    ]
+    assert impact_animation["selection"] == "damage"
+    assert impact_animation["selection_value"] == 75
+    assert impact_animation["selected_sample"] == "IMPACT4"
+    destruction_animation = next(
+        item
+        for item in entity_body["media"]
+        if item["kind"] == "animation" and item["role"] == "destruction"
+    )
+    assert destruction_animation["slot"] == "destruction"
+    assert destruction_animation["selection_value"] == 50
+    assert destruction_animation["selected_sample"] == "DEATH3"
+    debris_animation = next(
+        item
+        for item in entity_body["media"]
+        if item["kind"] == "animation" and item["role"] == "debris"
+    )
+    assert debris_animation["selection"] == "random"
+    assert [sample["name"] for sample in debris_animation["samples"]] == [
+        "DEBRIS1",
+        "DEBRIS2",
+    ]
     assert entity_body["art"]["primary_fire_flh"] == "180,24,90"
     assert entity_body["art"]["weapon_1_flh"] == "160,18,80"
     select_voice = next(item for item in entity_body["media"] if item["slot"] == "select")

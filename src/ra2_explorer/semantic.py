@@ -131,6 +131,9 @@ _WARHEAD_FIELDS = {
     "percent_at_max": "percentatmax",
     "infantry_death": "infdeath",
     "animation_list": "animlist",
+    "splash_list": "splashlist",
+    "em_effect": "emeffect",
+    "conventional": "conventional",
     "wall": "wall",
     "wood": "wood",
     "radiation": "radiation",
@@ -257,6 +260,9 @@ class MediaAssociation:
     samples: tuple[MediaSample, ...]
     role: str | None = None
     aliases: tuple[str, ...] = ()
+    selection: str | None = None
+    selected_sample: str | None = None
+    selection_value: int | None = None
 
     def as_dict(
         self, language: GameLanguage = DEFAULT_GAME_LANGUAGE
@@ -268,6 +274,9 @@ class MediaAssociation:
             "source": self.source,
             "role": self.role,
             "aliases": list(self.aliases),
+            "selection": self.selection,
+            "selected_sample": self.selected_sample,
+            "selection_value": self.selection_value,
             "samples": [sample.as_dict(language) for sample in self.samples],
         }
 
@@ -1066,6 +1075,7 @@ class SemanticLibrary:
                             rule_values,
                             art_values,
                             dependencies,
+                            rules,
                             art,
                             asset_index,
                             audio_events,
@@ -1619,6 +1629,7 @@ def _resolve_media(
     rules: dict[str, str],
     entity_art: dict[str, str],
     dependencies: tuple[EntityDependency, ...],
+    rules_sections: dict[str, dict[str, str]],
     art_sections: dict[str, dict[str, str]],
     assets: _AssetIndex,
     audio_events: dict[str, tuple[MediaSample, ...]],
@@ -1654,6 +1665,11 @@ def _resolve_media(
                 )
             )
 
+    weapon_dependencies = {
+        (dependency.slot, dependency.id.casefold()): dependency
+        for dependency in dependencies
+        if dependency.kind == "weapon"
+    }
     for dependency in dependencies:
         if dependency.kind == "weapon":
             for event in _references(dependency.properties.get("report")):
@@ -1676,7 +1692,11 @@ def _resolve_media(
                                 animation, art_sections, assets
                             )
                         ),
-                        role="weapon",
+                        role=(
+                            "destruction"
+                            if dependency.slot == "destruction"
+                            else "weapon"
+                        ),
                     )
                 )
         elif dependency.kind == "warhead":
@@ -1684,11 +1704,30 @@ def _resolve_media(
                 dict.fromkeys(_references(dependency.properties.get("animation_list")))
             )
             if animations:
+                weapon = weapon_dependencies.get(
+                    (dependency.slot, (dependency.parent or "").casefold())
+                )
+                damage = _integer(weapon.properties.get("damage")) if weapon else None
+                if damage is not None and dependency.slot == "destruction":
+                    try:
+                        modifier = float(rules.get("deathweapondamagemodifier", "1"))
+                    except ValueError:
+                        modifier = 1.0
+                    damage = int(damage * modifier)
+                random_selection = _yes(dependency.properties.get("em_effect"))
+                if damage is not None and damage <= 0 and not random_selection:
+                    continue
+                selected_index = (
+                    min(max(damage or 0, 0) // 25, len(animations) - 1)
+                    if damage is not None and not random_selection
+                    else 0
+                )
+                selected_animation = animations[selected_index]
                 add(
                     MediaAssociation(
                         "animation",
                         dependency.slot,
-                        animations[0],
+                        selected_animation,
                         dependency.id,
                         tuple(
                             sample
@@ -1697,9 +1736,68 @@ def _resolve_media(
                                 animation, art_sections, assets
                             )
                         ),
-                        role="impact",
+                        role=(
+                            "destruction"
+                            if dependency.slot == "destruction"
+                            else "impact"
+                        ),
+                        selection=(
+                            "random"
+                            if random_selection
+                            else "damage"
+                            if damage is not None
+                            else "first"
+                        ),
+                        selected_sample=selected_animation,
+                        selection_value=damage,
                     )
                 )
+
+    max_debris = _integer(rules.get("maxdebris"), 0) or 0
+    if max_debris > 0:
+        debris_types = tuple(dict.fromkeys(_references(rules.get("debristypes"))))
+        debris_animations = tuple(dict.fromkeys(_references(rules.get("debrisanims"))))
+        debris_samples: tuple[MediaSample, ...] = ()
+        if debris_types:
+            resolved = []
+            for reference in debris_types:
+                values = rules_sections.get(reference.casefold(), {})
+                image = values.get("image") or reference
+                asset = _find_asset(
+                    assets,
+                    (f"{image}.vxl", f"{image}.hva"),
+                    ("vxl", "hva"),
+                )
+                resolved.append(MediaSample(reference, None, asset))
+            debris_samples = tuple(resolved)
+        else:
+            references = debris_animations or tuple(
+                dict.fromkeys(
+                    _references(
+                        rules_sections.get("general", {}).get("metallicdebris")
+                        or rules_sections.get("audiovisual", {}).get("metallicdebris")
+                    )
+                )
+            )
+            debris_samples = tuple(
+                sample
+                for reference in references
+                for sample in _animation_samples(reference, art_sections, assets)
+            )
+        if debris_samples:
+            add(
+                MediaAssociation(
+                    "animation",
+                    "destruction",
+                    debris_samples[0].name,
+                    entity_id,
+                    debris_samples,
+                    role="debris",
+                    selection="random",
+                    selected_sample=debris_samples[0].name,
+                    selection_value=max_debris,
+                )
+            )
 
     for field, value in entity_art.items():
         role = _entity_animation_role(field)
@@ -1778,7 +1876,7 @@ def _animation_samples(
             playback or AnimationPlayback(),
             direction=direction_match.group(1).upper(),
         )
-    return (MediaSample(image, None, asset, animation=playback),)
+    return (MediaSample(reference, None, asset, animation=playback),)
 
 
 def _entity_animation_role(field: str) -> str | None:
@@ -1931,13 +2029,30 @@ def _resolve_dependencies(
             )
         return values
 
+    def resolve_weapon(slot: str, weapon_id: str) -> None:
+        weapon = add(weapon_id, "weapon", slot, None, _WEAPON_FIELDS)
+        for projectile_id in _references(weapon.get("projectile")):
+            add(projectile_id, "projectile", slot, weapon_id, _PROJECTILE_FIELDS)
+        for warhead_id in _references(weapon.get("warhead")):
+            add(warhead_id, "warhead", slot, weapon_id, _WARHEAD_FIELDS)
+
     for slot, field in _WEAPON_SLOTS:
         for weapon_id in _references(entity_rules.get(field)):
-            weapon = add(weapon_id, "weapon", slot, None, _WEAPON_FIELDS)
-            for projectile_id in _references(weapon.get("projectile")):
-                add(projectile_id, "projectile", slot, weapon_id, _PROJECTILE_FIELDS)
-            for warhead_id in _references(weapon.get("warhead")):
-                add(warhead_id, "warhead", slot, weapon_id, _WARHEAD_FIELDS)
+            resolve_weapon(slot, weapon_id)
+
+    weapon_count = _integer(entity_rules.get("weaponcount"), 0) or 0
+    for index in range(1, min(weapon_count, 64) + 1):
+        for prefix, field_prefix in (("weapon", "weapon"), ("elite_weapon", "eliteweapon")):
+            for weapon_id in _references(entity_rules.get(f"{field_prefix}{index}")):
+                resolve_weapon(f"{prefix}_{index}", weapon_id)
+
+    death_weapons = _references(entity_rules.get("deathweapon"))
+    if not death_weapons and _yes(entity_rules.get("explodes")):
+        death_weapons = _references(
+            sections.get("combatdamage", {}).get("deathweapon")
+        )
+    for weapon_id in death_weapons:
+        resolve_weapon("destruction", weapon_id)
     return tuple(dependencies)
 
 
