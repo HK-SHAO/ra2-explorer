@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import json
-from dataclasses import replace
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -11,9 +10,8 @@ from PIL import Image
 from ra2_explorer.api import create_app
 from ra2_explorer.config import Settings
 from ra2_explorer.semantic import (
-    GameEntity,
+    _effective_entity_countries,
     _entity_animation_role,
-    _entity_name_qualifiers,
     _entity_usage,
 )
 from tests.ra2_fixtures import (
@@ -160,7 +158,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert entity_page["total"] == 2
     entity_summaries = {item["id"]: item for item in entity_page["items"]}
     assert entity_summaries["DemoVehicle"]["display_name"] == "Generated test vehicle"
-    assert entity_summaries["DemoVehicle"]["name_qualifier"] is None
+    assert entity_summaries["DemoVehicle"]["body_status"] == "available"
     assert entity_summaries["DemoVehicle"]["renderable"] is True
     assert entity_summaries["DemoVehicle"]["body_format"] == "vxl"
     assert entity_summaries["DemoVehicle"]["usage"] == "buildable"
@@ -627,46 +625,24 @@ def test_entity_animation_fields_follow_art_semantics() -> None:
     assert _entity_animation_role("activeanimdamaged") is None
 
 
-def test_duplicate_entity_names_prefer_unique_side_qualifiers() -> None:
-    def entity(entity_id: str, side: str, internal_name: str) -> GameEntity:
-        return GameEntity(
-            entity_id,
-            "infantry",
-            "buildable",
-            "工程师",
-            internal_name,
-            "Name:ENGINEER",
-            True,
-            entity_id,
-            False,
-            (),
-            (side,),
-            {},
-            {},
-            (),
-            (),
-            (),
-        )
-
-    qualifiers = _entity_name_qualifiers(
-        (
-            entity("ENGINEER", "GDI", "Engineer"),
-            entity("SENGINEER", "Nod", "Soviet Engineer"),
-            entity("YENGINEER", "ThirdSide", "Yuri Engineer"),
-        )
+def test_effective_entity_countries_follow_house_restrictions() -> None:
+    owners = (
+        "Russians,Confederation,Africans,Arabs,YuriCountry,"
+        "British,French,Germans,Americans,Alliance"
     )
 
-    assert qualifiers == {
-        "engineer": "GDI",
-        "sengineer": "Nod",
-        "yengineer": "ThirdSide",
-    }
-
-    ambiguous = (
-        replace(entity("ENGINEER", "GDI", "Engineer"), sides=("GDI", "Nod")),
-        replace(entity("SENGINEER", "Nod", "Soviet Engineer"), sides=("GDI", "Nod")),
-    )
-    assert _entity_name_qualifiers(ambiguous) == {
-        "engineer": "ENGINEER",
-        "sengineer": "SENGINEER",
-    }
+    assert _effective_entity_countries(
+        {
+            "owner": owners,
+            "forbiddenhouses": "Russians,Confederation,Africans,Arabs,YuriCountry",
+        }
+    ) == ("British", "French", "Germans", "Americans", "Alliance")
+    assert _effective_entity_countries(
+        {
+            "owner": owners,
+            "forbiddenhouses": "British,French,Germans,Americans,Alliance,YuriCountry",
+        }
+    ) == ("Russians", "Confederation", "Africans", "Arabs")
+    assert _effective_entity_countries(
+        {"owner": owners, "requiredhouses": "British"}
+    ) == ("British",)

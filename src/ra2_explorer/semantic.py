@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import threading
-from collections import Counter, OrderedDict, defaultdict
+from collections import Counter, OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any
@@ -58,6 +58,8 @@ _RULE_FIELDS = {
     "turret": "turret",
     "naval": "naval",
     "movement_zone": "movementzone",
+    "required_houses": "requiredhouses",
+    "forbidden_houses": "forbiddenhouses",
 }
 _ART_FIELDS = {
     "cameo": "cameo",
@@ -144,6 +146,30 @@ _WEAPON_SLOTS = (
     ("elite_primary", "eliteprimary"),
     ("elite_secondary", "elitesecondary"),
 )
+
+_COUNTRY_ICON_FILES = {
+    "americans": ("USAI.PCX",),
+    "alliance": ("JAPI.PCX",),
+    "french": ("FRAI.PCX",),
+    "germans": ("GERI.PCX",),
+    "british": ("GBRI.PCX",),
+    "africans": ("DJBI.PCX",),
+    "arabs": ("ARBI.PCX",),
+    "confederation": ("LATI.PCX",),
+    "russians": ("RUSI.PCX",),
+    "yuricountry": ("OBS_YURI.PCX", "OBSYURI.SHP"),
+}
+_SIDE_ICON_FILES = {
+    "gdi": ("GDII.PCX", "OBS_ALLI.PCX"),
+    "nod": ("NODI.PCX", "OBS_SOVI.PCX"),
+    "thirdside": ("OBS_YURI.PCX", "OBSYURI.SHP"),
+}
+_SIDE_DISPLAY_NAMES = {
+    "gdi": "盟军",
+    "nod": "苏军",
+    "thirdside": "尤里",
+}
+_NULL_IMAGES = {"", "none", "null", "<none>"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,6 +322,7 @@ class GameEntity:
     voxel: bool
     countries: tuple[str, ...]
     sides: tuple[str, ...]
+    affiliation: dict[str, Any] | None
     rules: dict[str, str]
     art: dict[str, str]
     components: tuple[EntityComponent, ...]
@@ -313,24 +340,39 @@ class GameEntity:
         )
 
     def summary(
-        self,
-        language: GameLanguage = DEFAULT_GAME_LANGUAGE,
-        name_qualifier: str | None = None,
+        self, language: GameLanguage = DEFAULT_GAME_LANGUAGE
     ) -> dict[str, object]:
         body = self.component("body")
+        affiliation = None
+        if self.affiliation is not None:
+            affiliation = {
+                "kind": self.affiliation["kind"],
+                "id": self.affiliation["id"],
+                "display_name": localize_game_text(
+                    str(self.affiliation["display_name"]), language
+                ),
+                "icon": _asset_summary(self.affiliation.get("icon")),
+            }
         return {
             "id": self.id,
             "kind": self.kind,
             "usage": self.usage,
             "display_name": localize_game_text(self.display_name, language),
-            "name_qualifier": name_qualifier,
             "internal_name": self.internal_name,
             "ui_name": self.ui_name,
             "image": self.image,
             "voxel": self.voxel,
             "countries": list(self.countries),
             "sides": list(self.sides),
+            "affiliation": affiliation,
             "renderable": self.renderable,
+            "body_status": (
+                "available"
+                if self.renderable
+                else "not_defined"
+                if _is_null_image(self.image)
+                else "missing"
+            ),
             "component_count": sum(component.asset is not None for component in self.components),
             "body_format": body["format"] if body else None,
             "media_kinds": sorted({association.kind for association in self.media}),
@@ -371,33 +413,6 @@ class SemanticCatalog:
         if entity is None:
             raise AssetNotFoundError("单位不存在")
         return entity
-
-
-def _entity_name_qualifiers(
-    entities: tuple[GameEntity, ...] | list[GameEntity],
-    language: GameLanguage = DEFAULT_GAME_LANGUAGE,
-) -> dict[str, str]:
-    groups: dict[tuple[str, str], list[GameEntity]] = defaultdict(list)
-    for entity in entities:
-        display_name = localize_game_text(entity.display_name, language).strip().casefold()
-        groups[(entity.kind, display_name)].append(entity)
-
-    qualifiers: dict[str, str] = {}
-    for members in groups.values():
-        if len(members) < 2:
-            continue
-        side_candidates = {
-            entity.id.casefold(): entity.sides[0] if len(entity.sides) == 1 else ""
-            for entity in members
-        }
-        side_counts = Counter(value.casefold() for value in side_candidates.values() if value)
-        for entity in members:
-            side = side_candidates[entity.id.casefold()]
-            if side and side_counts[side.casefold()] == 1:
-                qualifiers[entity.id.casefold()] = side
-            else:
-                qualifiers[entity.id.casefold()] = entity.id
-    return qualifiers
 
 
 class SemanticLibrary:
@@ -442,7 +457,6 @@ class SemanticLibrary:
         offset: int = 0,
     ) -> dict[str, object]:
         catalog = self.catalog(source_id)
-        name_qualifiers = _entity_name_qualifiers(catalog.entities, language)
         entities = list(catalog.entities)
         if renderable is not None:
             entities = [entity for entity in entities if entity.renderable is renderable]
@@ -470,10 +484,7 @@ class SemanticLibrary:
         total = len(entities)
         selected = entities[offset : offset + limit]
         return {
-            "items": [
-                entity.summary(language, name_qualifiers.get(entity.id.casefold()))
-                for entity in selected
-            ],
+            "items": [entity.summary(language) for entity in selected],
             "total": total,
             "kinds": [
                 {"kind": entity_kind, "count": counts.get(entity_kind, 0)}
@@ -1016,6 +1027,7 @@ class SemanticLibrary:
                 "aud",
                 "video",
                 "binary",
+                "pcx",
             ),
         )
         asset_index = _index_assets(assets)
@@ -1082,7 +1094,7 @@ class SemanticLibrary:
                     (component.asset for component in components if component.role == "body"),
                     None,
                 )
-                countries = _references(rule_values.get("owner"))
+                countries = _effective_entity_countries(rule_values)
                 sides = tuple(
                     dict.fromkeys(
                         country_lookup.get(country.casefold(), {}).get("side", "")
@@ -1102,6 +1114,13 @@ class SemanticLibrary:
                         voxel or detected_voxel,
                         countries,
                         tuple(side for side in sides if side),
+                        _entity_affiliation(
+                            rule_values,
+                            countries,
+                            tuple(side for side in sides if side),
+                            country_lookup,
+                            asset_index,
+                        ),
                         _selected_fields(rule_values, _RULE_FIELDS),
                         _selected_fields(art_values, _ART_FIELDS),
                         components,
@@ -1170,6 +1189,60 @@ def _build_country_definitions(
             }
         )
     return tuple(countries)
+
+
+def _effective_entity_countries(values: dict[str, str]) -> tuple[str, ...]:
+    owners = _references(values.get("owner"))
+    required = _references(values.get("requiredhouses"))
+    forbidden = {value.casefold() for value in _references(values.get("forbiddenhouses"))}
+    if required:
+        required_keys = {value.casefold() for value in required}
+        selected = tuple(value for value in owners if value.casefold() in required_keys)
+        if not selected:
+            selected = required
+    else:
+        selected = owners
+    return tuple(value for value in selected if value.casefold() not in forbidden)
+
+
+def _entity_affiliation(
+    values: dict[str, str],
+    countries: tuple[str, ...],
+    sides: tuple[str, ...],
+    country_lookup: dict[str, dict[str, str]],
+    assets: _AssetIndex,
+) -> dict[str, Any] | None:
+    owners = _references(values.get("owner"))
+    required = _references(values.get("requiredhouses"))
+    country_specific = len(countries) == 1 and (bool(required) or len(owners) == 1)
+    if country_specific:
+        country_id = countries[0]
+        definition = country_lookup.get(country_id.casefold(), {})
+        icon = _find_asset(
+            assets,
+            _COUNTRY_ICON_FILES.get(country_id.casefold(), ()),
+            ("pcx", "shp"),
+        )
+        return {
+            "kind": "country",
+            "id": country_id,
+            "display_name": definition.get("display_name") or country_id,
+            "icon": icon,
+        }
+    if len(sides) == 1:
+        side_id = sides[0]
+        icon = _find_asset(
+            assets,
+            _SIDE_ICON_FILES.get(side_id.casefold(), ()),
+            ("pcx", "shp"),
+        )
+        return {
+            "kind": "side",
+            "id": side_id,
+            "display_name": _SIDE_DISPLAY_NAMES.get(side_id.casefold(), side_id),
+            "icon": icon,
+        }
+    return None
 
 
 def _build_media_items(
@@ -1995,6 +2068,8 @@ def _resolve_components(
     voxel: bool,
     has_turret: bool,
 ) -> tuple[tuple[EntityComponent, ...], bool]:
+    if _is_null_image(image):
+        return (), False
     body_vxl = _find_asset(assets, (f"{image}.vxl",), ("vxl",))
     detected_voxel = body_vxl is not None
     components = []
@@ -2040,6 +2115,10 @@ def _resolve_components(
                 EntityComponent(role, expected, _find_asset(assets, (expected,), ("shp",)))
             )
     return tuple(components), detected_voxel
+
+
+def _is_null_image(image: str) -> bool:
+    return image.strip().casefold() in _NULL_IMAGES
 
 
 def _theater_shp_names(image: str, new_theater: bool) -> tuple[str, ...]:
@@ -2140,6 +2219,7 @@ def _find_asset(
                 "aud": "aud",
                 "bik": "video",
                 "hva": "hva",
+                "pcx": "pcx",
                 "shp": "shp",
                 "vqa": "video",
                 "vxl": "vxl",

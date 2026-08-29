@@ -131,12 +131,12 @@ export interface EntitySummary {
   kind: EntityKind;
   usage: EntityUsage;
   display_name: string;
-  name_qualifier: string | null;
   internal_name: string;
   ui_name: string | null;
   image: string;
   voxel: boolean;
   renderable: boolean;
+  body_status: "available" | "not_defined" | "missing";
   component_count: number;
   body_format: string | null;
   media_kinds: Array<"voice" | "sound" | "animation">;
@@ -147,6 +147,12 @@ export interface EntitySummary {
   primary: string | null;
   countries: string[];
   sides: string[];
+  affiliation: {
+    kind: "country" | "side";
+    id: string;
+    display_name: string;
+    icon: EntityComponentAsset | null;
+  } | null;
 }
 
 export type AssetSort = "name_asc" | "name_desc" | "size_desc" | "size_asc";

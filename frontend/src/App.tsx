@@ -501,15 +501,8 @@ function entityUsageLabel(kind: EntityKind, usage: EntityUsage) {
   return entityUsageLabels[kind][usage] || usage;
 }
 
-function entityNameQualifierLabel(entity: EntitySummary) {
-  return entity.name_qualifier
-    ? sideLabels[entity.name_qualifier] || entity.name_qualifier
-    : "";
-}
-
-function EntityDisplayName({ entity }: { entity: EntitySummary }) {
-  const qualifier = entityNameQualifierLabel(entity);
-  return <>{entity.display_name}{qualifier && <em className="entity-name-qualifier">{qualifier}</em>}</>;
+function entityBodyStatusLabel(entity: EntitySummary) {
+  return entity.body_status === "not_defined" ? "规则对象无独立图像" : "游戏文件未提供主体";
 }
 
 function readBrowsingLocation(): Partial<BrowsingLocation> {
@@ -1661,9 +1654,9 @@ function EntityListPanel({ entities, total, loading, query, setQuery, sort, setS
         {layout === "list" ? entities.map((entity) => (
           <button key={entity.id} className={`asset-row entity-row ${selectedId === entity.id ? "selected" : ""}`} onClick={() => setSelectedId(entity.id)}>
             <span className={`file-icon entity-icon ${entity.renderable ? "ready" : "missing"}`}><Icon name="unit" /></span>
-            <span className="asset-main"><strong><EntityDisplayName entity={entity} /></strong><small>{entity.id} → {entity.image}{entity.internal_name !== entity.display_name ? ` · ${entity.internal_name}` : ""}</small></span>
+            <span className="asset-main"><strong>{entity.display_name}</strong><small>{entity.id}{entity.body_status !== "not_defined" ? ` → ${entity.image}` : ""}{entity.internal_name !== entity.display_name ? ` · ${entity.internal_name}` : ""}</small></span>
             <span className="entity-kind">{entityUsageLabel(entity.kind, entity.usage)}</span>
-            <span className="entity-stats"><strong>{entity.cost ? `$${entity.cost}` : "—"}</strong><small>{entity.strength ? `${entity.strength} HP` : entity.renderable ? `${entity.component_count} 个组件` : "缺少主体"}</small></span>
+            <span className="entity-stats"><strong>{entity.cost ? `$${entity.cost}` : "—"}</strong><small>{entity.strength ? `${entity.strength} HP` : entity.renderable ? `${entity.component_count} 个组件` : entityBodyStatusLabel(entity)}</small></span>
             <Icon name="chevron" size={15} />
           </button>
         )) : entities.map((entity) => <EntityGridCard key={entity.id} entity={entity} sourceId={sourceId} selected={selectedId === entity.id} onSelect={setSelectedId} />)}
@@ -1678,7 +1671,7 @@ function EntityGridCard({ entity, sourceId, selected, onSelect }: { entity: Enti
   return (
     <button className={`asset-card entity-card ${selected ? "selected" : ""}`} onClick={() => onSelect(entity.id)}>
       <EntityCardPreview entity={entity} sourceId={sourceId} />
-      <span className="asset-card-copy"><strong title={`${entity.display_name}${entity.name_qualifier ? ` · ${entityNameQualifierLabel(entity)}` : ""}`}><EntityDisplayName entity={entity} /></strong></span>
+      <span className="asset-card-copy"><strong title={entity.display_name}>{entity.display_name}</strong></span>
     </button>
   );
 }
@@ -1781,6 +1774,9 @@ function EntityCardPreview({ entity, sourceId }: { entity: EntitySummary; source
     {entity.renderable
       ? requested && <img decoding="async" fetchPriority="low" src={url} alt="" onLoad={finish} onError={(event) => { finish(); event.currentTarget.hidden = true; }} />
       : <Icon name="unit" size={34} />}
+    {entity.affiliation?.icon && <span className="entity-affiliation-badge" role="img" aria-label={entity.affiliation.display_name} title={entity.affiliation.display_name}>
+      <img src={api.previewUrl(entity.affiliation.icon.id, 0, "", 1)} alt="" />
+    </span>}
   </span>;
 }
 
@@ -2658,7 +2654,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
               {!entity.voxel && entity.preview.supports_facing && <label><span>朝向</span><select value={facing} onChange={(event) => setFacing(Number(event.target.value))}>{Array.from({ length: 8 }, (_, index) => <option key={index} value={index}>{index * 45}°</option>)}</select></label>}
               {entity.preview.supports_player_color && <label title="选择玩家颜色"><select aria-label="玩家颜色" value={playerColor} onChange={(event) => setPlayerColor(event.target.value)}><option value="">原始色</option>{playerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
             </div>
-          </div> : <div className="unsupported-preview"><Icon name="unit" size={34} /><strong>缺少主体资产</strong></div>}
+          </div> : <div className="unsupported-preview"><Icon name="unit" size={34} /><strong>{entityBodyStatusLabel(entity)}</strong></div>}
         </div>
 
         <div ref={connectDetailSections} onScroll={wide ? detailScroll.remember : undefined} className="entity-detail-sections">
