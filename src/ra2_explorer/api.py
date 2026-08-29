@@ -303,7 +303,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         palette = _select_palette(services, body, palette_id)
         player_color = _validated_player_color(player_color)
         renderer_version = (
-            "renderer-shp-sequence-facing-v1"
+            "renderer-shp-sequence-facing-v2"
             if body["format"] == "shp"
             else "renderer-vpl-techno-body-v3"
         )
@@ -340,7 +340,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if thumbnail:
             image = _crop_transparent_preview(
                 image,
-                padding_ratio=0.26 if semantic_entity.kind == "infantry" else 0.08,
+                padding_ratio=0.42 if semantic_entity.kind == "infantry" else 0.08,
             )
         output = io.BytesIO()
         image.save(output, format="PNG")
@@ -807,10 +807,10 @@ def _crop_transparent_preview(image, *, padding_ratio: float = 0.08):
     padding = max(2, round(max(right - left, bottom - top) * padding_ratio))
     return image.crop(
         (
-            max(0, left - padding),
-            max(0, top - padding),
-            min(image.width, right + padding),
-            min(image.height, bottom + padding),
+            left - padding,
+            top - padding,
+            right + padding,
+            bottom + padding,
         )
     )
 
