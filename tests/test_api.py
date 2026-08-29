@@ -293,6 +293,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert entity_model.json()["frame"] == 3
     assert entity_model.json()["frame_count"] == 4
     assert entity_model.json()["part_count"] == 1
+    assert entity_model.headers["cache-control"] == "private, max-age=3600"
 
     diagnostics = client.get(f"/api/semantic/{source['id']}/diagnostics")
     assert diagnostics.status_code == 200

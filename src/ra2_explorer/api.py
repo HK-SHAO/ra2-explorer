@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 from pathlib import Path
 from urllib.parse import quote
@@ -331,7 +332,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         frame: int = Query(default=0, ge=0),
         player_color: str | None = Query(default=None, max_length=24),
         palette_id: str | None = None,
-    ) -> dict[str, object]:
+    ) -> Response:
         semantic_entity = services.semantic.catalog(source_id).get(entity_id)
         body = semantic_entity.component("body")
         if body is None or body["format"] != "vxl":
@@ -343,15 +344,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "models",
             source_id,
             entity_id,
-            "scene-v4-vpl",
+            "scene-v4-vpl-techno-body-v2",
             f"frame-{frame}",
             f"color-{player_color or 'original'}",
             f"palette-{palette_id or 'auto'}",
             extension="json",
         )
-        cached = services.derived.read_json(artifact_path)
+        cached = services.derived.read_bytes(artifact_path)
         if cached is not None:
-            return cached
+            return _model_response(cached)
         _, scene = services.semantic.model_scene(
             source_id,
             entity_id,
@@ -360,8 +361,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             player_color=player_color,
         )
         result = scene.as_dict()
-        services.derived.write_json(artifact_path, result)
-        return result
+        encoded = _json_bytes(result)
+        services.derived.write_bytes(artifact_path, encoded)
+        return _model_response(encoded)
 
     @app.get("/api/assets/{asset_id}/content")
     def asset_content(asset_id: str) -> StreamingResponse:
@@ -409,7 +411,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         frame: int = Query(default=0, ge=0),
         player_color: str | None = Query(default=None, max_length=24),
         palette_id: str | None = None,
-    ) -> dict[str, object]:
+    ) -> Response:
         asset_record = services.database.get_asset(asset_id)
         if asset_record["format"] not in {"vxl", "hva"}:
             raise HTTPException(status_code=409, detail="该资产不是 VXL/HVA 模型")
@@ -445,9 +447,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             f"palette-{palette_id or 'auto'}",
             extension="json",
         )
-        cached = services.derived.read_json(artifact_path)
+        cached = services.derived.read_bytes(artifact_path)
         if cached is not None:
-            return cached
+            return _model_response(cached)
         _, model_data = services.reader.read(str(model_asset["id"]))
         animation = None
         if animation_asset is not None:
@@ -461,8 +463,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             vpl=services.semantic.voxel_lighting(source_id),
         )
         result = scene.as_dict()
-        services.derived.write_json(artifact_path, result)
-        return result
+        encoded = _json_bytes(result)
+        services.derived.write_bytes(artifact_path, encoded)
+        return _model_response(encoded)
 
     @app.get("/api/assets/{asset_id}/metadata")
     def asset_metadata(asset_id: str) -> dict[str, object]:
@@ -854,6 +857,18 @@ def _select_palette(
     )
     _, palette_data = services.reader.read(palette_asset["id"])
     return parse_palette(palette_data)
+
+
+def _json_bytes(data: dict[str, object]) -> bytes:
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def _model_response(data: bytes) -> Response:
+    return Response(
+        content=data,
+        media_type="application/json",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 def _inspect_asset(asset: dict[str, object], data: bytes) -> dict[str, object]:

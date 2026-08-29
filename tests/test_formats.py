@@ -54,6 +54,7 @@ def test_vxl_decodes_columns_and_renders_embedded_palette() -> None:
     assert model.limbs[0].name == "BODY"
     assert model.limbs[0].size == (12, 8, 7)
     assert model.voxel_count > 80
+    assert len(model.limbs[0].surface_voxels) < len(model.limbs[0].voxels)
     preview = model.render(scale=2)
     assert preview.mode == "RGBA"
     assert preview.getbbox() is not None

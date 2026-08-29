@@ -43,6 +43,7 @@ class VxlLimb:
     size: tuple[int, int, int]
     normals_mode: int
     voxels: tuple[Voxel, ...]
+    surface_voxels: tuple[Voxel, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -405,7 +406,7 @@ def _collect_world_voxels(
                     start=part.model.remap_start,
                     end=part.model.remap_end,
                 )
-            for voxel in _surface_voxels(limb.voxels):
+            for voxel in limb.surface_voxels:
                 world_x, world_y, world_z = _apply_transform(
                     transform,
                     float(voxel.x),
@@ -679,6 +680,7 @@ def parse_vxl(data: bytes | bytearray | memoryview) -> VxlFile:
                 tailer.size,
                 tailer.normals_mode,
                 voxels,
+                _surface_voxels(voxels),
             )
         )
     return VxlFile(
