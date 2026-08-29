@@ -358,11 +358,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .animation-kind-tabs em { min-width: 19px; padding: 1px 5px; border-radius: 10px; color: #969ba4; background: #292c32; font-size: 11px; font-style: normal; text-align: center; }
 .entity-composite-stage { position: relative; min-width: 0; min-height: 180px; overflow: hidden; }
 .entity-composite-stage > .preview-stage, .entity-composite-stage > .voxel-viewer { width: 100%; height: 100%; min-height: inherit; }
+.entity-preview-controls { position: absolute; z-index: 5; left: 50%; bottom: 10px; width: min(calc(100% - 20px), 620px); display: flex; align-items: stretch; justify-content: center; gap: 6px; transform: translateX(-50%); }
+.entity-preview-controls > .frame-controls { min-width: 0; flex: 1 1 auto; border-top: 1px solid var(--line); border-radius: 3px; background: rgba(22,24,28,.91); box-shadow: 0 5px 18px rgba(0,0,0,.28); backdrop-filter: blur(5px); }
 .entity-effect-overlay { position: absolute; z-index: 3; inset: 0; overflow: hidden; pointer-events: none; transition: opacity 40ms linear; }
 .entity-effect-overlay.hidden { opacity: 0; }
 .entity-effect-overlay.visible { opacity: 1; }
 .entity-effect-overlay img { position: absolute; left: var(--effect-x, 50%); top: var(--effect-y, 50%); max-width: 88%; max-height: 88%; image-rendering: pixelated; object-fit: contain; filter: drop-shadow(0 5px 10px rgba(0,0,0,.45)); transform: translate(-50%, -50%); }
-.return-body-action { width: 100%; min-height: 34px; border: 1px solid var(--line); border-top: 0; color: #c6c9ce; background: #191b20; font-size: 12px; cursor: pointer; }
+.return-body-action { width: auto; min-height: 43px; flex: 0 0 auto; padding: 0 13px; border: 1px solid var(--line); border-radius: 3px; color: #c6c9ce; background: rgba(25,27,32,.94); box-shadow: 0 5px 18px rgba(0,0,0,.28); font-size: 12px; cursor: pointer; backdrop-filter: blur(5px); }
 .return-body-action:hover { color: #fff; background: #202329; }
 .entity-rules dd { max-width: 68%; overflow-wrap: anywhere; }
 .entity-dependencies { margin-top: 20px; }

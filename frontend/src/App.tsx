@@ -41,8 +41,8 @@ import {
 
 const VoxelViewer = lazy(async () => ({ default: (await import("./VoxelViewer")).VoxelViewer }));
 
-function VoxelPreview({ url, label }: { url: string; label: string }) {
-  return <Suspense fallback={<div className="voxel-viewer"><div className="voxel-status">正在载入三维视图…</div></div>}><VoxelViewer url={url} label={label} /></Suspense>;
+function VoxelPreview({ url, label, viewKey }: { url: string; label: string; viewKey: string }) {
+  return <Suspense fallback={<div className="voxel-viewer"><div className="voxel-status">正在载入三维视图…</div></div>}><VoxelViewer url={url} label={label} viewKey={viewKey} /></Suspense>;
 }
 
 type IconName =
@@ -1007,11 +1007,14 @@ function ExplorerApp() {
       return;
     }
     let cancelled = false;
-    setSelectedEntity(null);
     setEntityDetailLoading(true);
     api.entity(sourceId, selectedEntityId)
       .then((entity) => !cancelled && setSelectedEntity(entity))
-      .catch((reason: Error) => !cancelled && setError(reason.message))
+      .catch((reason: Error) => {
+        if (cancelled) return;
+        setSelectedEntity(null);
+        setError(reason.message);
+      })
       .finally(() => !cancelled && setEntityDetailLoading(false));
     return () => { cancelled = true; };
   }, [sourceId, sourceRevision, selectedEntityId, view]);
@@ -1603,7 +1606,12 @@ function effectBodySequence(associations: MediaAssociation[], slot: string) {
   return bodySequences.find((association) => association.event.toLowerCase().includes("fire")) || null;
 }
 
-function animationEffectAnchor(event: string) {
+function animationEffectAnchor(
+  event: string,
+  dependencyKind: EntityDependency["kind"] | undefined,
+  art: Record<string, string>,
+  slot: string,
+) {
   const direction = event.toUpperCase().match(/-(NE|SE|SW|NW|N|E|S|W)$/)?.[1] || "";
   const anchors: Record<string, { x: number; y: number }> = {
     N: { x: 50, y: 23 },
@@ -1615,7 +1623,32 @@ function animationEffectAnchor(event: string) {
     W: { x: 28, y: 45 },
     NW: { x: 36, y: 30 },
   };
-  return anchors[direction] || { x: 50, y: 50 };
+  if (direction) return anchors[direction];
+  if (dependencyKind === "warhead") return { x: 70, y: 59 };
+  if (dependencyKind !== "weapon") return { x: 50, y: 50 };
+
+  const field = slot.includes("secondary") ? "secondary_fire_flh" : "primary_fire_flh";
+  const values = (art[field] || "").split(",").map((value) => Number(value.trim()));
+  if (values.length < 3 || values.some((value) => !Number.isFinite(value))) {
+    return { x: 67, y: 44 };
+  }
+  const [forward, lateral, height] = values;
+  const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value));
+  return {
+    x: clamp(50 + forward / 12 - lateral / 22, 28, 76),
+    y: clamp(52 + forward / 34 + lateral / 38 - height / 10, 22, 70),
+  };
+}
+
+function animationAssociationTitle(entity: GameEntity, association: MediaAssociation) {
+  if (association.slot === "body_sequence") return animationEventLabel(association.event);
+  const dependency = entity.dependencies.find(
+    (item) => item.id.toLowerCase() === association.source.toLowerCase(),
+  );
+  const slot = mediaSlotLabels[association.slot] || association.slot;
+  if (dependency?.kind === "weapon") return `${slot}开火`;
+  if (dependency?.kind === "warhead") return `${slot}命中`;
+  return animationEventLabel(association.event);
 }
 
 function CompactAudioPlayer({ assetId, label, active, onPlaybackChange }: {
@@ -2153,7 +2186,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
     if (next === "weapon") setPlaying(false);
   }
 
-  if (loading) return <aside className="detail-panel panel empty-detail"><div className="radar small"><span /></div><strong>正在读取单位详情…</strong></aside>;
+  if (loading && !entity) return <aside className="detail-panel panel empty-detail"><div className="radar small"><span /></div><strong>正在读取单位详情…</strong></aside>;
   if (!entity) return <aside className="detail-panel panel empty-detail"><div className="empty-detail-icon"><Icon name="unit" size={30} /></div><strong>选择单位</strong></aside>;
   const rules = Object.entries(entity.rules).filter(([key]) => ruleLabels[key]);
   const soundAssociations = mergeSoundAssociations(entity.media);
@@ -2165,6 +2198,9 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
   const animationCount = bodyAnimationCount + weaponAnimationCount;
   const visibleAnimationAssociations = animationTab === "body" ? bodyAnimationAssociations : weaponAnimationAssociations;
   const activeAnimationAsset = activeAnimation?.sample.asset || null;
+  const activeAnimationDependency = activeAnimation
+    ? entity.dependencies.find((item) => item.id.toLowerCase() === activeAnimation.source.toLowerCase())
+    : undefined;
   const effectBodyAsset = effectBodySample?.asset || null;
   const activeAnimationPreviewUrl = activeAnimationAsset?.format === "shp"
     ? api.previewUrl(activeAnimationAsset.id, activeAnimationSourceFrame, "", 5, playerColor)
@@ -2172,7 +2208,12 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
   const effectBodyPreviewUrl = effectBodyAsset?.format === "shp"
     ? api.previewUrl(effectBodyAsset.id, effectBodySourceFrame, "", 5, playerColor)
     : "";
-  const effectAnchor = animationEffectAnchor(activeAnimation?.event || "");
+  const effectAnchor = animationEffectAnchor(
+    activeAnimation?.event || "",
+    activeAnimationDependency?.kind,
+    entity.art,
+    activeAnimation?.slot || "",
+  );
   const entityTags = [
     entityKindLabels[entity.kind],
     entityUsageLabel(entity.kind, entity.usage),
@@ -2193,41 +2234,37 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
     (slot) => ({ slot, items: entity.dependencies.filter((item) => item.slot === slot) }),
   );
   return (
-    <aside ref={connectDetailPanel} onScroll={wide ? undefined : detailScroll.remember} className={`detail-panel entity-detail panel ${wide ? "entity-detail-wide" : "entity-detail-narrow"}`}>
+    <aside ref={connectDetailPanel} onScroll={wide ? undefined : detailScroll.remember} aria-busy={loading} className={`detail-panel entity-detail panel ${wide ? "entity-detail-wide" : "entity-detail-narrow"}`}>
       <div className="entity-detail-body">
         <div className="entity-preview-column">
           {entity.renderable ? <div className="preview-block entity-preview">
             {activeAnimationIsBody && activeAnimationAsset?.format === "shp"
               ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${activeAnimationAsset.id}:${activeAnimation?.event || "body"}`} fitContent={Boolean(activeAnimationFrameFit)} frameFit={activeAnimationFrameFit} src={activeAnimationPreviewUrl} alt={`${animationEventLabel(activeAnimation?.event || "主体动作")}预览`} building={entity.kind === "building"} />
               : activeAnimationIsBody && activeAnimationAsset && ["vxl", "hva"].includes(activeAnimationAsset.format)
-                ? <VoxelPreview url={api.assetModelUrl(activeAnimationAsset.id, activeAnimationSourceFrame, playerColor)} label={animationEventLabel(activeAnimation?.event || activeAnimationAsset.display_name)} />
-                : activeAnimationAsset
-                  ? <div className="entity-composite-stage">
+                ? <VoxelPreview url={api.assetModelUrl(activeAnimationAsset.id, activeAnimationSourceFrame, playerColor)} label={animationEventLabel(activeAnimation?.event || activeAnimationAsset.display_name)} viewKey={`asset:${activeAnimationAsset.id}`} />
+                : !activeAnimationAsset && frameMode === "grid" && frameCount > 1
+                  ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing, playerColor, scale: 3 })} />
+                  : <div className="entity-composite-stage">
                     {effectBodyPreviewUrl
                       ? <ImageViewport className="shp entity-composite-body" fitKey={`${entity.id}:${effectBodyAssociation?.event || "body"}`} fitContent={Boolean(effectBodyFrameFit)} frameFit={effectBodyFrameFit} src={effectBodyPreviewUrl} alt={`${entity.display_name} 主体动作`} building={entity.kind === "building"} />
                       : entity.voxel
-                        ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} />
+                        ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} viewKey={`entity:${sourceId}:${entity.id}`} />
                         : previewFailed
                           ? <div className="preview-stage shp"><div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div></div>
                           : <ImageViewport className="shp entity-composite-body" fitKey={entity.id} fitContent={frameCount <= 1} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
-                    {activeAnimationAsset.format === "shp" && <span className={`entity-effect-overlay ${effectFrameVisible ? "visible" : "hidden"}`} style={{ "--effect-x": `${effectAnchor.x}%`, "--effect-y": `${effectAnchor.y}%` } as CSSProperties} aria-hidden="true">
+                    {activeAnimationAsset?.format === "shp" && <span className={`entity-effect-overlay ${effectFrameVisible ? "visible" : "hidden"}`} style={{ "--effect-x": `${effectAnchor.x}%`, "--effect-y": `${effectAnchor.y}%` } as CSSProperties} aria-hidden="true">
                       <StablePreviewImage src={activeAnimationPreviewUrl} alt="" />
                     </span>}
-                  </div>
-                  : frameMode === "grid" && frameCount > 1
-                    ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing, playerColor, scale: 3 })} />
-                    : entity.voxel
-                      ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} />
-                      : previewFailed
-                        ? <div className="preview-stage shp"><div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div></div>
-                        : <ImageViewport className="shp" fitKey={entity.id} fitContent={frameCount <= 1} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
-            {activeAnimationAsset && activeAnimationFrameCount > 1
-              ? <div className="frame-controls"><button className="play-button" onClick={() => setAnimationPlaying(!animationPlaying)} aria-label={animationPlaying ? "暂停" : "播放"}><Icon name={animationPlaying ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={activeAnimationFrameCount - 1} value={Math.min(animationFrame, activeAnimationFrameCount - 1)} onChange={(event) => setAnimationFrame(Number(event.target.value))} aria-label="关联动画帧" /><span>{String(animationFrame + 1).padStart(2, "0")} <i>/</i> {String(activeAnimationFrameCount).padStart(2, "0")} · 源 {activeAnimationSourceFrame + 1}</span></div>
-              : !activeAnimationAsset && frameCount > 1 && <div className="frame-controls">
-                {frameMode === "sequence" && <><button className="play-button" onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={frameCount - 1} value={Math.min(frame, frameCount - 1)} onChange={(event) => setFrame(Number(event.target.value))} aria-label="当前动画帧" /><span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(frameCount).padStart(2, "0")}</span></>}
-                <div className="frame-mode-toggle"><button className={frameMode === "sequence" ? "active" : ""} onClick={() => setFrameMode("sequence")} title="顺序播放"><Icon name="play" size={14} /></button><button className={frameMode === "grid" ? "active" : ""} onClick={() => { setPlaying(false); setFrameMode("grid"); }} title="全部帧"><Icon name="grid" size={14} /></button></div>
-              </div>}
-            {activeAnimationAsset && <button type="button" className="return-body-action" onClick={() => { setActiveAnimation(null); setPlaying(frameCount > 1); }}>返回主体</button>}
+                  </div>}
+            {(activeAnimationAsset || frameCount > 1) && <div className="entity-preview-controls">
+              {activeAnimationAsset && activeAnimationFrameCount > 1
+                ? <div className="frame-controls"><button className="play-button" onClick={() => setAnimationPlaying(!animationPlaying)} aria-label={animationPlaying ? "暂停" : "播放"}><Icon name={animationPlaying ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={activeAnimationFrameCount - 1} value={Math.min(animationFrame, activeAnimationFrameCount - 1)} onChange={(event) => setAnimationFrame(Number(event.target.value))} aria-label="关联动画帧" /><span>{String(animationFrame + 1).padStart(2, "0")} <i>/</i> {String(activeAnimationFrameCount).padStart(2, "0")} · 源 {activeAnimationSourceFrame + 1}</span></div>
+                : !activeAnimationAsset && frameCount > 1 && <div className="frame-controls">
+                  {frameMode === "sequence" && <><button className="play-button" onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={frameCount - 1} value={Math.min(frame, frameCount - 1)} onChange={(event) => setFrame(Number(event.target.value))} aria-label="当前动画帧" /><span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(frameCount).padStart(2, "0")}</span></>}
+                  <div className="frame-mode-toggle"><button className={frameMode === "sequence" ? "active" : ""} onClick={() => setFrameMode("sequence")} title="顺序播放"><Icon name="play" size={14} /></button><button className={frameMode === "grid" ? "active" : ""} onClick={() => { setPlaying(false); setFrameMode("grid"); }} title="全部帧"><Icon name="grid" size={14} /></button></div>
+                </div>}
+              {activeAnimationAsset && <button type="button" className="return-body-action" onClick={() => { setActiveAnimation(null); setPlaying(frameCount > 1); }}>返回主体</button>}
+            </div>}
             <div className="entity-render-options compact-render-options">
               {!entity.voxel && entity.preview.supports_facing && <label><span>朝向</span><select value={facing} onChange={(event) => setFacing(Number(event.target.value))}>{Array.from({ length: 8 }, (_, index) => <option key={index} value={index}>{index * 45}°</option>)}</select></label>}
               {entity.preview.supports_player_color && <label title="选择玩家颜色"><select aria-label="玩家颜色" value={playerColor} onChange={(event) => setPlayerColor(event.target.value)}><option value="">原始色</option>{playerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
@@ -2261,7 +2298,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
               {animationTab === "body" && frameCount > 1 && !hasBodySequences && <button type="button" className={!activeAnimation ? "active" : ""} onClick={() => { setActiveAnimation(null); setFrameMode("sequence"); setPlaying(true); }}><span className="animation-thumbnail body-action"><Icon name="unit" size={24} /></span><span><strong>全部主体帧</strong><small>{frameCount} 帧 · 顺序预览</small></span><Icon name="play" size={16} /></button>}
               {visibleAnimationAssociations.flatMap((association) => association.samples.map((sample, index) => <button type="button" disabled={!sample.asset} className={activeAnimation?.event === association.event && activeAnimation.slot === association.slot && activeAnimation.source === association.source && activeAnimation.sample.name === sample.name ? "active" : ""} onClick={() => { if (!sample.asset) return; setPlaying(false); setActiveAnimation({ event: association.event, slot: association.slot, source: association.source, sample }); }} key={`${association.slot}-${association.source}-${association.event}-${sample.name}-${index}`}>
                 <span className={`animation-thumbnail ${association.slot === "body_sequence" ? "body-action" : ""}`}>{sample.asset && ["shp", "tmp", "pcx"].includes(sample.asset.format) ? <img loading="lazy" src={api.previewUrl(sample.asset.id, sample.animation?.start_frame || 0, "", 2, playerColor)} alt="" /> : <Icon name="image" size={24} />}</span>
-                <span><strong>{animationEventLabel(association.event)}</strong><small>{mediaSlotLabels[association.slot] || association.slot}{sample.animation?.frame_count ? ` · ${sample.animation.frame_count} 帧` : ""}{sample.asset ? "" : " · 未解析"}</small></span><Icon name="play" size={16} />
+                <span><strong>{animationAssociationTitle(entity, association)}</strong><small>{association.slot === "body_sequence" ? (mediaSlotLabels[association.slot] || association.slot) : association.event}{sample.animation?.frame_count ? ` · ${sample.animation.frame_count} 帧` : ""}{sample.asset ? "" : " · 未解析"}</small></span><Icon name="play" size={16} />
               </button>))}
             </div>
           </section>}
@@ -2418,7 +2455,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
       {isModel && <div className="preview-block">
         {frameMode === "grid" && asset.format === "hva" && frameCount > 1
           ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.previewUrl(asset.id, index, paletteId, 3, playerColor)} />
-          : <VoxelPreview url={api.assetModelUrl(asset.id, frame, playerColor, paletteId)} label={asset.display_name} />}
+          : <VoxelPreview url={api.assetModelUrl(asset.id, frame, playerColor, paletteId)} label={asset.display_name} viewKey={`asset:${asset.id}`} />}
         {asset.format === "hva" && hasFrameControl && <div className="frame-controls">
           {frameMode === "sequence" && <><button className="play-button" onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={frameCount - 1} value={Math.min(frame, frameCount - 1)} onChange={(event) => setFrame(Number(event.target.value))} aria-label="当前动画帧" /><span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(frameCount).padStart(2, "0")}</span></>}
           <div className="frame-mode-toggle"><button className={frameMode === "sequence" ? "active" : ""} onClick={() => setFrameMode("sequence")} title="顺序播放"><Icon name="play" size={14} /></button><button className={frameMode === "grid" ? "active" : ""} onClick={() => { setPlaying(false); setFrameMode("grid"); }} title="全部帧"><Icon name="grid" size={14} /></button></div>

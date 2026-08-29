@@ -472,13 +472,13 @@ export const api = {
     entityId: string,
     options: EntityPreviewOptions = {},
   ) => {
-    const params = new URLSearchParams({ frame: String(options.frame ?? 0) });
+    const params = new URLSearchParams({ frame: String(options.frame ?? 0), v: "5" });
     if (options.playerColor) params.set("player_color", options.playerColor);
     if (options.paletteId) params.set("palette_id", options.paletteId);
     return `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}/model.json?${params}`;
   },
   assetModelUrl: (assetId: string, frame = 0, playerColor = "", paletteId = "") => {
-    const params = new URLSearchParams({ frame: String(frame) });
+    const params = new URLSearchParams({ frame: String(frame), v: "5" });
     if (playerColor) params.set("player_color", playerColor);
     if (paletteId) params.set("palette_id", paletteId);
     return `/api/assets/${assetId}/model.json?${params}`;

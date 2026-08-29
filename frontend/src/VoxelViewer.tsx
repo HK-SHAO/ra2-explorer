@@ -22,16 +22,17 @@ interface ViewerEngine {
   model: THREE.InstancedMesh | null;
   grid: THREE.GridHelper | null;
   fitBounds: THREE.Box3 | null;
+  viewKey: string | null;
   viewHeight: number;
   updateProjection: (() => void) | null;
   resetView: (() => void) | null;
   render: (() => void) | null;
 }
 
-export function VoxelViewer({ url, label }: { url: string; label: string }) {
+export function VoxelViewer({ url, label, viewKey }: { url: string; label: string; viewKey: string }) {
   const mountRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<ViewerEngine | null>(null);
-  const [data, setData] = useState<VoxelSceneData | null>(null);
+  const [loadedScene, setLoadedScene] = useState<{ data: VoxelSceneData; viewKey: string } | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -79,6 +80,7 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
         model: null,
         grid: null,
         fitBounds: null,
+        viewKey: null,
         viewHeight: 2,
         updateProjection: null,
         resetView: null,
@@ -139,6 +141,13 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
       engine.renderer.domElement.remove();
       engineRef.current = null;
     };
+  }, []);
+
+  useEffect(() => {
+    engineRef.current?.renderer.domElement.setAttribute(
+      "aria-label",
+      `${label} 交互式三维模型`,
+    );
   }, [label]);
 
   useEffect(() => {
@@ -157,21 +166,24 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
         if (![1, 2, 3, 4].includes(scene.version) || !Array.isArray(scene.voxels)) {
           throw new Error("模型数据版本不受支持");
         }
-        setData(scene);
+        setLoadedScene({ data: scene, viewKey });
         setLoading(false);
       })
       .catch((reason: unknown) => {
         if (controller.signal.aborted) return;
-        setData(null);
+        setLoadedScene(null);
         setLoading(false);
         setError(reason instanceof Error ? reason.message : "模型加载失败");
       });
     return () => controller.abort();
-  }, [url]);
+  }, [url, viewKey]);
 
   useEffect(() => {
     const engine = engineRef.current;
-    if (!engine || !data) return;
+    if (!engine || !loadedScene) return;
+    const { data, viewKey: loadedViewKey } = loadedScene;
+    const preserveView = engine.viewKey === loadedViewKey && engine.fitBounds !== null;
+    const preservedBounds = preserveView ? engine.fitBounds?.clone() || null : null;
     disposeModel(engine);
 
     const geometry = new THREE.BoxGeometry(1, 1, 1);
@@ -214,8 +226,10 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
         new THREE.Vector3(maximum[0], maximum[2], maximum[1]),
       );
     }
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
+    engine.fitBounds = preservedBounds || box.clone();
+    engine.viewKey = loadedViewKey;
+    const center = engine.fitBounds.getCenter(new THREE.Vector3());
+    const size = engine.fitBounds.getSize(new THREE.Vector3());
     const diameter = Math.max(size.length(), 0.1);
     const gridSize = Math.max(size.x, size.z, diameter * 0.75, 0.5) * 1.7;
     const grid = new THREE.GridHelper(gridSize, 12, 0x424852, 0x292d34);
@@ -227,8 +241,6 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
     });
     engine.scene.add(grid);
     engine.grid = grid;
-    engine.fitBounds = box.clone();
-
     const resetView = () => {
       const radius = Math.max(diameter / 2, 0.05);
       const distance = Math.max(radius * 4, 1);
@@ -246,13 +258,18 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
       engine.render?.();
     };
     engine.resetView = resetView;
-    resetView();
-  }, [data]);
+    if (preserveView) {
+      engine.updateProjection?.();
+      engine.render?.();
+    } else {
+      resetView();
+    }
+  }, [loadedScene]);
 
   return (
     <div className="voxel-viewer" aria-busy={loading}>
       <div ref={mountRef} className="voxel-canvas" />
-      {data && !loading && (
+      {loadedScene && !loading && (
         <button type="button" className="voxel-reset" onClick={() => engineRef.current?.resetView?.()}>
           重置视角
         </button>
