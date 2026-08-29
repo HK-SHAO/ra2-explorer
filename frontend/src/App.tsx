@@ -8,6 +8,7 @@ import {
   Suspense,
   UIEvent as ReactUIEvent,
   WheelEvent as ReactWheelEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -462,7 +463,7 @@ function ruleColumnSpan(label: string, value: string) {
 }
 
 function useRememberedScroll<T extends HTMLElement = HTMLDivElement>(key: string, itemCount: number) {
-  const ref = useRef<T>(null);
+  const ref = useRef<T | null>(null);
   const activeKey = useRef("");
   const target = useRef(0);
   const restoring = useRef(false);
@@ -490,7 +491,7 @@ function useRememberedScroll<T extends HTMLElement = HTMLDivElement>(key: string
     return () => window.cancelAnimationFrame(frame);
   }, [key, itemCount]);
 
-  function remember(event: ReactUIEvent<HTMLDivElement>) {
+  function remember(event: ReactUIEvent<T>) {
     if (!key || !ready.current) return;
     const top = event.currentTarget.scrollTop;
     if (restoring.current && Math.abs(top - target.current) >= 2) return;
@@ -1983,6 +1984,12 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
   const associationLayout = detailTab === "animation" ? animationAssociationLayout : soundAssociationLayout;
   const setAssociationLayout = detailTab === "animation" ? setAnimationAssociationLayout : setSoundAssociationLayout;
   const detailScroll = useRememberedScroll<HTMLElement>(scrollKey, entity ? entity.components.length + entity.media.length : 0);
+  const connectDetailPanel = useCallback((node: HTMLElement | null) => {
+    if (!wide) detailScroll.ref.current = node;
+  }, [wide, detailScroll.ref]);
+  const connectDetailSections = useCallback((node: HTMLDivElement | null) => {
+    if (wide) detailScroll.ref.current = node;
+  }, [wide, detailScroll.ref]);
 
   useEffect(() => {
     setFrame(0);
@@ -2088,7 +2095,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
     (slot) => ({ slot, items: entity.dependencies.filter((item) => item.slot === slot) }),
   );
   return (
-    <aside ref={detailScroll.ref} onScroll={detailScroll.remember} className={`detail-panel entity-detail panel ${wide ? "entity-detail-wide" : "entity-detail-narrow"}`}>
+    <aside ref={connectDetailPanel} onScroll={wide ? undefined : detailScroll.remember} className={`detail-panel entity-detail panel ${wide ? "entity-detail-wide" : "entity-detail-narrow"}`}>
       <div className="entity-detail-body">
         <div className="entity-preview-column">
           {entity.renderable ? <div className="preview-block entity-preview">
@@ -2130,7 +2137,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
           </div> : <div className="unsupported-preview"><Icon name="unit" size={34} /><strong>缺少主体资产</strong></div>}
         </div>
 
-        <div className="entity-detail-sections">
+        <div ref={connectDetailSections} onScroll={wide ? detailScroll.remember : undefined} className="entity-detail-sections">
           <div className="detail-title entity-detail-title"><div className="detail-heading-line"><h2 title={entity.display_name}>{entity.display_name}</h2><small>{entity.id} · {entity.internal_name}</small></div><div className="detail-actions">{detailTab !== "data" && <LayoutToggle layout={associationLayout} onChange={setAssociationLayout} />}{onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}</div></div>
           <div className="entity-detail-tabs" role="tablist" aria-label="单位详细信息">
             <button type="button" role="tab" id="entity-sound-tab" aria-controls="entity-sound-panel" aria-selected={detailTab === "sound"} className={detailTab === "sound" ? "active" : ""} disabled={soundCount === 0} onClick={() => { setDetailTab("sound"); if (detailScroll.ref.current) detailScroll.ref.current.scrollTop = 0; }}>声音 <em>{soundCount}</em></button>
@@ -2434,7 +2441,7 @@ function DetachedEntityDetail({ sourceId, entityId }: { sourceId: string; entity
       })
       .catch((reason: Error) => setError(reason.message));
   }, [sourceId, entityId]);
-  return <main className="detached-shell">{error ? <div className="detached-error">{error}</div> : <EntityDetailPanel sourceId={sourceId} entity={entity} loading={!entity} playerColors={colors} wide />}</main>;
+  return <main className="detached-shell">{error ? <div className="detached-error">{error}</div> : <EntityDetailPanel sourceId={sourceId} entity={entity} loading={!entity} playerColors={colors} wide scrollKey={`detached-entity:${sourceId}:${entityId}`} />}</main>;
 }
 
 function DetachedAssetDetail({ assetId }: { assetId: string }) {
