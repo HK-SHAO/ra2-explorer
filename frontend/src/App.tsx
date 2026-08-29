@@ -1572,8 +1572,8 @@ function FrameGrid({ count, active, onSelect, urlFor }: { count: number; active:
   return <div className="frame-grid" aria-label="全部动画帧">{Array.from({ length: count }, (_, index) => <button type="button" key={index} className={active === index ? "active" : ""} onClick={() => onSelect(index)}><img loading="lazy" src={urlFor(index)} alt={`第 ${index + 1} 帧`} /><span>{index + 1}</span></button>)}</div>;
 }
 
-function animationSourceFrames(sample: MediaSample | undefined, metadata: AssetMetadata | null, facing: number) {
-  const total = Math.max(0, metadata?.frame_count || 0);
+function animationSourceFramesFromTotal(sample: MediaSample | undefined, totalFrames: number, facing: number) {
+  const total = Math.max(0, totalFrames);
   const playback = sample?.animation;
   if (!playback) return Array.from({ length: Math.max(1, total) }, (_, index) => index);
   const start = playback.start_frame + (playback.facing_step > 0 ? facing * playback.facing_step : 0);
@@ -1581,6 +1581,40 @@ function animationSourceFrames(sample: MediaSample | undefined, metadata: AssetM
   const frames = Array.from({ length: Math.max(1, count) }, (_, index) => start + index)
     .filter((frame) => total === 0 || frame < total);
   return frames.length > 0 ? frames : [Math.min(Math.max(0, start), Math.max(0, total - 1))];
+}
+
+function animationSourceFrames(sample: MediaSample | undefined, metadata: AssetMetadata | null, facing: number) {
+  return animationSourceFramesFromTotal(sample, metadata?.frame_count || 0, facing);
+}
+
+function effectBodySequence(associations: MediaAssociation[], slot: string) {
+  const bodySequences = associations.filter(
+    (association) => association.kind === "animation" && association.slot === "body_sequence",
+  );
+  if (bodySequences.length === 0) return null;
+  const preferredEvents = slot.includes("secondary")
+    ? ["deployedfire", "fireprone", "fireup", "fire", "attack"]
+    : ["fireup", "fire", "deployedfire", "fireprone", "attack"];
+  for (const event of preferredEvents) {
+    const match = bodySequences.find((association) => association.event.toLowerCase() === event);
+    if (match) return match;
+  }
+  return bodySequences.find((association) => association.event.toLowerCase().includes("fire")) || null;
+}
+
+function animationEffectAnchor(event: string) {
+  const direction = event.toUpperCase().match(/-(NE|SE|SW|NW|N|E|S|W)$/)?.[1] || "";
+  const anchors: Record<string, { x: number; y: number }> = {
+    N: { x: 50, y: 23 },
+    NE: { x: 64, y: 30 },
+    E: { x: 72, y: 45 },
+    SE: { x: 64, y: 61 },
+    S: { x: 50, y: 68 },
+    SW: { x: 36, y: 61 },
+    W: { x: 28, y: 45 },
+    NW: { x: 36, y: 30 },
+  };
+  return anchors[direction] || { x: 50, y: 50 };
 }
 
 function CompactAudioPlayer({ assetId, label, active, onPlaybackChange }: {
@@ -1626,6 +1660,51 @@ function AudioDownloadAction({ assetId, label }: { assetId: string; label: strin
   return <a className="audio-download-action" href={api.contentUrl(assetId)} download title={`下载 ${label}`} aria-label={`下载 ${label}`}><Icon name="download" size={15} /></a>;
 }
 
+function StablePreviewImage({ src, alt, style, className, draggable = false, onLoad, onError }: {
+  src: string;
+  alt: string;
+  style?: CSSProperties;
+  className?: string;
+  draggable?: boolean;
+  onLoad?: (image: HTMLImageElement) => void;
+  onError?: () => void;
+}) {
+  const [displayedSrc, setDisplayedSrc] = useState(src);
+  const requestedSrc = useRef(src);
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+
+  useEffect(() => {
+    requestedSrc.current = src;
+    if (!src || src === displayedSrc) return;
+    let cancelled = false;
+    const candidate = new Image();
+    const reveal = () => {
+      if (!cancelled && requestedSrc.current === src) setDisplayedSrc(src);
+    };
+    candidate.onload = () => {
+      if (typeof candidate.decode === "function") void candidate.decode().catch(() => undefined).then(reveal);
+      else reveal();
+    };
+    candidate.onerror = () => {
+      if (!cancelled && requestedSrc.current === src) onErrorRef.current?.();
+    };
+    candidate.src = src;
+    return () => { cancelled = true; };
+  }, [src, displayedSrc]);
+
+  return <img
+    src={displayedSrc}
+    data-requested-src={src}
+    alt={alt}
+    className={className}
+    draggable={draggable}
+    style={style}
+    onLoad={(event) => onLoad?.(event.currentTarget)}
+    onError={onError}
+  />;
+}
+
 function ImageViewport({ src, alt, fitKey, building = false, className = "", onError }: {
   src: string;
   alt: string;
@@ -1653,7 +1732,7 @@ function ImageViewport({ src, alt, fitKey, building = false, className = "", onE
   useEffect(() => {
     reset();
     setImageFit(null);
-  }, [fitKey, src]);
+  }, [fitKey]);
 
   useEffect(() => {
     const element = viewportRef.current;
@@ -1785,7 +1864,7 @@ function ImageViewport({ src, alt, fitKey, building = false, className = "", onE
     <div className="preview-rulers horizontal" />
     <div className="preview-rulers vertical" />
     <div className={`image-viewport-canvas ${fittedImageStyle ? "content-fitted" : ""}`} style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
-      <img src={src} alt={alt} draggable={false} style={fittedImageStyle} onLoad={(event) => measureVisibleContent(event.currentTarget)} onError={onError} />
+      <StablePreviewImage src={src} alt={alt} style={fittedImageStyle} onLoad={measureVisibleContent} onError={onError} />
     </div>
     <div className="image-viewport-tools" onPointerDown={(event) => event.stopPropagation()}>
       <button type="button" onClick={() => adjustZoom(-0.25)} disabled={zoom <= 1} aria-label="缩小" title="缩小">−</button>
@@ -1823,6 +1902,13 @@ interface DisplaySoundAssociation {
 }
 
 type EntityDetailTab = "sound" | "animation" | "data";
+
+interface ActiveEntityAnimation {
+  event: string;
+  slot: string;
+  source: string;
+  sample: MediaSample;
+}
 
 function mergeSoundAssociations(associations: MediaAssociation[]): DisplaySoundAssociation[] {
   const merged = new Map<string, DisplaySoundAssociation>();
@@ -1864,20 +1950,38 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
   const [playerColor, setPlayerColor] = useState("");
   const [playing, setPlaying] = useState(false);
   const [frameMode, setFrameMode] = useState<"sequence" | "grid">("sequence");
-  const [associationLayout, setAssociationLayout] = useState<LayoutMode>("list");
+  const [soundAssociationLayout, setSoundAssociationLayout] = useState<LayoutMode>("list");
+  const [animationAssociationLayout, setAnimationAssociationLayout] = useState<LayoutMode>("grid");
   const [detailTab, setDetailTab] = useState<EntityDetailTab>("sound");
-  const [activeAnimation, setActiveAnimation] = useState<{ event: string; sample: MediaSample } | null>(null);
+  const [activeAnimation, setActiveAnimation] = useState<ActiveEntityAnimation | null>(null);
   const [animationMetadata, setAnimationMetadata] = useState<AssetMetadata | null>(null);
   const [animationFrame, setAnimationFrame] = useState(0);
   const [animationPlaying, setAnimationPlaying] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
   const frameCount = Math.max(1, entity?.preview.frame_count || 1);
+  const animationAssociations = entity?.media.filter((association) => association.kind === "animation") || [];
   const activeAnimationFrames = useMemo(
     () => animationSourceFrames(activeAnimation?.sample, animationMetadata, facing),
     [activeAnimation, animationMetadata, facing],
   );
-  const activeAnimationFrameCount = activeAnimationFrames.length;
-  const activeAnimationSourceFrame = activeAnimationFrames[Math.min(animationFrame, activeAnimationFrameCount - 1)] || 0;
+  const activeAnimationIsBody = activeAnimation?.slot === "body_sequence";
+  const effectBodyAssociation = activeAnimation && !activeAnimationIsBody
+    ? effectBodySequence(animationAssociations, activeAnimation.slot)
+    : null;
+  const effectBodySample = effectBodyAssociation?.samples.find((sample) => sample.asset) || null;
+  const effectBodyFrames = effectBodySample
+    ? animationSourceFramesFromTotal(effectBodySample, entity?.preview.source_frame_count || 0, facing)
+    : [];
+  const activeAnimationFrameCount = activeAnimation
+    ? Math.max(activeAnimationFrames.length, effectBodyFrames.length, 1)
+    : activeAnimationFrames.length;
+  const activeAnimationSourceFrame = activeAnimationFrames[Math.min(animationFrame, activeAnimationFrames.length - 1)] || 0;
+  const effectBodySourceFrame = effectBodyFrames.length > 0
+    ? effectBodyFrames[animationFrame % effectBodyFrames.length]
+    : 0;
+  const effectFrameVisible = Boolean(activeAnimation && !activeAnimationIsBody && animationFrame < activeAnimationFrames.length);
+  const associationLayout = detailTab === "animation" ? animationAssociationLayout : soundAssociationLayout;
+  const setAssociationLayout = detailTab === "animation" ? setAnimationAssociationLayout : setSoundAssociationLayout;
   const detailScroll = useRememberedScroll<HTMLElement>(scrollKey, entity ? entity.components.length + entity.media.length : 0);
 
   useEffect(() => {
@@ -1922,11 +2026,15 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
       .then((nextMetadata) => {
         if (cancelled) return;
         setAnimationMetadata(nextMetadata);
-        setAnimationPlaying((activeAnimation.sample.animation?.frame_count || nextMetadata.frame_count || 1) > 1);
       })
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [activeAnimation]);
+
+  useEffect(() => {
+    if (!activeAnimation) return;
+    setAnimationPlaying(activeAnimationFrameCount > 1);
+  }, [activeAnimation, activeAnimationFrameCount]);
 
   useEffect(() => {
     if (activeAnimation) setAnimationFrame(0);
@@ -1947,12 +2055,19 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
   if (!entity) return <aside className="detail-panel panel empty-detail"><div className="empty-detail-icon"><Icon name="unit" size={30} /></div><strong>选择单位</strong></aside>;
   const rules = Object.entries(entity.rules).filter(([key]) => ruleLabels[key]);
   const soundAssociations = mergeSoundAssociations(entity.media);
-  const animationAssociations = entity.media.filter((association) => association.kind === "animation");
   const soundCount = soundAssociations.reduce((count, association) => count + association.samples.length, 0);
   const associatedAnimationCount = animationAssociations.reduce((count, association) => count + association.samples.length, 0);
   const hasBodySequences = animationAssociations.some((association) => association.slot === "body_sequence");
   const animationCount = associatedAnimationCount + (frameCount > 1 && !hasBodySequences ? 1 : 0);
   const activeAnimationAsset = activeAnimation?.sample.asset || null;
+  const effectBodyAsset = effectBodySample?.asset || null;
+  const activeAnimationPreviewUrl = activeAnimationAsset?.format === "shp"
+    ? api.previewUrl(activeAnimationAsset.id, activeAnimationSourceFrame, "", 5, playerColor)
+    : "";
+  const effectBodyPreviewUrl = effectBodyAsset?.format === "shp"
+    ? api.previewUrl(effectBodyAsset.id, effectBodySourceFrame, "", 5, playerColor)
+    : "";
+  const effectAnchor = animationEffectAnchor(activeAnimation?.event || "");
   const entityTags = [
     entityKindLabels[entity.kind],
     entityUsageLabel(entity.kind, entity.usage),
@@ -1977,17 +2092,30 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
       <div className="entity-detail-body">
         <div className="entity-preview-column">
           {entity.renderable ? <div className="preview-block entity-preview">
-            {activeAnimationAsset?.format === "shp"
-              ? <ImageViewport className="shp entity-effect-stage" fitKey={`${activeAnimationAsset.id}:${activeAnimation?.event || "animation"}`} src={api.previewUrl(activeAnimationAsset.id, activeAnimationSourceFrame, "", 5, playerColor)} alt={`${animationEventLabel(activeAnimation?.event || "关联动画")}预览`} building={entity.kind === "building"} />
-              : activeAnimationAsset && ["vxl", "hva"].includes(activeAnimationAsset.format)
+            {activeAnimationIsBody && activeAnimationAsset?.format === "shp"
+              ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${activeAnimationAsset.id}:${activeAnimation?.event || "body"}`} src={activeAnimationPreviewUrl} alt={`${animationEventLabel(activeAnimation?.event || "主体动作")}预览`} building={entity.kind === "building"} />
+              : activeAnimationIsBody && activeAnimationAsset && ["vxl", "hva"].includes(activeAnimationAsset.format)
                 ? <VoxelPreview url={api.assetModelUrl(activeAnimationAsset.id, activeAnimationSourceFrame, playerColor)} label={animationEventLabel(activeAnimation?.event || activeAnimationAsset.display_name)} />
-                : frameMode === "grid" && frameCount > 1
-                  ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing, playerColor, scale: 3 })} />
-                  : entity.voxel
-                    ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} />
-                    : previewFailed
-                      ? <div className="preview-stage shp"><div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div></div>
-                      : <ImageViewport className="shp" fitKey={entity.id} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
+                : activeAnimationAsset
+                  ? <div className="entity-composite-stage">
+                    {effectBodyPreviewUrl
+                      ? <ImageViewport className="shp entity-composite-body" fitKey={`${entity.id}:${effectBodyAssociation?.event || "body"}`} src={effectBodyPreviewUrl} alt={`${entity.display_name} 主体动作`} building={entity.kind === "building"} />
+                      : entity.voxel
+                        ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} />
+                        : previewFailed
+                          ? <div className="preview-stage shp"><div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div></div>
+                          : <ImageViewport className="shp entity-composite-body" fitKey={entity.id} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
+                    {activeAnimationAsset.format === "shp" && <span className={`entity-effect-overlay ${effectFrameVisible ? "visible" : "hidden"}`} style={{ "--effect-x": `${effectAnchor.x}%`, "--effect-y": `${effectAnchor.y}%` } as CSSProperties} aria-hidden="true">
+                      <StablePreviewImage src={activeAnimationPreviewUrl} alt="" />
+                    </span>}
+                  </div>
+                  : frameMode === "grid" && frameCount > 1
+                    ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing, playerColor, scale: 3 })} />
+                    : entity.voxel
+                      ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} />
+                      : previewFailed
+                        ? <div className="preview-stage shp"><div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div></div>
+                        : <ImageViewport className="shp" fitKey={entity.id} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
             {activeAnimationAsset && activeAnimationFrameCount > 1
               ? <div className="frame-controls"><button className="play-button" onClick={() => setAnimationPlaying(!animationPlaying)} aria-label={animationPlaying ? "暂停" : "播放"}><Icon name={animationPlaying ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={activeAnimationFrameCount - 1} value={Math.min(animationFrame, activeAnimationFrameCount - 1)} onChange={(event) => setAnimationFrame(Number(event.target.value))} aria-label="关联动画帧" /><span>{String(animationFrame + 1).padStart(2, "0")} <i>/</i> {String(activeAnimationFrameCount).padStart(2, "0")} · 源 {activeAnimationSourceFrame + 1}</span></div>
               : !activeAnimationAsset && frameCount > 1 && <div className="frame-controls">
@@ -2022,7 +2150,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
           {detailTab === "animation" && <section className="entity-tab-panel entity-animations" role="tabpanel" id="entity-animation-panel" aria-labelledby="entity-animation-tab">
             <div className={`animation-association-list ${associationLayout === "grid" ? "animation-association-grid" : ""}`}>
               {frameCount > 1 && !hasBodySequences && <button type="button" className={!activeAnimation ? "active" : ""} onClick={() => { setActiveAnimation(null); setFrameMode("sequence"); setPlaying(true); }}><span className="animation-thumbnail body-action"><Icon name="unit" size={24} /></span><span><strong>全部主体帧</strong><small>{frameCount} 帧 · 顺序预览</small></span><Icon name="play" size={16} /></button>}
-              {animationAssociations.flatMap((association) => association.samples.map((sample, index) => <button type="button" disabled={!sample.asset} className={activeAnimation?.event === association.event && activeAnimation.sample.name === sample.name ? "active" : ""} onClick={() => sample.asset && setActiveAnimation({ event: association.event, sample })} key={`${association.event}-${sample.name}-${index}`}>
+              {animationAssociations.flatMap((association) => association.samples.map((sample, index) => <button type="button" disabled={!sample.asset} className={activeAnimation?.event === association.event && activeAnimation.slot === association.slot && activeAnimation.source === association.source && activeAnimation.sample.name === sample.name ? "active" : ""} onClick={() => { if (!sample.asset) return; setPlaying(false); setActiveAnimation({ event: association.event, slot: association.slot, source: association.source, sample }); }} key={`${association.slot}-${association.source}-${association.event}-${sample.name}-${index}`}>
                 <span className="animation-thumbnail">{sample.asset && ["shp", "tmp", "pcx"].includes(sample.asset.format) ? <img loading="lazy" src={api.previewUrl(sample.asset.id, sample.animation?.start_frame || 0, "", 2, playerColor)} alt="" /> : <Icon name="image" size={24} />}</span>
                 <span><strong>{animationEventLabel(association.event)}</strong><small>{mediaSlotLabels[association.slot] || association.slot}{sample.animation?.frame_count ? ` · ${sample.animation.frame_count} 帧` : ""}{sample.asset ? "" : " · 未解析"}</small></span><Icon name="play" size={16} />
               </button>))}
