@@ -20,6 +20,7 @@ interface ViewerEngine {
   controls: OrbitControls;
   model: THREE.InstancedMesh | null;
   grid: THREE.GridHelper | null;
+  fitBounds: THREE.Box3 | null;
   viewHeight: number;
   updateProjection: (() => void) | null;
   resetView: (() => void) | null;
@@ -73,6 +74,7 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
         controls,
         model: null,
         grid: null,
+        fitBounds: null,
         viewHeight: 2,
         updateProjection: null,
         resetView: null,
@@ -83,6 +85,13 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
       const updateProjection = () => {
         const width = Math.max(1, mount.clientWidth);
         const height = Math.max(1, mount.clientHeight);
+        if (engine.fitBounds) {
+          engine.viewHeight = fittedViewHeight(
+            engine.fitBounds,
+            camera,
+            width / height,
+          );
+        }
         const halfHeight = Math.max(engine.viewHeight, 0.001) / 2;
         const halfWidth = halfHeight * (width / height);
         camera.left = -halfWidth;
@@ -160,14 +169,23 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
     model.instanceMatrix.setUsage(THREE.StaticDrawUsage);
     const transform = new THREE.Object3D();
     const color = new THREE.Color();
+    const box = new THREE.Box3().makeEmpty();
+    const voxelMinimum = new THREE.Vector3();
+    const voxelMaximum = new THREE.Vector3();
     data.voxels.forEach((voxel, index) => {
       const [x, y, z, size, red, green, blue] = voxel;
+      const safeSize = Math.max(0.000_001, size);
+      const halfSize = safeSize / 2;
       transform.position.set(x, z, y);
-      transform.scale.setScalar(Math.max(0.000_001, size));
+      transform.scale.setScalar(safeSize);
       transform.updateMatrix();
       model.setMatrixAt(index, transform.matrix);
       color.setRGB(red / 255, green / 255, blue / 255, THREE.SRGBColorSpace);
       model.setColorAt(index, color);
+      voxelMinimum.set(x - halfSize, z - halfSize, y - halfSize);
+      voxelMaximum.set(x + halfSize, z + halfSize, y + halfSize);
+      box.expandByPoint(voxelMinimum);
+      box.expandByPoint(voxelMaximum);
     });
     model.instanceMatrix.needsUpdate = true;
     if (model.instanceColor) model.instanceColor.needsUpdate = true;
@@ -175,12 +193,14 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
     engine.scene.add(model);
     engine.model = model;
 
-    const minimum = data.bounds.min;
-    const maximum = data.bounds.max;
-    const box = new THREE.Box3(
-      new THREE.Vector3(minimum[0], minimum[2], minimum[1]),
-      new THREE.Vector3(maximum[0], maximum[2], maximum[1]),
-    );
+    if (box.isEmpty()) {
+      const minimum = data.bounds.min;
+      const maximum = data.bounds.max;
+      box.set(
+        new THREE.Vector3(minimum[0], minimum[2], minimum[1]),
+        new THREE.Vector3(maximum[0], maximum[2], maximum[1]),
+      );
+    }
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const diameter = Math.max(size.length(), 0.1);
@@ -194,21 +214,22 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
     });
     engine.scene.add(grid);
     engine.grid = grid;
+    engine.fitBounds = box.clone();
 
     const resetView = () => {
-      const distance = Math.max(diameter * 3, 1);
-      engine.camera.near = Math.max(distance / 2_000, 0.000_1);
-      engine.camera.far = Math.max(distance * 50, 100);
-      engine.camera.position.set(
-        center.x + distance,
-        center.y + distance,
-        center.z + distance,
-      );
+      const radius = Math.max(diameter / 2, 0.05);
+      const distance = Math.max(radius * 4, 1);
+      const direction = new THREE.Vector3(1, 1, 1).normalize();
+      engine.camera.near = Math.max(distance - radius * 2.5, 0.000_1);
+      engine.camera.far = Math.max(distance + radius * 4, 100);
+      engine.camera.position.copy(center).addScaledVector(direction, distance);
+      engine.camera.up.set(0, 1, 0);
+      engine.camera.lookAt(center);
+      engine.camera.updateMatrixWorld(true);
       engine.camera.zoom = 1;
-      engine.viewHeight = Math.max(diameter * 1.18, 0.35);
-      engine.updateProjection?.();
       engine.controls.target.copy(center);
       engine.controls.update();
+      engine.updateProjection?.();
       engine.render?.();
     };
     engine.resetView = resetView;
@@ -248,7 +269,39 @@ function disposeModel(engine: ViewerEngine) {
     materials.forEach((material) => material.dispose());
     engine.grid = null;
   }
+  engine.fitBounds = null;
   engine.resetView = null;
-  engine.updateProjection = null;
-  engine.render = null;
+}
+
+function fittedViewHeight(
+  bounds: THREE.Box3,
+  camera: THREE.OrthographicCamera,
+  aspect: number,
+) {
+  camera.updateMatrixWorld(true);
+  const { min, max } = bounds;
+  const corners = [
+    new THREE.Vector3(min.x, min.y, min.z),
+    new THREE.Vector3(min.x, min.y, max.z),
+    new THREE.Vector3(min.x, max.y, min.z),
+    new THREE.Vector3(min.x, max.y, max.z),
+    new THREE.Vector3(max.x, min.y, min.z),
+    new THREE.Vector3(max.x, min.y, max.z),
+    new THREE.Vector3(max.x, max.y, min.z),
+    new THREE.Vector3(max.x, max.y, max.z),
+  ];
+  let minimumX = Number.POSITIVE_INFINITY;
+  let maximumX = Number.NEGATIVE_INFINITY;
+  let minimumY = Number.POSITIVE_INFINITY;
+  let maximumY = Number.NEGATIVE_INFINITY;
+  corners.forEach((corner) => {
+    corner.applyMatrix4(camera.matrixWorldInverse);
+    minimumX = Math.min(minimumX, corner.x);
+    maximumX = Math.max(maximumX, corner.x);
+    minimumY = Math.min(minimumY, corner.y);
+    maximumY = Math.max(maximumY, corner.y);
+  });
+  const projectedWidth = Math.max(0.001, maximumX - minimumX);
+  const projectedHeight = Math.max(0.001, maximumY - minimumY);
+  return Math.max(projectedHeight, projectedWidth / Math.max(aspect, 0.1), 0.1) * 1.16;
 }
