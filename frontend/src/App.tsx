@@ -1295,7 +1295,7 @@ function ExplorerApp() {
             previewUrl={previewUrl}
             associations={associations}
             audioActive={playingMediaId === selected?.id}
-            onAudioPlaybackChange={(active) => setPlayingMediaId(active && selected ? selected.id : "")}
+            onAudioPlaybackChange={(active, assetId) => setPlayingMediaId((current) => active ? assetId : current === assetId ? "" : current)}
             wide={detailPlacement === "bottom"}
             scrollKey={`asset:${sourceId}:${selectedId}`}
             onPopout={() => window.open(`/?detail=asset&asset_id=${encodeURIComponent(selectedId)}`, `ra2exp-asset-${selectedId}`, "popup=yes,width=1100,height=780")}
@@ -1622,7 +1622,7 @@ function CompactAudioPlayer({ assetId, label, active, onPlaybackChange }: {
   assetId: string;
   label: string;
   active?: boolean;
-  onPlaybackChange?: (active: boolean) => void;
+  onPlaybackChange?: (active: boolean, assetId: string) => void;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [localActive, setLocalActive] = useState(false);
@@ -1630,13 +1630,13 @@ function CompactAudioPlayer({ assetId, label, active, onPlaybackChange }: {
 
   function update(next: boolean) {
     if (active === undefined) setLocalActive(next);
-    onPlaybackChange?.(next);
+    onPlaybackChange?.(next, assetId);
   }
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || active === undefined) return;
-    if (active) void audio.play().catch(() => onPlaybackChange?.(false));
+    if (active) void audio.play().catch(() => onPlaybackChange?.(false, assetId));
     else audio.pause();
   }, [active, assetId]);
 
@@ -1965,7 +1965,7 @@ interface DisplaySoundAssociation {
 
 type EntityDetailTab = "sound" | "animation" | "data";
 type EntityAnimationTab = "body" | "weapon";
-type AudioDetailTab = "preview" | "associations" | "data";
+type AudioDetailTab = "associations" | "data";
 
 interface ActiveEntityAnimation {
   event: string;
@@ -2334,7 +2334,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   previewUrl: string;
   associations: AssetAssociationPage | null;
   audioActive?: boolean;
-  onAudioPlaybackChange?: (active: boolean) => void;
+  onAudioPlaybackChange?: (active: boolean, assetId: string) => void;
   wide?: boolean;
   onPopout?: () => void;
   scrollKey?: string;
@@ -2345,7 +2345,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   const [frameMode, setFrameMode] = useState<"sequence" | "grid">("sequence");
   const [audioDetailTab, setAudioDetailTab] = useState<AudioDetailTab>(() => {
     const remembered = window.localStorage.getItem("ra2exp-audio-detail-tab-v1");
-    return remembered === "associations" || remembered === "data" ? remembered : "preview";
+    return remembered === "data" ? "data" : "associations";
   });
   const detailScroll = useRememberedScroll<HTMLElement>(scrollKey, associations?.items.length || 0);
   function selectAudioDetailTab(next: AudioDetailTab) {
@@ -2364,7 +2364,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   const isAudio = audioFormats.includes(asset.format);
   const isModel = ["vxl", "hva"].includes(asset.format);
   const activeAudioDetailTab = audioDetailTab === "associations" && associations !== null && associations.items.length === 0
-    ? "preview"
+    ? "data"
     : audioDetailTab;
   const frameCount = metadata?.frame_count || 1;
   const activeFrame = metadata?.frames?.[frame];
@@ -2388,7 +2388,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   if (metadata?.label_count !== undefined) metadataRows.push({ label: "CSF 文本", value: `${metadata.label_count} 标签 · ${metadata.string_count} 字符串` });
   if (metadata?.entry_count !== undefined) metadataRows.push({ label: "配置结构", value: `${metadata.section_count} 节 · ${metadata.entry_count} 项` });
   if (metadata?.encoding) metadataRows.push({ label: "文本编码", value: metadata.encoding });
-  if (metadata?.duration_seconds !== undefined) metadataRows.push({ label: "音频", value: `${formatDuration(metadata.duration_seconds)} · ${metadata.sample_rate?.toLocaleString("zh-CN")} Hz · ${metadata.bits_per_sample} bit` });
+  if (metadata?.duration_seconds !== undefined) metadataRows.push({ label: "音频", value: `${formatDuration(metadata.duration_seconds)} · ${metadata.sample_rate?.toLocaleString("zh-CN")} Hz · ${metadata.bits_per_sample} bit${metadata.audio_codec ? ` · ${metadata.audio_codec}` : ""}` });
   if (isAudio && originalTexts.length > 0) metadataRows.push({ label: "原文文本", value: originalTexts.join("\n"), tone: "metadata-text" });
   if (isAudio && localizedTexts.length > 0) metadataRows.push({ label: "中文文本", value: localizedTexts.join("\n"), tone: "metadata-text" });
   metadataRows.push({ label: "来源", value: asset.storage_kind === "loose" ? "松散文件" : asset.storage_kind === "bag" ? "音频包" : "MIX 归档" });
@@ -2396,10 +2396,21 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   metadataRows.push({ label: "识别", value: asset.confidence === "name" ? "名称库匹配" : asset.confidence === "content" ? "内容探测" : asset.confidence === "filename" ? "文件名" : asset.confidence === "index" ? "音频索引" : "未知" });
   return (
     <aside ref={detailScroll.ref} onScroll={detailScroll.remember} className={`detail-panel asset-detail panel ${wide ? "detail-panel-wide" : "detail-panel-narrow"}`}>
-      <div className="detail-title"><div className="detail-heading-line"><span className="format-pill">{formatLabels[asset.format] || asset.format.toUpperCase()}</span><h2 title={assetDisplayName(asset)}>{assetDisplayName(asset)}</h2></div><div className="detail-actions">{onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}{!isAudio && <a className="icon-button" href={api.contentUrl(asset.id)} title="导出原始文件" aria-label="导出原始文件"><Icon name="download" /></a>}</div></div>
+      <div className={`detail-title ${isAudio ? "audio-detail-title" : ""}`}>
+        <div className="detail-heading-line"><span className="format-pill">{formatLabels[asset.format] || asset.format.toUpperCase()}</span><h2 title={assetDisplayName(asset)}>{assetDisplayName(asset)}</h2></div>
+        <div className="detail-actions">
+          {onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}
+          {isAudio
+            ? <div className="audio-header-player">
+              <CompactAudioPlayer assetId={asset.id} label={assetDisplayName(asset)} active={audioActive} onPlaybackChange={onAudioPlaybackChange} />
+              <span className="audio-header-meta" title={metadata?.audio_codec || ""}>{metadata?.duration_seconds !== undefined ? formatDuration(metadata.duration_seconds) : ""}</span>
+              <AudioDownloadAction assetId={asset.id} label={assetDisplayName(asset)} />
+            </div>
+            : <a className="icon-button" href={api.contentUrl(asset.id)} title="导出原始文件" aria-label="导出原始文件"><Icon name="download" /></a>}
+        </div>
+      </div>
 
       {isAudio && <div className="entity-detail-tabs asset-detail-tabs" role="tablist" aria-label="声音详细信息">
-        <button type="button" role="tab" id="audio-preview-tab" aria-controls="audio-preview-panel" aria-selected={activeAudioDetailTab === "preview"} className={activeAudioDetailTab === "preview" ? "active" : ""} onClick={() => selectAudioDetailTab("preview")}>播放</button>
         <button type="button" role="tab" id="audio-associations-tab" aria-controls="audio-associations-panel" aria-selected={activeAudioDetailTab === "associations"} className={activeAudioDetailTab === "associations" ? "active" : ""} disabled={associations !== null && associations.items.length === 0} onClick={() => selectAudioDetailTab("associations")}>关联 <em>{associations?.items.length || 0}</em></button>
         <button type="button" role="tab" id="audio-data-tab" aria-controls="audio-data-panel" aria-selected={activeAudioDetailTab === "data"} className={activeAudioDetailTab === "data" ? "active" : ""} onClick={() => selectAudioDetailTab("data")}>数据 <em>{metadataRows.length}</em></button>
       </div>}
@@ -2425,8 +2436,6 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
           </div>}
         </div>
       )}
-
-      {isAudio && activeAudioDetailTab === "preview" && <div className="audio-tab-panel" role="tabpanel" id="audio-preview-panel" aria-labelledby="audio-preview-tab"><div className="audio-preview compact-audio-preview"><CompactAudioPlayer assetId={asset.id} label={assetDisplayName(asset)} active={audioActive} onPlaybackChange={onAudioPlaybackChange} /><span className="audio-preview-meta">{metadata?.duration_seconds !== undefined ? formatDuration(metadata.duration_seconds) : ""}{metadata?.audio_codec ? ` · ${metadata.audio_codec}` : ""}</span><AudioDownloadAction assetId={asset.id} label={assetDisplayName(asset)} /></div></div>}
 
       {asset.format === "video" && <div className="video-preview">
         {videoRequested && !videoFailed
