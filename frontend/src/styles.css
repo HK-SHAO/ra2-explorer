@@ -350,7 +350,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .entity-detail-tabs em { min-width: 20px; padding: 2px 5px; border-radius: 10px; color: #90959e; background: #24272d; font-size: 11px; font-style: normal; }
 .entity-tab-panel { min-width: 0; margin-top: 10px; }
 .entity-tab-panel > .entity-section:first-child { margin-top: 0; }
-.animation-kind-tabs { display: inline-grid; grid-template-columns: repeat(2, minmax(116px, 1fr)); gap: 3px; margin: 0 9px 8px; padding: 3px; border: 1px solid var(--line-soft); border-radius: 3px; background: #15171b; }
+.animation-kind-tabs { display: inline-grid; grid-template-columns: repeat(var(--animation-tab-count, 2), minmax(106px, 1fr)); gap: 3px; margin: 0 9px 8px; padding: 3px; border: 1px solid var(--line-soft); border-radius: 3px; background: #15171b; }
 .animation-kind-tabs button { min-width: 0; height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 10px; border: 1px solid transparent; border-radius: 2px; color: #858a94; background: transparent; font-size: 12px; cursor: pointer; }
 .animation-kind-tabs button:hover:not(:disabled) { color: #d4d6da; background: #202329; }
 .animation-kind-tabs button.active { border-color: #713733; color: #f0f1f2; background: #281b1d; }
@@ -364,6 +364,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .entity-effect-overlay.hidden { opacity: 0; }
 .entity-effect-overlay.visible { opacity: 1; }
 .entity-effect-overlay img { position: absolute; left: var(--effect-x, 50%); top: var(--effect-y, 50%); max-width: 88%; max-height: 88%; image-rendering: pixelated; object-fit: contain; filter: drop-shadow(0 5px 10px rgba(0,0,0,.45)); transform: translate(-50%, -50%); }
+.entity-effect-overlay.attached img { left: 50%; top: 50%; width: calc(100% - 30px); height: calc(100% - 30px); max-width: none; max-height: none; }
 .return-body-action { width: auto; min-height: 43px; flex: 0 0 auto; padding: 0 13px; border: 1px solid var(--line); border-radius: 3px; color: #c6c9ce; background: rgba(25,27,32,.94); box-shadow: 0 5px 18px rgba(0,0,0,.28); font-size: 12px; cursor: pointer; backdrop-filter: blur(5px); }
 .return-body-action:hover { color: #fff; background: #202329; }
 .entity-rules dd { max-width: 68%; overflow-wrap: anywhere; }

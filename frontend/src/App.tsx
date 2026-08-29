@@ -42,8 +42,13 @@ import {
 
 const VoxelViewer = lazy(async () => ({ default: (await import("./VoxelViewer")).VoxelViewer }));
 
-function VoxelPreview({ url, label, viewKey }: { url: string; label: string; viewKey: string }) {
-  return <Suspense fallback={<div className="voxel-viewer"><div className="voxel-status">正在载入三维视图…</div></div>}><VoxelViewer url={url} label={label} viewKey={viewKey} /></Suspense>;
+function VoxelPreview({ url, label, viewKey, onFacingChange }: {
+  url: string;
+  label: string;
+  viewKey: string;
+  onFacingChange?: (facing: number) => void;
+}) {
+  return <Suspense fallback={<div className="voxel-viewer"><div className="voxel-status">正在载入三维视图…</div></div>}><VoxelViewer url={url} label={label} viewKey={viewKey} onFacingChange={onFacingChange} /></Suspense>;
 }
 
 type IconName =
@@ -270,6 +275,8 @@ const mediaSlotLabels: Record<string, string> = {
   buildup: "建造",
   activeanim: "运转",
   activeanimtwo: "辅助运转",
+  activeanimthree: "运转层三",
+  activeanimfour: "运转层四",
   productionanim: "生产",
   idleanim: "待机",
   specialanim: "特殊",
@@ -1622,48 +1629,95 @@ function effectBodySequence(associations: MediaAssociation[], slot: string) {
   return bodySequences.find((association) => association.event.toLowerCase().includes("fire")) || null;
 }
 
+const animationDirections = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+
+function directionalAnimationSample(samples: MediaSample[], facing: number) {
+  const direction = animationDirections[((facing % 8) + 8) % 8];
+  return samples.find((sample) => sample.animation?.direction?.toUpperCase() === direction)
+    || samples.find((sample) => sample.asset)
+    || samples[0];
+}
+
+function animationCardSamples(association: MediaAssociation, facing: number) {
+  const directional = association.samples.filter((sample) => sample.animation?.direction);
+  if (directional.length > 1 && directional.length === association.samples.length) {
+    const selected = directionalAnimationSample(association.samples, facing);
+    return selected ? [selected] : [];
+  }
+  return association.samples;
+}
+
+function animationRoleTab(kind: EntityKind, role: MediaAssociation["role"], slot: string): EntityAnimationTab {
+  if (role === "construction") return kind === "building" ? "construction" : "body";
+  if (role === "operation") return kind === "building" ? "operation" : "body";
+  if (role === "weapon" || role === "impact") return "weapon";
+  return role === "body" || slot === "body_sequence" ? "body" : "weapon";
+}
+
+function animationAssociationTab(kind: EntityKind, association: MediaAssociation): EntityAnimationTab {
+  return animationRoleTab(kind, association.role, association.slot);
+}
+
+function animationAssociationCount(association: MediaAssociation) {
+  const directional = association.samples.filter((sample) => sample.animation?.direction);
+  return directional.length > 1 && directional.length === association.samples.length
+    ? 1
+    : association.samples.length;
+}
+
+function defaultEntityAnimationTab(entity: GameEntity | null): EntityAnimationTab {
+  if (!entity) return "body";
+  const associations = entity.media.filter((association) => association.kind === "animation");
+  const order: EntityAnimationTab[] = entity.kind === "building"
+    ? ["construction", "operation", "weapon"]
+    : ["body", "weapon"];
+  return order.find((tab) => associations.some((association) => animationAssociationTab(entity.kind, association) === tab))
+    || (entity.kind !== "building" && entity.preview.frame_count > 1 ? "body" : "weapon");
+}
+
+function animationFireFlh(art: Record<string, string>, slot: string) {
+  const secondary = slot.includes("secondary");
+  const elite = slot.includes("elite");
+  const fields = secondary
+    ? [...(elite ? ["elite_secondary_fire_flh"] : []), "secondary_fire_flh", "weapon_2_flh"]
+    : [...(elite ? ["elite_primary_fire_flh"] : []), "primary_fire_flh", "weapon_1_flh"];
+  for (const field of fields) {
+    const values = (art[field] || "").split(",").map((value) => Number(value.trim()));
+    if (values.length >= 3 && values.every((value) => Number.isFinite(value))) return values.slice(0, 3);
+  }
+  return null;
+}
+
 function animationEffectAnchor(
-  event: string,
-  dependencyKind: EntityDependency["kind"] | undefined,
+  role: MediaAssociation["role"],
   art: Record<string, string>,
   slot: string,
+  facing: number,
 ) {
-  const direction = event.toUpperCase().match(/-(NE|SE|SW|NW|N|E|S|W)$/)?.[1] || "";
-  const anchors: Record<string, { x: number; y: number }> = {
-    N: { x: 50, y: 23 },
-    NE: { x: 64, y: 30 },
-    E: { x: 72, y: 45 },
-    SE: { x: 64, y: 61 },
-    S: { x: 50, y: 68 },
-    SW: { x: 36, y: 61 },
-    W: { x: 28, y: 45 },
-    NW: { x: 36, y: 30 },
-  };
-  if (direction) return anchors[direction];
-  if (dependencyKind === "warhead") return { x: 70, y: 59 };
-  if (dependencyKind !== "weapon") return { x: 50, y: 50 };
-
-  const field = slot.includes("secondary") ? "secondary_fire_flh" : "primary_fire_flh";
-  const values = (art[field] || "").split(",").map((value) => Number(value.trim()));
-  if (values.length < 3 || values.some((value) => !Number.isFinite(value))) {
-    return { x: 67, y: 44 };
+  if (role === "operation") return { x: 50, y: 50 };
+  const radians = (((facing % 8) + 8) % 8) * Math.PI / 4;
+  if (role === "impact") {
+    return { x: 50 + Math.sin(radians) * 24, y: 54 - Math.cos(radians) * 12 };
   }
-  const [forward, lateral, height] = values;
+  const flh = animationFireFlh(art, slot);
+  if (!flh) return { x: 50 + Math.sin(radians) * 12, y: 48 - Math.cos(radians) * 6 };
+  const [forward, lateral, height] = flh;
+  const projectedX = forward * Math.sin(radians) + lateral * Math.cos(radians);
+  const projectedY = -forward * Math.cos(radians) + lateral * Math.sin(radians);
   const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value));
   return {
-    x: clamp(50 + forward / 12 - lateral / 22, 28, 76),
-    y: clamp(52 + forward / 34 + lateral / 38 - height / 10, 22, 70),
+    x: clamp(50 + projectedX / 10, 20, 80),
+    y: clamp(54 + projectedY / 25 - height / 18, 20, 75),
   };
 }
 
-function animationAssociationTitle(entity: GameEntity, association: MediaAssociation) {
-  if (association.slot === "body_sequence") return animationEventLabel(association.event);
-  const dependency = entity.dependencies.find(
-    (item) => item.id.toLowerCase() === association.source.toLowerCase(),
-  );
+function animationAssociationTitle(association: MediaAssociation) {
+  if (association.role === "body" || association.slot === "body_sequence") return animationEventLabel(association.event);
   const slot = mediaSlotLabels[association.slot] || association.slot;
-  if (dependency?.kind === "weapon") return `${slot}开火`;
-  if (dependency?.kind === "warhead") return `${slot}命中`;
+  if (association.role === "weapon") return `${slot}开火`;
+  if (association.role === "impact") return `${slot}命中`;
+  if (association.role === "construction") return "建造";
+  if (association.role === "operation") return mediaSlotLabels[association.slot] || animationEventLabel(association.event);
   return animationEventLabel(association.event);
 }
 
@@ -2020,13 +2074,14 @@ interface DisplaySoundAssociation {
 }
 
 type EntityDetailTab = "sound" | "animation" | "data";
-type EntityAnimationTab = "body" | "weapon";
+type EntityAnimationTab = "body" | "construction" | "operation" | "weapon";
 type AudioDetailTab = "associations" | "data";
 
 interface ActiveEntityAnimation {
   event: string;
   slot: string;
   source: string;
+  role: MediaAssociation["role"];
   sample: MediaSample;
 }
 
@@ -2081,15 +2136,30 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
   const [animationPlaying, setAnimationPlaying] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
   const frameCount = Math.max(1, entity?.preview.frame_count || 1);
-  const animationAssociations = entity?.media.filter((association) => association.kind === "animation") || [];
-  const bodyAnimationAssociations = animationAssociations.filter((association) => association.slot === "body_sequence");
-  const weaponAnimationAssociations = animationAssociations.filter((association) => association.slot !== "body_sequence");
+  const animationAssociations = useMemo(
+    () => entity?.media.filter((association) => association.kind === "animation") || [],
+    [entity],
+  );
+  const entityKind = entity?.kind || "vehicle";
+  const bodyAnimationAssociations = animationAssociations.filter(
+    (association) => animationAssociationTab(entityKind, association) === "body",
+  );
+  const constructionAnimationAssociations = animationAssociations.filter(
+    (association) => animationAssociationTab(entityKind, association) === "construction",
+  );
+  const operationAnimationAssociations = animationAssociations.filter(
+    (association) => animationAssociationTab(entityKind, association) === "operation",
+  );
+  const weaponAnimationAssociations = animationAssociations.filter(
+    (association) => animationAssociationTab(entityKind, association) === "weapon",
+  );
   const activeAnimationFrames = useMemo(
     () => animationSourceFrames(activeAnimation?.sample, animationMetadata, facing),
     [activeAnimation, animationMetadata, facing],
   );
-  const activeAnimationIsBody = activeAnimation?.slot === "body_sequence";
-  const effectBodyAssociation = activeAnimation && !activeAnimationIsBody
+  const activeAnimationIsBody = activeAnimation?.role === "body" || activeAnimation?.slot === "body_sequence";
+  const activeAnimationReplacesBody = activeAnimationIsBody || activeAnimation?.role === "construction";
+  const effectBodyAssociation = activeAnimation && ["weapon", "impact"].includes(activeAnimation.role || "")
     ? effectBodySequence(animationAssociations, activeAnimation.slot)
     : null;
   const effectBodySample = effectBodyAssociation?.samples.find((sample) => sample.asset) || null;
@@ -2105,7 +2175,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
   const effectBodySourceFrame = effectBodyFrames.length > 0
     ? effectBodyFrames[animationFrame % effectBodyFrames.length]
     : 0;
-  const effectFrameVisible = Boolean(activeAnimation && !activeAnimationIsBody && animationFrame < activeAnimationFrames.length);
+  const effectFrameVisible = Boolean(activeAnimation && !activeAnimationReplacesBody && animationFrame < activeAnimationFrames.length);
   const associationLayout = detailTab === "animation" ? animationAssociationLayout : soundAssociationLayout;
   const setAssociationLayout = detailTab === "animation" ? setAnimationAssociationLayout : setSoundAssociationLayout;
   const detailScroll = useRememberedScroll<HTMLElement>(scrollKey, entity ? entity.components.length + entity.media.length : 0);
@@ -2128,9 +2198,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
     setAnimationFrame(0);
     setAnimationPlaying(false);
     setPreviewFailed(false);
-    setAnimationTab(entity && (entity.preview.frame_count > 1 || entity.media.some((association) => association.kind === "animation" && association.slot === "body_sequence"))
-      ? "body"
-      : "weapon");
+    setAnimationTab(defaultEntityAnimationTab(entity));
     setDetailTab(entity?.media.some((association) => association.kind !== "animation")
       ? "sound"
       : entity?.media.some((association) => association.kind === "animation")
@@ -2185,7 +2253,20 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
   }, [activeAnimation, activeAnimationFrameCount]);
 
   useEffect(() => {
-    if (activeAnimation) setAnimationFrame(0);
+    if (!activeAnimation) return;
+    const association = animationAssociations.find(
+      (item) => item.slot === activeAnimation.slot
+        && item.source === activeAnimation.source
+        && item.event === activeAnimation.event,
+    );
+    const directional = association?.samples.filter((sample) => sample.animation?.direction) || [];
+    const sample = association && directional.length > 1 && directional.length === association.samples.length
+      ? directionalAnimationSample(association.samples, facing)
+      : undefined;
+    if (sample && sample.name !== activeAnimation.sample.name) {
+      setActiveAnimation((current) => current ? { ...current, sample } : current);
+    }
+    setAnimationFrame(0);
   }, [facing]);
 
   useEffect(() => {
@@ -2201,12 +2282,15 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
 
   function selectAnimationTab(next: EntityAnimationTab) {
     setAnimationTab(next);
-    const activeMatchesTab = next === "body" ? activeAnimationIsBody : Boolean(activeAnimation && !activeAnimationIsBody);
+    const activeMatchesTab = Boolean(
+      activeAnimation
+      && animationRoleTab(entityKind, activeAnimation.role, activeAnimation.slot) === next,
+    );
     if (activeAnimation && !activeMatchesTab) {
       setActiveAnimation(null);
       setAnimationPlaying(false);
     }
-    if (next === "weapon") setPlaying(false);
+    if (next !== "body") setPlaying(false);
   }
 
   if (loading && !entity) return <aside className="detail-panel panel empty-detail"><div className="radar small"><span /></div><strong>正在读取单位详情…</strong></aside>;
@@ -2215,15 +2299,42 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
   const soundAssociations = mergeSoundAssociations(entity.media);
   const soundCount = soundAssociations.reduce((count, association) => count + association.samples.length, 0);
   const hasBodySequences = bodyAnimationAssociations.length > 0;
-  const bodyAnimationCount = bodyAnimationAssociations.reduce((count, association) => count + association.samples.length, 0)
-    + (frameCount > 1 && !hasBodySequences ? 1 : 0);
-  const weaponAnimationCount = weaponAnimationAssociations.reduce((count, association) => count + association.samples.length, 0);
-  const animationCount = bodyAnimationCount + weaponAnimationCount;
-  const visibleAnimationAssociations = animationTab === "body" ? bodyAnimationAssociations : weaponAnimationAssociations;
-  const activeAnimationAsset = activeAnimation?.sample.asset || null;
-  const activeAnimationDependency = activeAnimation
-    ? entity.dependencies.find((item) => item.id.toLowerCase() === activeAnimation.source.toLowerCase())
+  const hasRawBodyAnimation = entity.kind !== "building" && frameCount > 1 && !hasBodySequences;
+  const animationGroups: Record<EntityAnimationTab, MediaAssociation[]> = {
+    body: bodyAnimationAssociations,
+    construction: constructionAnimationAssociations,
+    operation: operationAnimationAssociations,
+    weapon: weaponAnimationAssociations,
+  };
+  const animationCounts: Record<EntityAnimationTab, number> = {
+    body: bodyAnimationAssociations.reduce((count, association) => count + animationAssociationCount(association), 0)
+      + (hasRawBodyAnimation ? 1 : 0),
+    construction: constructionAnimationAssociations.reduce((count, association) => count + animationAssociationCount(association), 0),
+    operation: operationAnimationAssociations.reduce((count, association) => count + animationAssociationCount(association), 0),
+    weapon: weaponAnimationAssociations.reduce((count, association) => count + animationAssociationCount(association), 0),
+  };
+  const animationTabLabels: Record<EntityAnimationTab, string> = {
+    body: "主体动作",
+    construction: "建造",
+    operation: "运行",
+    weapon: entity.kind === "building" ? "武器效果" : "武器动画",
+  };
+  const animationTabs = (Object.keys(animationCounts) as EntityAnimationTab[]).filter(
+    (tab) => animationCounts[tab] > 0,
+  );
+  const animationCount = Object.values(animationCounts).reduce((total, count) => total + count, 0);
+  const visibleAnimationAssociations = animationGroups[animationTab];
+  const activeAnimationAssociation = activeAnimation
+    ? animationAssociations.find(
+      (association) => association.slot === activeAnimation.slot
+        && association.source === activeAnimation.source
+        && association.event === activeAnimation.event,
+    )
     : undefined;
+  const activeAnimationTitle = activeAnimationAssociation
+    ? animationAssociationTitle(activeAnimationAssociation)
+    : animationEventLabel(activeAnimation?.event || "主体动作");
+  const activeAnimationAsset = activeAnimation?.sample.asset || null;
   const effectBodyAsset = effectBodySample?.asset || null;
   const activeAnimationPreviewUrl = activeAnimationAsset?.format === "shp"
     ? api.previewUrl(activeAnimationAsset.id, activeAnimationSourceFrame, "", 5, playerColor)
@@ -2232,10 +2343,10 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
     ? api.previewUrl(effectBodyAsset.id, effectBodySourceFrame, "", 5, playerColor)
     : "";
   const effectAnchor = animationEffectAnchor(
-    activeAnimation?.event || "",
-    activeAnimationDependency?.kind,
+    activeAnimation?.role || null,
     entity.art,
     activeAnimation?.slot || "",
+    facing,
   );
   const entityTags = [
     entityKindLabels[entity.kind],
@@ -2261,32 +2372,32 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
       <div className="entity-detail-body">
         <div className="entity-preview-column">
           {entity.renderable ? <div className="preview-block entity-preview">
-            {activeAnimationIsBody && activeAnimationAsset?.format === "shp"
-              ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${activeAnimationAsset.id}:${activeAnimation?.event || "body"}`} fitContent={Boolean(activeAnimationFrameFit)} frameFit={activeAnimationFrameFit} src={activeAnimationPreviewUrl} alt={`${animationEventLabel(activeAnimation?.event || "主体动作")}预览`} building={entity.kind === "building"} />
-              : activeAnimationIsBody && activeAnimationAsset && ["vxl", "hva"].includes(activeAnimationAsset.format)
+            {activeAnimationReplacesBody && activeAnimationAsset?.format === "shp"
+              ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${activeAnimationAsset.id}:${activeAnimation?.event || "body"}`} fitContent={Boolean(activeAnimationFrameFit)} frameFit={activeAnimationFrameFit} src={activeAnimationPreviewUrl} alt={`${activeAnimationTitle}预览`} building={entity.kind === "building"} />
+              : activeAnimationReplacesBody && activeAnimationAsset && ["vxl", "hva"].includes(activeAnimationAsset.format)
                 ? <VoxelPreview url={api.assetModelUrl(activeAnimationAsset.id, activeAnimationSourceFrame, playerColor)} label={animationEventLabel(activeAnimation?.event || activeAnimationAsset.display_name)} viewKey={`asset:${activeAnimationAsset.id}`} />
-                : !activeAnimationAsset && frameMode === "grid" && frameCount > 1
+                : !activeAnimationAsset && frameMode === "grid" && hasRawBodyAnimation
                   ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing, playerColor, scale: 3 })} />
                   : <div className="entity-composite-stage">
                     {effectBodyPreviewUrl
                       ? <ImageViewport className="shp entity-composite-body" fitKey={`${entity.id}:${effectBodyAssociation?.event || "body"}`} fitContent={Boolean(effectBodyFrameFit)} frameFit={effectBodyFrameFit} src={effectBodyPreviewUrl} alt={`${entity.display_name} 主体动作`} building={entity.kind === "building"} />
                       : entity.voxel
-                        ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} viewKey={`entity:${sourceId}:${entity.id}`} />
+                        ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} viewKey={`entity:${sourceId}:${entity.id}`} onFacingChange={setFacing} />
                         : previewFailed
                           ? <div className="preview-stage shp"><div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div></div>
-                          : <ImageViewport className="shp entity-composite-body" fitKey={entity.id} fitContent={!playing || frameCount <= 1} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
-                    {activeAnimationAsset?.format === "shp" && <span className={`entity-effect-overlay ${effectFrameVisible ? "visible" : "hidden"}`} style={{ "--effect-x": `${effectAnchor.x}%`, "--effect-y": `${effectAnchor.y}%` } as CSSProperties} aria-hidden="true">
+                          : <ImageViewport className="shp entity-composite-body" fitKey={entity.id} fitContent={activeAnimation?.role === "operation" && entity.kind === "building" ? false : !playing || frameCount <= 1} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
+                    {activeAnimationAsset?.format === "shp" && <span className={`entity-effect-overlay ${activeAnimation?.role === "operation" ? "attached" : ""} ${effectFrameVisible ? "visible" : "hidden"}`} style={{ "--effect-x": `${effectAnchor.x}%`, "--effect-y": `${effectAnchor.y}%` } as CSSProperties} aria-hidden="true">
                       <StablePreviewImage src={activeAnimationPreviewUrl} alt="" />
                     </span>}
                   </div>}
-            {(activeAnimationAsset || frameCount > 1) && <div className="entity-preview-controls">
+            {(activeAnimationAsset || hasRawBodyAnimation) && <div className="entity-preview-controls">
               {activeAnimationAsset && activeAnimationFrameCount > 1
                 ? <div className="frame-controls"><button className="play-button" onClick={() => setAnimationPlaying(!animationPlaying)} aria-label={animationPlaying ? "暂停" : "播放"}><Icon name={animationPlaying ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={activeAnimationFrameCount - 1} value={Math.min(animationFrame, activeAnimationFrameCount - 1)} onChange={(event) => setAnimationFrame(Number(event.target.value))} aria-label="关联动画帧" /><span>{String(animationFrame + 1).padStart(2, "0")} <i>/</i> {String(activeAnimationFrameCount).padStart(2, "0")} · 源 {activeAnimationSourceFrame + 1}</span></div>
-                : !activeAnimationAsset && frameCount > 1 && <div className="frame-controls">
+                : !activeAnimationAsset && hasRawBodyAnimation && <div className="frame-controls">
                   {frameMode === "sequence" && <><button className="play-button" onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={frameCount - 1} value={Math.min(frame, frameCount - 1)} onChange={(event) => setFrame(Number(event.target.value))} aria-label="当前动画帧" /><span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(frameCount).padStart(2, "0")}</span></>}
                   <div className="frame-mode-toggle"><button className={frameMode === "sequence" ? "active" : ""} onClick={() => setFrameMode("sequence")} title="顺序播放"><Icon name="play" size={14} /></button><button className={frameMode === "grid" ? "active" : ""} onClick={() => { setPlaying(false); setFrameMode("grid"); }} title="全部帧"><Icon name="grid" size={14} /></button></div>
                 </div>}
-              {activeAnimationAsset && <button type="button" className="return-body-action" onClick={() => { setActiveAnimation(null); setPlaying(frameCount > 1); }}>返回主体</button>}
+              {activeAnimationAsset && <button type="button" className="return-body-action" onClick={() => { setActiveAnimation(null); setPlaying(hasRawBodyAnimation); }}>返回主体</button>}
             </div>}
             <div className="entity-render-options compact-render-options">
               {!entity.voxel && entity.preview.supports_facing && <label><span>朝向</span><select value={facing} onChange={(event) => setFacing(Number(event.target.value))}>{Array.from({ length: 8 }, (_, index) => <option key={index} value={index}>{index * 45}°</option>)}</select></label>}
@@ -2313,15 +2424,14 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
           </section>}
 
           {detailTab === "animation" && <section className="entity-tab-panel entity-animations" role="tabpanel" id="entity-animation-panel" aria-labelledby="entity-animation-tab">
-            <div className="animation-kind-tabs" role="tablist" aria-label="动画类型">
-              <button type="button" role="tab" id="entity-body-animation-tab" aria-controls="entity-body-animation-panel" aria-selected={animationTab === "body"} className={animationTab === "body" ? "active" : ""} disabled={bodyAnimationCount === 0} onClick={() => selectAnimationTab("body")}>主体动作 <em>{bodyAnimationCount}</em></button>
-              <button type="button" role="tab" id="entity-weapon-animation-tab" aria-controls="entity-weapon-animation-panel" aria-selected={animationTab === "weapon"} className={animationTab === "weapon" ? "active" : ""} disabled={weaponAnimationCount === 0} onClick={() => selectAnimationTab("weapon")}>武器动画 <em>{weaponAnimationCount}</em></button>
-            </div>
-            <div id={animationTab === "body" ? "entity-body-animation-panel" : "entity-weapon-animation-panel"} role="tabpanel" aria-labelledby={animationTab === "body" ? "entity-body-animation-tab" : "entity-weapon-animation-tab"} className={`animation-association-list ${associationLayout === "grid" ? "animation-association-grid" : ""}`}>
-              {animationTab === "body" && frameCount > 1 && !hasBodySequences && <button type="button" className={!activeAnimation ? "active" : ""} onClick={() => { setActiveAnimation(null); setFrameMode("sequence"); setPlaying(true); }}><span className="animation-thumbnail body-action"><Icon name="unit" size={24} /></span><span><strong>全部主体帧</strong><small>{frameCount} 帧 · 顺序预览</small></span><Icon name="play" size={16} /></button>}
-              {visibleAnimationAssociations.flatMap((association) => association.samples.map((sample, index) => <button type="button" disabled={!sample.asset} className={activeAnimation?.event === association.event && activeAnimation.slot === association.slot && activeAnimation.source === association.source && activeAnimation.sample.name === sample.name ? "active" : ""} onClick={() => { if (!sample.asset) return; setPlaying(false); setActiveAnimation({ event: association.event, slot: association.slot, source: association.source, sample }); }} key={`${association.slot}-${association.source}-${association.event}-${sample.name}-${index}`}>
-                <span className={`animation-thumbnail ${association.slot === "body_sequence" ? "body-action" : ""}`}>{sample.asset && ["shp", "tmp", "pcx"].includes(sample.asset.format) ? <img loading="lazy" src={api.previewUrl(sample.asset.id, sample.animation?.start_frame || 0, "", 2, playerColor)} alt="" /> : <Icon name="image" size={24} />}</span>
-                <span><strong>{animationAssociationTitle(entity, association)}</strong><small>{association.slot === "body_sequence" ? (mediaSlotLabels[association.slot] || association.slot) : association.event}{sample.animation?.frame_count ? ` · ${sample.animation.frame_count} 帧` : ""}{sample.asset ? "" : " · 未解析"}</small></span><Icon name="play" size={16} />
+            {animationTabs.length > 0 && <div className="animation-kind-tabs" role="tablist" aria-label="动画类型" style={{ "--animation-tab-count": animationTabs.length } as CSSProperties}>
+              {animationTabs.map((tab) => <button type="button" role="tab" id={`entity-${tab}-animation-tab`} aria-controls={`entity-${tab}-animation-panel`} aria-selected={animationTab === tab} className={animationTab === tab ? "active" : ""} onClick={() => selectAnimationTab(tab)} key={tab}>{animationTabLabels[tab]} <em>{animationCounts[tab]}</em></button>)}
+            </div>}
+            <div id={`entity-${animationTab}-animation-panel`} role="tabpanel" aria-labelledby={`entity-${animationTab}-animation-tab`} className={`animation-association-list ${associationLayout === "grid" ? "animation-association-grid" : ""}`}>
+              {animationTab === "body" && hasRawBodyAnimation && <button type="button" className={!activeAnimation ? "active" : ""} onClick={() => { setActiveAnimation(null); setFrameMode("sequence"); setPlaying(true); }}><span className="animation-thumbnail body-action"><Icon name="unit" size={24} /></span><span><strong>全部主体帧</strong><small>{frameCount} 帧 · 顺序预览</small></span><Icon name="play" size={16} /></button>}
+              {visibleAnimationAssociations.flatMap((association) => animationCardSamples(association, facing).map((sample, index) => <button type="button" disabled={!sample.asset} className={activeAnimation?.event === association.event && activeAnimation.slot === association.slot && activeAnimation.source === association.source && activeAnimation.sample.name === sample.name ? "active" : ""} onClick={() => { if (!sample.asset) return; setPlaying(false); setActiveAnimation({ event: association.event, slot: association.slot, source: association.source, role: association.role, sample }); }} key={`${association.slot}-${association.source}-${association.event}-${sample.name}-${index}`}>
+                <span className={`animation-thumbnail ${association.role === "body" || association.role === "construction" ? "body-action" : ""}`}>{sample.asset && ["shp", "tmp", "pcx"].includes(sample.asset.format) ? <img loading="lazy" src={api.previewUrl(sample.asset.id, sample.animation?.start_frame || 0, "", 2, playerColor)} alt="" /> : <Icon name="image" size={24} />}</span>
+                <span><strong>{animationAssociationTitle(association)}</strong><small>{association.role === "body" ? (mediaSlotLabels[association.slot] || association.slot) : association.event}{association.samples.length > 1 && association.samples.every((item) => item.animation?.direction) ? ` · ${association.samples.length} 个朝向` : sample.animation?.frame_count ? ` · ${sample.animation.frame_count} 帧` : ""}{sample.asset ? "" : " · 未解析"}</small></span><Icon name="play" size={16} />
               </button>))}
             </div>
           </section>}

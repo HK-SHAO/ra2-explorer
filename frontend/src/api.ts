@@ -228,6 +228,7 @@ export interface MediaAssociation {
   slot: string;
   event: string;
   source: string;
+  role: "body" | "construction" | "operation" | "weapon" | "impact" | null;
   samples: MediaSample[];
 }
 

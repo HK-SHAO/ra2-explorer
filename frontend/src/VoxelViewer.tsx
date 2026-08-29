@@ -29,12 +29,19 @@ interface ViewerEngine {
   render: (() => void) | null;
 }
 
-export function VoxelViewer({ url, label, viewKey }: { url: string; label: string; viewKey: string }) {
+export function VoxelViewer({ url, label, viewKey, onFacingChange }: {
+  url: string;
+  label: string;
+  viewKey: string;
+  onFacingChange?: (facing: number) => void;
+}) {
   const mountRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<ViewerEngine | null>(null);
+  const onFacingChangeRef = useRef(onFacingChange);
   const [loadedScene, setLoadedScene] = useState<{ data: VoxelSceneData; viewKey: string } | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  onFacingChangeRef.current = onFacingChange;
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -69,7 +76,18 @@ export function VoxelViewer({ url, label, viewKey }: { url: string; label: strin
       controls.minZoom = 0.35;
       controls.maxZoom = 12;
 
-      const render = () => renderer.render(scene, camera);
+      let lastFacing = -1;
+      const render = () => {
+        renderer.render(scene, camera);
+        const offsetX = camera.position.x - controls.target.x;
+        const offsetZ = camera.position.z - controls.target.z;
+        const sector = Math.round(Math.atan2(offsetX, offsetZ) / (Math.PI / 4));
+        const facing = (sector + 10) % 8;
+        if (facing !== lastFacing) {
+          lastFacing = facing;
+          onFacingChangeRef.current?.(facing);
+        }
+      };
       controls.addEventListener("change", render);
 
       const engine: ViewerEngine = {
