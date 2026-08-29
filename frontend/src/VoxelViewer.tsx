@@ -15,11 +15,13 @@ export interface VoxelSceneData {
 
 interface ViewerEngine {
   scene: THREE.Scene;
-  camera: THREE.PerspectiveCamera;
+  camera: THREE.OrthographicCamera;
   renderer: THREE.WebGLRenderer;
   controls: OrbitControls;
   model: THREE.InstancedMesh | null;
   grid: THREE.GridHelper | null;
+  viewHeight: number;
+  updateProjection: (() => void) | null;
   resetView: (() => void) | null;
   render: (() => void) | null;
 }
@@ -37,7 +39,7 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
     let resizeObserver: ResizeObserver | null = null;
     try {
       const scene = new THREE.Scene();
-      const camera = new THREE.PerspectiveCamera(38, 1, 0.001, 10_000);
+      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.001, 10_000);
       const renderer = new THREE.WebGLRenderer({
         alpha: true,
         antialias: true,
@@ -50,18 +52,16 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
       renderer.domElement.setAttribute("aria-label", `${label} 交互式三维模型`);
       mount.appendChild(renderer.domElement);
 
-      const skyLight = new THREE.HemisphereLight(0xe8efff, 0x30271f, 1.35);
-      const keyLight = new THREE.DirectionalLight(0xfff3dc, 2.15);
-      keyLight.position.set(-3.5, 6, 4.5);
-      const fillLight = new THREE.DirectionalLight(0xbccfff, 0.55);
-      fillLight.position.set(4, 2, -3);
-      scene.add(skyLight, keyLight, fillLight);
+      const ambientLight = new THREE.AmbientLight(0xd8dde5, 0.72);
+      const keyLight = new THREE.DirectionalLight(0xfff0d1, 1.08);
+      keyLight.position.set(-4, 7, 5);
+      scene.add(ambientLight, keyLight);
 
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = false;
       controls.screenSpacePanning = true;
-      controls.minDistance = 0.05;
-      controls.maxDistance = 1_000;
+      controls.minZoom = 0.35;
+      controls.maxZoom = 12;
 
       const render = () => renderer.render(scene, camera);
       controls.addEventListener("change", render);
@@ -73,17 +73,30 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
         controls,
         model: null,
         grid: null,
+        viewHeight: 2,
+        updateProjection: null,
         resetView: null,
         render,
       };
       engineRef.current = engine;
 
+      const updateProjection = () => {
+        const width = Math.max(1, mount.clientWidth);
+        const height = Math.max(1, mount.clientHeight);
+        const halfHeight = Math.max(engine.viewHeight, 0.001) / 2;
+        const halfWidth = halfHeight * (width / height);
+        camera.left = -halfWidth;
+        camera.right = halfWidth;
+        camera.top = halfHeight;
+        camera.bottom = -halfHeight;
+        camera.updateProjectionMatrix();
+      };
+      engine.updateProjection = updateProjection;
       const resize = () => {
         const width = Math.max(1, mount.clientWidth);
         const height = Math.max(1, mount.clientHeight);
         renderer.setSize(width, height, false);
-        camera.aspect = width / height;
-        camera.updateProjectionMatrix();
+        updateProjection();
         render();
       };
       resizeObserver = new ResizeObserver(resize);
@@ -142,7 +155,7 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
     disposeModel(engine);
 
     const geometry = new THREE.BoxGeometry(1, 1, 1);
-    const material = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    const material = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
     const model = new THREE.InstancedMesh(geometry, material, data.voxels.length);
     model.instanceMatrix.setUsage(THREE.StaticDrawUsage);
     const transform = new THREE.Object3D();
@@ -183,18 +196,18 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
     engine.grid = grid;
 
     const resetView = () => {
-      const distance = Math.max(diameter * 1.35, 0.5);
+      const distance = Math.max(diameter * 3, 1);
       engine.camera.near = Math.max(distance / 2_000, 0.000_1);
       engine.camera.far = Math.max(distance * 50, 100);
       engine.camera.position.set(
-        center.x + distance * 0.82,
-        center.y + distance * 0.68,
-        center.z + distance * 0.9,
+        center.x + distance,
+        center.y + distance,
+        center.z + distance,
       );
-      engine.camera.updateProjectionMatrix();
+      engine.camera.zoom = 1;
+      engine.viewHeight = Math.max(diameter * 1.18, 0.35);
+      engine.updateProjection?.();
       engine.controls.target.copy(center);
-      engine.controls.minDistance = Math.max(diameter * 0.08, 0.02);
-      engine.controls.maxDistance = Math.max(diameter * 30, 20);
       engine.controls.update();
       engine.render?.();
     };
@@ -236,5 +249,6 @@ function disposeModel(engine: ViewerEngine) {
     engine.grid = null;
   }
   engine.resetView = null;
+  engine.updateProjection = null;
   engine.render = null;
 }

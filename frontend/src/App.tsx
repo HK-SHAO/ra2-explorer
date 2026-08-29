@@ -14,6 +14,7 @@ import {
   GameInstallation,
   MediaItem,
   MediaKind,
+  MediaSample,
   MediaSort,
   PlayerColor,
   Source,
@@ -41,7 +42,6 @@ type IconName =
   | "pause"
   | "play"
   | "popout"
-  | "refresh"
   | "search"
   | "settings"
   | "spark"
@@ -63,7 +63,6 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     pause: <><path d="M9 7v10M15 7v10" /></>,
     play: <path d="m9 7 8 5-8 5z" />,
     popout: <><path d="M13 4h7v7M20 4l-9 9" /><path d="M18 13v7H4V6h7" /></>,
-    refresh: <><path d="M20 11a8 8 0 0 0-14.8-4L3 10" /><path d="M3 5v5h5M4 13a8 8 0 0 0 14.8 4L21 14" /><path d="M21 19v-5h-5" /></>,
     search: <><circle cx="11" cy="11" r="7" /><path d="m16 16 5 5" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 9 19.37a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-1.55-1.03H3v-4h.08A1.7 1.7 0 0 0 4.63 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63a1.7 1.7 0 0 0 1-1.55V3h4v.08A1.7 1.7 0 0 0 15 4.63a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9a1.7 1.7 0 0 0 1.55 1.03H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z" /></>,
     spark: <><path d="m12 3 1.1 4.2L17 9l-3.9 1.8L12 15l-1.1-4.2L7 9l3.9-1.8z" /><path d="m19 15 .6 2.4L22 18.5l-2.4 1.1L19 22l-.6-2.4-2.4-1.1 2.4-1.1z" /></>,
@@ -271,16 +270,6 @@ function crcLabel(value: number | null) {
   return value === null ? "—" : value.toString(16).toUpperCase().padStart(8, "0");
 }
 
-function stateLabel(state: Source["state"]) {
-  return {
-    new: "等待扫描",
-    scanning: "扫描中",
-    ready: "索引就绪",
-    ready_with_errors: "部分就绪",
-    failed: "扫描失败",
-  }[state];
-}
-
 function assetIcon(format: string): IconName {
   if (["vxl", "hva"].includes(format)) return "unit";
   if (["shp", "tmp", "pcx"].includes(format)) return "image";
@@ -293,6 +282,7 @@ function assetIcon(format: string): IconName {
 }
 
 type LayoutMode = "list" | "grid";
+type DetailPlacement = "right" | "bottom";
 type EntitySort = "name_asc" | "name_desc" | "cost_desc" | "strength_desc";
 
 const audioFormats = ["bag_audio", "wav", "aud"];
@@ -316,22 +306,6 @@ const assetCategories: Array<{
 ];
 
 const entityKindOrder: EntityKind[] = ["vehicle", "aircraft", "infantry", "building"];
-
-const entityTagLabels: Record<string, string> = {
-  "body:vxl": "三维体素",
-  "body:shp": "帧动画",
-  "media:voice": "带语音",
-  "media:sound": "带音效",
-  "media:animation": "带动画",
-};
-
-function entityTagMatches(entity: EntitySummary, tag: string) {
-  if (!tag) return true;
-  const [group, value] = tag.split(":", 2);
-  if (group === "body") return entity.body_format === value;
-  if (group === "media") return (entity.media_kinds ?? []).includes(value as "voice" | "sound" | "animation");
-  return true;
-}
 
 function sortEntities(entities: EntitySummary[], sort: EntitySort) {
   const selected = [...entities];
@@ -381,14 +355,13 @@ function ExplorerApp() {
   const [layout, setLayout] = useState<LayoutMode>(() =>
     window.localStorage.getItem("ra2exp-layout") === "grid" ? "grid" : "list",
   );
+  const [detailPlacement, setDetailPlacement] = useState<DetailPlacement>(() =>
+    window.localStorage.getItem("ra2exp-detail-placement") === "right" ? "right" : "bottom",
+  );
   const [entities, setEntities] = useState<EntitySummary[]>([]);
   const [entityKinds, setEntityKinds] = useState<Array<{ kind: EntityKind; count: number }>>([]);
-  const [entityCountries, setEntityCountries] = useState<Array<{ id: string; display_name: string; side: string; count: number }>>([]);
-  const [entitySides, setEntitySides] = useState<Array<{ id: string; count: number }>>([]);
   const [entityKind, setEntityKind] = useState<EntityKind | "">("vehicle");
   const [entityQuery, setEntityQuery] = useState("");
-  const [entityTag, setEntityTag] = useState("");
-  const [entityCountry, setEntityCountry] = useState("");
   const [entitySide, setEntitySide] = useState("");
   const [entitySort, setEntitySort] = useState<EntitySort>("name_asc");
   const [selectedEntityId, setSelectedEntityId] = useState("");
@@ -442,23 +415,25 @@ function ExplorerApp() {
     () => entities.filter((entity) => !entityKind || entity.kind === entityKind),
     [entities, entityKind],
   );
-  const scopedEntities = useMemo(
-    () => kindEntities.filter((entity) =>
-      (!entitySide || entity.sides.includes(entitySide))
-      && (!entityCountry || entity.countries.includes(entityCountry))),
-    [kindEntities, entitySide, entityCountry],
-  );
+  const entitySideFacets = useMemo(() => Object.keys(sideLabels)
+    .map((id) => ({ id, count: kindEntities.filter((entity) => entity.sides.includes(id)).length }))
+    .filter((side) => side.count > 0), [kindEntities]);
   const visibleEntities = useMemo(
-    () => sortEntities(scopedEntities.filter((entity) => entityTagMatches(entity, entityTag)), entitySort),
-    [scopedEntities, entityTag, entitySort],
+    () => sortEntities(
+      kindEntities.filter((entity) => !entitySide || entity.sides.includes(entitySide)),
+      entitySort,
+    ),
+    [kindEntities, entitySide, entitySort],
   );
-  const entityTags = Object.keys(entityTagLabels)
-    .map((tag) => ({ tag, count: scopedEntities.filter((entity) => entityTagMatches(entity, tag)).length }))
-    .filter((item) => item.count > 0);
 
   function updateLayout(next: LayoutMode) {
     setLayout(next);
     window.localStorage.setItem("ra2exp-layout", next);
+  }
+
+  function updateDetailPlacement(next: DetailPlacement) {
+    setDetailPlacement(next);
+    window.localStorage.setItem("ra2exp-detail-placement", next);
   }
 
   function updateEnabledFormats(next: string[]) {
@@ -497,6 +472,12 @@ function ExplorerApp() {
   useEffect(() => {
     if (assetFormatTag && !categoryFormats.includes(assetFormatTag)) setAssetFormatTag("");
   }, [assetFormatTag, categoryFormats]);
+
+  useEffect(() => {
+    if (entitySide && !entitySideFacets.some((side) => side.id === entitySide)) {
+      setEntitySide("");
+    }
+  }, [entitySide, entitySideFacets]);
 
   useEffect(() => {
     if (view !== "entities" || entityLoading) return;
@@ -638,8 +619,6 @@ function ExplorerApp() {
           if (cancelled) return;
           setEntities(page.items);
           setEntityKinds(page.kinds);
-          setEntityCountries(page.countries);
-          setEntitySides(page.sides);
           setSelectedEntityId((current) =>
             page.items.some((entity) => entity.id === current)
               ? current
@@ -797,19 +776,6 @@ function ExplorerApp() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <div className="brand">
-          <div className="brand-mark" aria-hidden="true"><span>R</span><i /></div>
-          <div><strong>RA2 Explorer</strong></div>
-        </div>
-        <div className="topbar-actions">
-          {activeSource && <span className={`source-status ${activeSource.state}`}><i />{stateLabel(activeSource.state)}</span>}
-          <button className="button ghost compact" onClick={openAddSource}><Icon name="folder" />添加目录</button>
-          <button className="button ghost compact settings-button" onClick={() => setSettingsOpen(true)}><Icon name="settings" />显示设置</button>
-          <button className="button primary compact" disabled={busy || !activeSource} onClick={() => activeSource && runAction(() => api.scanSource(activeSource.id), "目录索引已更新")}><Icon name="refresh" />重新扫描</button>
-        </div>
-      </header>
-
       {sources.length === 0 ? (
         <EmptyLibrary
           busy={busy}
@@ -821,8 +787,12 @@ function ExplorerApp() {
           )}
         />
       ) : (
-        <main className="workspace">
+        <main className={`workspace detail-${detailPlacement}`}>
           <aside className="source-panel panel">
+            <div className="sidebar-brand">
+              <div className="brand-mark" aria-hidden="true"><span>R</span><i /></div>
+              <strong>RA2 Explorer</strong>
+            </div>
             {sources.length > 1 && <section className="source-heading">
               <label className="source-select-wrap">
                 <select value={sourceId} onChange={(event) => setSourceId(event.target.value)} aria-label="选择资料库">
@@ -864,7 +834,7 @@ function ExplorerApp() {
                 </button>
               ))}
             </nav>
-
+            <button className="sidebar-settings" type="button" onClick={() => setSettingsOpen(true)}><Icon name="settings" />显示设置</button>
           </aside>
 
           {view === "assets" ? <>{isMediaCategory ? <MediaListPanel
@@ -936,7 +906,8 @@ function ExplorerApp() {
             playerColors={playerColors}
             previewUrl={previewUrl}
             associations={associations}
-            onPopout={() => window.open(`/?detail=asset&asset_id=${encodeURIComponent(selectedId)}`, `ra2exp-asset-${selectedId}`, "popup=yes,width=560,height=900")}
+            wide={detailPlacement === "bottom"}
+            onPopout={() => window.open(`/?detail=asset&asset_id=${encodeURIComponent(selectedId)}`, `ra2exp-asset-${selectedId}`, "popup=yes,width=1100,height=780")}
           />
           </> : <>
             <EntityListPanel
@@ -945,18 +916,12 @@ function ExplorerApp() {
               loading={entityLoading}
               query={entityQuery}
               setQuery={setEntityQuery}
-              tags={entityTags}
-              selectedTag={entityTag}
-              setSelectedTag={setEntityTag}
               sort={entitySort}
               setSort={setEntitySort}
               selectedId={selectedEntityId}
               setSelectedId={setSelectedEntityId}
               sourceId={sourceId}
-              countries={entityCountries}
-              sides={entitySides}
-              selectedCountry={entityCountry}
-              setSelectedCountry={setEntityCountry}
+              sides={entitySideFacets}
               selectedSide={entitySide}
               setSelectedSide={setEntitySide}
               layout={layout}
@@ -967,14 +932,15 @@ function ExplorerApp() {
               entity={selectedEntity}
               loading={entityDetailLoading}
               playerColors={playerColors}
-              onPopout={() => window.open(`/?detail=entity&source_id=${encodeURIComponent(sourceId)}&entity_id=${encodeURIComponent(selectedEntityId)}`, `ra2exp-entity-${selectedEntityId}`, "popup=yes,width=560,height=900")}
+              wide={detailPlacement === "bottom"}
+              onPopout={() => window.open(`/?detail=entity&source_id=${encodeURIComponent(sourceId)}&entity_id=${encodeURIComponent(selectedEntityId)}`, `ra2exp-entity-${selectedEntityId}`, "popup=yes,width=1100,height=780")}
             />
           </>}
         </main>
       )}
 
       {addOpen && <AddSourceDialog discoveries={discovery.candidates} busy={busy} onClose={() => setAddOpen(false)} onSubmit={async (path, name) => { await runAction(() => api.addSource(path, name), "资源目录已导入"); setAddOpen(false); }} />}
-      {settingsOpen && <FormatSettingsDialog formats={stats.formats} enabled={enabledFormats} onChange={updateEnabledFormats} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <FormatSettingsDialog formats={stats.formats} enabled={enabledFormats} onChange={updateEnabledFormats} detailPlacement={detailPlacement} onDetailPlacementChange={updateDetailPlacement} onClose={() => setSettingsOpen(false)} />}
       {error && <div className="toast error" role="alert"><Icon name="info" /><span>{error}</span><button onClick={() => setError("")} aria-label="关闭"><Icon name="close" size={15} /></button></div>}
       {notice && <div className="toast success" role="status"><span className="check">✓</span><span>{notice}</span></div>}
     </div>
@@ -1027,6 +993,20 @@ function AssetGridCard({ asset, selected, onSelect }: { asset: Asset; selected: 
   );
 }
 
+function mediaPrimaryText(item: MediaItem) {
+  return item.localized_texts[0]
+    || item.description
+    || item.original_texts[0]
+    || item.asset.display_name;
+}
+
+function mediaSecondaryText(item: MediaItem) {
+  const primary = mediaPrimaryText(item);
+  return [item.original_texts.find((text) => text !== primary), item.asset.display_name]
+    .filter((text): text is string => Boolean(text))
+    .join(" · ");
+}
+
 function MediaListPanel({ items, total, loading, query, setQuery, groups, selectedGroup, setSelectedGroup, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore }: {
   items: MediaItem[];
   total: number;
@@ -1064,40 +1044,34 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
       <div className={`asset-list ${layout === "grid" ? "asset-grid media-grid" : ""}`} tabIndex={0} aria-label="声音列表" onScroll={(event) => { const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void onLoadMore(); }}>
         {layout === "list" ? items.map((item) => <button key={item.asset.id} className={`asset-row media-row ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onClick={() => onSelect(item.asset.id)}>
           <span className="file-icon format-audio"><Icon name={playingId === item.asset.id ? "pause" : "play"} /></span>
-          <span className="asset-main"><strong>{item.description || item.asset.display_name}</strong><small>{item.asset.display_name}{item.texts.length > 1 ? ` · ${item.texts.length} 条文本` : ""}</small></span>
+          <span className="asset-main"><strong>{mediaPrimaryText(item)}</strong><small>{mediaSecondaryText(item)}{item.texts.length > 1 ? ` · ${item.texts.length} 条文本` : ""}</small></span>
           <span className="media-links">{item.entities.slice(0, 2).map((entity) => entity.display_name).join(" · ") || item.events.slice(0, 2).join(" · ") || "未关联"}</span>
           <Icon name="chevron" size={15} />
         </button>) : items.map((item) => <button key={item.asset.id} className={`asset-card media-card ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onClick={() => onSelect(item.asset.id)}>
           <span className="asset-card-preview format-audio"><span className="audio-glyph" aria-hidden="true">{[4, 11, 7, 17, 12, 20, 9, 14, 5, 10].map((height, index) => <i key={index} style={{ height }} />)}</span><Icon name={playingId === item.asset.id ? "pause" : "play"} size={20} /></span>
-          <span className="asset-card-copy"><strong title={item.description || item.asset.display_name}>{item.description || item.asset.display_name}</strong><small>{item.asset.display_name}</small></span>
+          <span className="asset-card-copy"><strong title={mediaPrimaryText(item)}>{mediaPrimaryText(item)}</strong><small title={mediaSecondaryText(item)}>{mediaSecondaryText(item)}</small></span>
         </button>)}
         {items.length < total && <button className="load-more" disabled={loading} onClick={() => void onLoadMore()}>{loading ? "正在载入…" : `载入更多（剩余 ${(total - items.length).toLocaleString("zh-CN")}）`}</button>}
         {loading && items.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在建立声音关联…</strong></div>}
         {!loading && items.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的声音</strong><button onClick={() => { setQuery(""); setSelectedGroup(""); }}>清除筛选</button></div>}
       </div>
-      {playing && <div className="media-now-playing"><div><Icon name="play" /><span><strong>{playing.description || playing.asset.display_name}</strong><small>{playing.asset.display_name}</small></span></div><audio key={playing.asset.id} controls autoPlay preload="metadata" src={api.mediaUrl(playing.asset.id)} onEnded={() => undefined} /></div>}
+      {playing && <div className="media-now-playing"><div><Icon name="play" /><span><strong>{mediaPrimaryText(playing)}</strong><small>{mediaSecondaryText(playing)}</small></span></div><audio key={playing.asset.id} controls autoPlay preload="metadata" src={api.mediaUrl(playing.asset.id)} onEnded={() => undefined} /></div>}
     </section>
   );
 }
 
-function EntityListPanel({ entities, total, loading, query, setQuery, tags, selectedTag, setSelectedTag, sort, setSort, selectedId, setSelectedId, sourceId, countries, sides, selectedCountry, setSelectedCountry, selectedSide, setSelectedSide, layout, setLayout }: {
+function EntityListPanel({ entities, total, loading, query, setQuery, sort, setSort, selectedId, setSelectedId, sourceId, sides, selectedSide, setSelectedSide, layout, setLayout }: {
   entities: EntitySummary[];
   total: number;
   loading: boolean;
   query: string;
   setQuery: (value: string) => void;
-  tags: Array<{ tag: string; count: number }>;
-  selectedTag: string;
-  setSelectedTag: (value: string) => void;
   sort: EntitySort;
   setSort: (value: EntitySort) => void;
   selectedId: string;
   setSelectedId: (id: string) => void;
   sourceId: string;
-  countries: Array<{ id: string; display_name: string; side: string; count: number }>;
   sides: Array<{ id: string; count: number }>;
-  selectedCountry: string;
-  setSelectedCountry: (value: string) => void;
   selectedSide: string;
   setSelectedSide: (value: string) => void;
   layout: LayoutMode;
@@ -1111,16 +1085,8 @@ function EntityListPanel({ entities, total, loading, query, setQuery, tags, sele
         <LayoutToggle layout={layout} onChange={setLayout} />
       </div>
       <div className="filter-strip">
-        <div className="entity-filter-groups">
-          <div className="tag-filter" role="group" aria-label="按阵营筛选">
-            {sides.map((side) => <button key={side.id} className={selectedSide === side.id ? "active" : ""} onClick={() => { const next = selectedSide === side.id ? "" : side.id; setSelectedSide(next); if (next && countries.find((country) => country.id === selectedCountry)?.side !== next) setSelectedCountry(""); }}>{sideLabels[side.id] || side.id}<em>{side.count}</em></button>)}
-          </div>
-          <div className="tag-filter" role="group" aria-label="按国家筛选">
-            {countries.filter((country) => !selectedSide || country.side === selectedSide).map((country) => <button key={country.id} className={selectedCountry === country.id ? "active" : ""} onClick={() => setSelectedCountry(selectedCountry === country.id ? "" : country.id)}>{country.display_name}<em>{country.count}</em></button>)}
-          </div>
-          <div className="tag-filter" role="group" aria-label="按单位特征筛选">
-            {tags.map((item) => <button key={item.tag} className={selectedTag === item.tag ? "active" : ""} onClick={() => setSelectedTag(selectedTag === item.tag ? "" : item.tag)}>{entityTagLabels[item.tag]}<em>{item.count}</em></button>)}
-          </div>
+        <div className="tag-filter" role="group" aria-label="按阵营筛选">
+          {sides.map((side) => <button key={side.id} className={selectedSide === side.id ? "active" : ""} onClick={() => setSelectedSide(selectedSide === side.id ? "" : side.id)}>{sideLabels[side.id] || side.id}<em>{side.count}</em></button>)}
         </div>
         <label className="sort-control"><span>排序</span><select value={sort} onChange={(event) => setSort(event.target.value as EntitySort)}>
           <option value="name_asc">名称 A–Z</option>
@@ -1141,7 +1107,7 @@ function EntityListPanel({ entities, total, loading, query, setQuery, tags, sele
           </button>
         )) : entities.map((entity) => <EntityGridCard key={entity.id} entity={entity} sourceId={sourceId} selected={selectedId === entity.id} onSelect={setSelectedId} />)}
         {loading && entities.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在解析规则实体…</strong></div>}
-        {!loading && entities.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的单位</strong><button onClick={() => { setQuery(""); setSelectedTag(""); setSelectedCountry(""); setSelectedSide(""); }}>清除筛选</button></div>}
+        {!loading && entities.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的单位</strong><button onClick={() => { setQuery(""); setSelectedSide(""); }}>清除筛选</button></div>}
       </div>
     </section>
   );
@@ -1162,11 +1128,31 @@ function FrameGrid({ count, active, onSelect, urlFor }: { count: number; active:
   return <div className="frame-grid" aria-label="全部动画帧">{Array.from({ length: count }, (_, index) => <button type="button" key={index} className={active === index ? "active" : ""} onClick={() => onSelect(index)}><img loading="lazy" src={urlFor(index)} alt={`第 ${index + 1} 帧`} /><span>{index + 1}</span></button>)}</div>;
 }
 
-function EntityDetailPanel({ sourceId, entity, loading, playerColors, onPopout }: {
+function EntitySoundSample({ sample }: { sample: MediaSample }) {
+  const originalText = sample.original_text || sample.text;
+  const localizedText = sample.localized_text && sample.localized_text !== originalText
+    ? sample.localized_text
+    : null;
+  return <div className="media-sample">
+    <div className="media-sample-main">
+      <span><strong>{sample.asset?.display_name || sample.name}</strong>{sample.asset?.display_name !== sample.name && <code>{sample.name}</code>}</span>
+      {sample.asset && audioFormats.includes(sample.asset.format)
+        ? <audio controls preload="none" src={api.mediaUrl(sample.asset.id)} />
+        : <em>音频未解析</em>}
+    </div>
+    <div className="media-sample-text">
+      <span><b>原文</b>{originalText || "暂无文本"}</span>
+      <span><b>中文</b>{localizedText || "暂无译文"}</span>
+    </div>
+  </div>;
+}
+
+function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = false, onPopout }: {
   sourceId: string;
   entity: GameEntity | null;
   loading: boolean;
   playerColors: PlayerColor[];
+  wide?: boolean;
   onPopout?: () => void;
 }) {
   const [frame, setFrame] = useState(0);
@@ -1174,6 +1160,11 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, onPopout }
   const [playerColor, setPlayerColor] = useState("");
   const [playing, setPlaying] = useState(false);
   const [frameMode, setFrameMode] = useState<"sequence" | "grid">("sequence");
+  const [associationLayout, setAssociationLayout] = useState<LayoutMode>("list");
+  const [activeAnimation, setActiveAnimation] = useState<{ event: string; sample: MediaSample } | null>(null);
+  const [animationMetadata, setAnimationMetadata] = useState<AssetMetadata | null>(null);
+  const [animationFrame, setAnimationFrame] = useState(0);
+  const [animationPlaying, setAnimationPlaying] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
   const frameCount = Math.max(1, entity?.preview.frame_count || 1);
 
@@ -1183,6 +1174,10 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, onPopout }
     setPlayerColor("");
     setPlaying(false);
     setFrameMode("sequence");
+    setActiveAnimation(null);
+    setAnimationMetadata(null);
+    setAnimationFrame(0);
+    setAnimationPlaying(false);
     setPreviewFailed(false);
   }, [entity?.id]);
 
@@ -1200,59 +1195,115 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, onPopout }
 
   useEffect(() => setPreviewFailed(false), [previewUrl]);
 
+  useEffect(() => {
+    setAnimationMetadata(null);
+    setAnimationFrame(0);
+    setAnimationPlaying(false);
+    if (!activeAnimation?.sample.asset) return;
+    let cancelled = false;
+    api.metadata(activeAnimation.sample.asset.id)
+      .then((nextMetadata) => {
+        if (cancelled) return;
+        setAnimationMetadata(nextMetadata);
+        setAnimationPlaying((nextMetadata.frame_count || 1) > 1);
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [activeAnimation]);
+
+  useEffect(() => {
+    const animationFrameCount = animationMetadata?.frame_count || 1;
+    if (!animationPlaying || animationFrameCount < 2) return;
+    const timer = window.setInterval(
+      () => setAnimationFrame((current) => (current + 1) % animationFrameCount),
+      140,
+    );
+    return () => window.clearInterval(timer);
+  }, [animationPlaying, animationMetadata]);
+
   if (loading) return <aside className="detail-panel panel empty-detail"><div className="radar small"><span /></div><strong>正在读取单位详情…</strong></aside>;
   if (!entity) return <aside className="detail-panel panel empty-detail"><div className="empty-detail-icon"><Icon name="unit" size={30} /></div><strong>选择单位</strong></aside>;
   const rules = Object.entries(entity.rules).filter(([key]) => ruleLabels[key]);
+  const soundAssociations = entity.media.filter((association) => association.kind !== "animation");
+  const animationAssociations = entity.media.filter((association) => association.kind === "animation");
+  const soundCount = soundAssociations.reduce((count, association) => count + association.samples.length, 0);
+  const associatedAnimationCount = animationAssociations.reduce((count, association) => count + association.samples.length, 0);
+  const animationCount = associatedAnimationCount + (frameCount > 1 ? 1 : 0);
+  const activeAnimationAsset = activeAnimation?.sample.asset || null;
+  const activeAnimationFrameCount = animationMetadata?.frame_count || 1;
+  const entityTags = [
+    entityKindLabels[entity.kind],
+    entity.voxel ? "VXL 三维模型" : "SHP 帧动画",
+    ...entity.sides.map((side) => sideLabels[side] || side),
+    ...entity.countries,
+    `${entity.component_count} 个组件`,
+    ...(entity.preview.frame_count > 1 ? [`${entity.preview.frame_count} 个有效帧`] : []),
+    ...(entity.preview.source_frame_count !== undefined && entity.preview.source_frame_count !== entity.preview.frame_count
+      ? [`源文件 ${entity.preview.source_frame_count} 帧`]
+      : []),
+    ...(entity.preview.voxel_count !== undefined
+      ? [`${entity.preview.voxel_count.toLocaleString("zh-CN")} 体素`]
+      : []),
+  ];
   const dependencyGroups = [...new Set(entity.dependencies.map((item) => item.slot))].map(
     (slot) => ({ slot, items: entity.dependencies.filter((item) => item.slot === slot) }),
   );
   return (
-    <aside className="detail-panel entity-detail panel">
-      <div className="detail-title"><div><h2 title={entity.display_name}>{entity.display_name}</h2><small>{entity.id} · {entity.internal_name}</small></div>{onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}</div>
+    <aside className={`detail-panel entity-detail panel ${wide ? "entity-detail-wide" : "entity-detail-narrow"}`}>
+      <div className="detail-title"><div><h2 title={entity.display_name}>{entity.display_name}</h2><small>{entity.id} · {entity.internal_name}</small></div><div className="detail-actions"><LayoutToggle layout={associationLayout} onChange={setAssociationLayout} />{onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}</div></div>
 
-      {entity.renderable ? <div className="preview-block entity-preview">
-        {frameMode === "grid" && frameCount > 1
-          ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing, playerColor, scale: 3 })} />
-          : entity.voxel
-          ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} />
-          : <div className="preview-stage shp"><div className="preview-rulers horizontal" /><div className="preview-rulers vertical" />{previewFailed ? <div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div> : <img key={previewUrl} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} />}</div>}
-        {frameCount > 1 && <div className="frame-controls">
-          {frameMode === "sequence" && <><button className="play-button" onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={frameCount - 1} value={Math.min(frame, frameCount - 1)} onChange={(event) => setFrame(Number(event.target.value))} aria-label="当前动画帧" /><span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(frameCount).padStart(2, "0")}</span></>}
-          <div className="frame-mode-toggle"><button className={frameMode === "sequence" ? "active" : ""} onClick={() => setFrameMode("sequence")} title="顺序播放"><Icon name="play" size={14} /></button><button className={frameMode === "grid" ? "active" : ""} onClick={() => { setPlaying(false); setFrameMode("grid"); }} title="全部帧"><Icon name="grid" size={14} /></button></div>
-        </div>}
-        <div className="entity-render-options compact-render-options">
-          {!entity.voxel && entity.preview.supports_facing && <label><span>朝向</span><select value={facing} onChange={(event) => setFacing(Number(event.target.value))}>{Array.from({ length: 8 }, (_, index) => <option key={index} value={index}>{index * 45}°</option>)}</select></label>}
-          {entity.preview.supports_player_color && <label><span>阵营色</span><select value={playerColor} onChange={(event) => setPlayerColor(event.target.value)}><option value="">原始色</option>{playerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
+      <div className="entity-detail-body">
+        <div className="entity-preview-column">
+          {entity.renderable ? <div className="preview-block entity-preview">
+            {activeAnimationAsset?.format === "shp"
+              ? <div className="preview-stage shp entity-effect-stage"><div className="preview-rulers horizontal" /><div className="preview-rulers vertical" /><img key={`${activeAnimationAsset.id}-${animationFrame}-${playerColor}`} src={api.previewUrl(activeAnimationAsset.id, animationFrame, "", 5, playerColor)} alt={`${activeAnimation?.event || "关联动画"} 预览`} /></div>
+              : activeAnimationAsset && ["vxl", "hva"].includes(activeAnimationAsset.format)
+                ? <VoxelPreview url={api.assetModelUrl(activeAnimationAsset.id, animationFrame, playerColor)} label={activeAnimation?.event || activeAnimationAsset.display_name} />
+                : frameMode === "grid" && frameCount > 1
+                  ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing, playerColor, scale: 3 })} />
+                  : entity.voxel
+                    ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} />
+                    : <div className="preview-stage shp"><div className="preview-rulers horizontal" /><div className="preview-rulers vertical" />{previewFailed ? <div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div> : <img key={previewUrl} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} />}</div>}
+            {activeAnimationAsset && activeAnimationFrameCount > 1
+              ? <div className="frame-controls"><button className="play-button" onClick={() => setAnimationPlaying(!animationPlaying)} aria-label={animationPlaying ? "暂停" : "播放"}><Icon name={animationPlaying ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={activeAnimationFrameCount - 1} value={animationFrame} onChange={(event) => setAnimationFrame(Number(event.target.value))} aria-label="关联动画帧" /><span>{String(animationFrame + 1).padStart(2, "0")} <i>/</i> {String(activeAnimationFrameCount).padStart(2, "0")}</span></div>
+              : !activeAnimationAsset && frameCount > 1 && <div className="frame-controls">
+                {frameMode === "sequence" && <><button className="play-button" onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={frameCount - 1} value={Math.min(frame, frameCount - 1)} onChange={(event) => setFrame(Number(event.target.value))} aria-label="当前动画帧" /><span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(frameCount).padStart(2, "0")}</span></>}
+                <div className="frame-mode-toggle"><button className={frameMode === "sequence" ? "active" : ""} onClick={() => setFrameMode("sequence")} title="顺序播放"><Icon name="play" size={14} /></button><button className={frameMode === "grid" ? "active" : ""} onClick={() => { setPlaying(false); setFrameMode("grid"); }} title="全部帧"><Icon name="grid" size={14} /></button></div>
+              </div>}
+            {activeAnimationAsset && <button type="button" className="return-body-action" onClick={() => { setActiveAnimation(null); setPlaying(frameCount > 1); }}>返回主体动作</button>}
+            <div className="entity-render-options compact-render-options">
+              {!entity.voxel && entity.preview.supports_facing && <label><span>朝向</span><select value={facing} onChange={(event) => setFacing(Number(event.target.value))}>{Array.from({ length: 8 }, (_, index) => <option key={index} value={index}>{index * 45}°</option>)}</select></label>}
+              {entity.preview.supports_player_color && <label title="选择玩家颜色"><select aria-label="玩家颜色" value={playerColor} onChange={(event) => setPlayerColor(event.target.value)}><option value="">原始色</option>{playerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
+            </div>
+          </div> : <div className="unsupported-preview"><Icon name="unit" size={34} /><strong>缺少主体资产</strong></div>}
         </div>
-      </div> : <div className="unsupported-preview"><Icon name="unit" size={34} /><strong>缺少主体资产</strong></div>}
 
-      {entity.media.length > 0 && <details className="entity-section compact-section" open>
-        <summary><span>关联声音与动画</span><em>{entity.media.length}</em></summary>
-        <div className="media-association-list">
-          {entity.media.map((association) => <article key={`${association.kind}-${association.slot}-${association.event}`}>
-            {association.samples.map((sample) => <div className="media-sample" key={`${association.event}-${sample.name}`}>
-              <span className="media-sample-label"><b>{mediaSlotLabels[association.slot] || association.slot}</b><code>{association.event}</code><strong>{sample.name}</strong></span>
-              {sample.asset && audioFormats.includes(sample.asset.format)
-                && <audio controls preload="none" src={api.mediaUrl(sample.asset.id)} />}
-              {sample.asset && !audioFormats.includes(sample.asset.format)
-                && <a href={api.contentUrl(sample.asset.id)}>{sample.asset.display_name}</a>}
-              {sample.text && <p>{sample.text}</p>}
-            </div>)}
+        <div className="entity-detail-sections">
+      {soundCount > 0 && <details className="entity-section compact-section entity-sounds" open>
+        <summary><span>关联声音</span><em>{soundCount}</em></summary>
+        <div className={`media-association-list ${associationLayout === "grid" ? "media-association-grid" : ""}`}>
+          {soundAssociations.map((association) => <article key={`${association.kind}-${association.slot}-${association.event}`}>
+            <header><strong>{mediaSlotLabels[association.slot] || association.slot}</strong><code>{association.event}</code><em>{association.samples.length}</em></header>
+            <div>{association.samples.map((sample, index) => <EntitySoundSample sample={sample} key={`${association.event}-${sample.name}-${index}`} />)}</div>
           </article>)}
         </div>
       </details>}
 
-      <details className="entity-section compact-section entity-tag-section">
-        <summary><span>标签</span><em>{2 + entity.countries.length + entity.sides.length}</em></summary>
+      {animationCount > 0 && <details className="entity-section compact-section entity-animations" open>
+        <summary><span>关联动画</span><em>{animationCount}</em></summary>
+        <div className={`animation-association-list ${associationLayout === "grid" ? "animation-association-grid" : ""}`}>
+          {frameCount > 1 && <button type="button" className={!activeAnimation ? "active" : ""} onClick={() => { setActiveAnimation(null); setFrameMode("sequence"); setPlaying(true); }}><span className="animation-thumbnail body-action"><Icon name="unit" size={24} /></span><span><strong>主体动作</strong><small>{frameCount} 帧 · 在主视图播放</small></span><Icon name="play" size={16} /></button>}
+          {animationAssociations.flatMap((association) => association.samples.map((sample, index) => <button type="button" disabled={!sample.asset} className={activeAnimation?.event === association.event && activeAnimation.sample.name === sample.name ? "active" : ""} onClick={() => sample.asset && setActiveAnimation({ event: association.event, sample })} key={`${association.event}-${sample.name}-${index}`}>
+            <span className="animation-thumbnail">{sample.asset && ["shp", "tmp", "pcx"].includes(sample.asset.format) ? <img loading="lazy" src={api.previewUrl(sample.asset.id, 0, "", 2, playerColor)} alt="" /> : <Icon name="image" size={24} />}</span>
+            <span><strong>{mediaSlotLabels[association.slot] || association.slot}</strong><small>{association.event}{sample.asset ? ` · ${sample.name}` : " · 未解析"}</small></span><Icon name="play" size={16} />
+          </button>))}
+        </div>
+      </details>}
+
+      <details className="entity-section compact-section entity-tag-section" open>
+        <summary><span>标签</span><em>{entityTags.length}</em></summary>
         <div className="entity-tags" aria-label="单位资源摘要">
-          <span>{entityKindLabels[entity.kind]}</span>
-          <span>{entity.voxel ? "VXL 三维模型" : "SHP 帧动画"}</span>
-          {entity.sides.map((side) => <span key={side}>{sideLabels[side] || side}</span>)}
-          {entity.countries.map((country) => <span key={country}>{country}</span>)}
-          <span>{entity.component_count} 个组件</span>
-          {entity.preview.frame_count > 1 && <span>{entity.preview.frame_count} 个有效帧</span>}
-          {entity.preview.source_frame_count !== undefined && entity.preview.source_frame_count !== entity.preview.frame_count && <span>源文件 {entity.preview.source_frame_count} 帧</span>}
-          {entity.preview.voxel_count !== undefined && <span>{entity.preview.voxel_count.toLocaleString("zh-CN")} 体素</span>}
+          {entityTags.map((tag, index) => <span key={`${tag}-${index}`}>{tag}</span>)}
         </div>
       </details>
 
@@ -1292,11 +1343,13 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, onPopout }
           </span>)}
         </div>
       </details>
+        </div>
+      </div>
     </aside>
   );
 }
 
-function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, frame, setFrame, playing, setPlaying, palettes, paletteId, setPaletteId, playerColors, previewUrl, associations, onPopout }: {
+function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, frame, setFrame, playing, setPlaying, palettes, paletteId, setPaletteId, playerColors, previewUrl, associations, wide = false, onPopout }: {
   asset: Asset | null;
   metadata: AssetMetadata | null;
   textAsset: TextAsset | null;
@@ -1312,6 +1365,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   playerColors: PlayerColor[];
   previewUrl: string;
   associations: AssetAssociationPage | null;
+  wide?: boolean;
   onPopout?: () => void;
 }) {
   const [playerColor, setPlayerColor] = useState("");
@@ -1334,8 +1388,10 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   const activeLimb = metadata?.limbs?.[frame];
   const hasFrameControl = ["shp", "tmp", "hva"].includes(asset.format) && frameCount > 1;
   const canChoosePalette = ["shp", "vxl", "hva", "tmp"].includes(asset.format) && palettes.length > 0;
+  const originalTexts = [...new Set((associations?.items || []).map((item) => item.original_text || item.text).filter((item): item is string => Boolean(item)))];
+  const localizedTexts = [...new Set((associations?.items || []).map((item) => item.localized_text).filter((item): item is string => Boolean(item)))];
   return (
-    <aside className="detail-panel panel">
+    <aside className={`detail-panel asset-detail panel ${wide ? "detail-panel-wide" : "detail-panel-narrow"}`}>
       <div className="detail-title"><div><span className="format-pill">{formatLabels[asset.format] || asset.format.toUpperCase()}</span><h2 title={asset.display_name}>{asset.display_name}</h2></div><div className="detail-actions">{onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}<a className="icon-button" href={api.contentUrl(asset.id)} title="导出原始文件" aria-label="导出原始文件"><Icon name="download" /></a></div></div>
 
       {isModel && <div className="preview-block">
@@ -1381,14 +1437,15 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
           <span>{mediaSlotLabels[item.slot] || item.slot}</span>
           <strong>{item.entity?.display_name || item.event}</strong>
           {item.entity && <code>{item.event}</code>}
-          {item.text && <p>{item.text}</p>}
+          {(item.original_text || item.text) && <p><b>原文</b>{item.original_text || item.text}</p>}
+          {item.localized_text && item.localized_text !== (item.original_text || item.text) && <p><b>中文</b>{item.localized_text}</p>}
         </article>)}</div>
       </div>}
 
       {!canPreview && !isText && !isAudio && !isModel && asset.format !== "video" && <div className="unsupported-preview"><Icon name={assetIcon(asset.format)} size={34} /><strong>{formatLabels[asset.format] || asset.format.toUpperCase()}</strong></div>}
 
       {(canChoosePalette || isModel) && <div className="entity-render-options asset-render-options">
-        {isModel && <label><span>阵营色</span><select value={playerColor} onChange={(event) => setPlayerColor(event.target.value)}><option value="">原始色</option>{playerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
+        {isModel && <label title="选择玩家颜色"><select aria-label="玩家颜色" value={playerColor} onChange={(event) => setPlayerColor(event.target.value)}><option value="">原始色</option>{playerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
         {canChoosePalette && <label><span>配色表</span><select value={paletteId} onChange={(event) => setPaletteId(event.target.value)}><option value="">自动</option>{palettes.map((palette) => <option key={palette.id} value={palette.id}>{palette.display_name}</option>)}</select></label>}
       </div>}
 
@@ -1409,6 +1466,8 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
           {metadata?.entry_count !== undefined && <div><dt>配置结构</dt><dd>{metadata.section_count} 节 · {metadata.entry_count} 项</dd></div>}
           {metadata?.encoding && <div><dt>文本编码</dt><dd>{metadata.encoding}</dd></div>}
           {metadata?.duration_seconds !== undefined && <div><dt>音频</dt><dd>{formatDuration(metadata.duration_seconds)} · {metadata.sample_rate?.toLocaleString("zh-CN")} Hz · {metadata.bits_per_sample} bit</dd></div>}
+          {isAudio && <div><dt>原文文本</dt><dd className="metadata-text">{originalTexts.join("\n") || "—"}</dd></div>}
+          {isAudio && <div><dt>中文文本</dt><dd className="metadata-text">{localizedTexts.join("\n") || "—"}</dd></div>}
           <div><dt>来源</dt><dd>{asset.storage_kind === "loose" ? "松散文件" : asset.storage_kind === "bag" ? "音频包" : "MIX 归档"}</dd></div>
           {asset.crc !== null && <div><dt>CRC</dt><dd className="mono">{crcLabel(asset.crc)}</dd></div>}
           <div><dt>识别</dt><dd>{asset.confidence === "name" ? "名称库匹配" : asset.confidence === "content" ? "内容探测" : asset.confidence === "filename" ? "文件名" : asset.confidence === "index" ? "音频索引" : "未知"}</dd></div>
@@ -1419,10 +1478,12 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   );
 }
 
-function FormatSettingsDialog({ formats, enabled, onChange, onClose }: {
+function FormatSettingsDialog({ formats, enabled, onChange, detailPlacement, onDetailPlacementChange, onClose }: {
   formats: Stats["formats"];
   enabled: string[];
   onChange: (formats: string[]) => void;
+  detailPlacement: DetailPlacement;
+  onDetailPlacementChange: (placement: DetailPlacement) => void;
   onClose: () => void;
 }) {
   const enabledSet = new Set(enabled);
@@ -1440,7 +1501,14 @@ function FormatSettingsDialog({ formats, enabled, onChange, onClose }: {
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="dialog format-settings" role="dialog" aria-modal="true" aria-labelledby="format-settings-title">
-        <div className="dialog-header"><div className="dialog-icon"><Icon name="settings" /></div><div><h2 id="format-settings-title">显示与载入</h2></div><button type="button" onClick={onClose} aria-label="关闭"><Icon name="close" /></button></div>
+        <div className="dialog-header"><div className="dialog-icon"><Icon name="settings" /></div><div><h2 id="format-settings-title">显示设置</h2></div><button type="button" onClick={onClose} aria-label="关闭"><Icon name="close" /></button></div>
+        <section className="detail-placement-setting">
+          <strong>详情布局</strong>
+          <div className="layout-choice" role="group" aria-label="详情区域布局">
+            <button type="button" className={detailPlacement === "bottom" ? "active" : ""} onClick={() => onDetailPlacementChange("bottom")}>上下</button>
+            <button type="button" className={detailPlacement === "right" ? "active" : ""} onClick={() => onDetailPlacementChange("right")}>左右</button>
+          </div>
+        </section>
         <div className="format-settings-actions">
           <button type="button" onClick={() => onChange(available.filter((item) => defaultVisibleFormats.includes(item)))}>常用素材</button>
           <button type="button" onClick={() => onChange(available)}>全部启用</button>
@@ -1494,7 +1562,7 @@ function DetachedEntityDetail({ sourceId, entityId }: { sourceId: string; entity
       })
       .catch((reason: Error) => setError(reason.message));
   }, [sourceId, entityId]);
-  return <main className="detached-shell">{error ? <div className="detached-error">{error}</div> : <EntityDetailPanel sourceId={sourceId} entity={entity} loading={!entity} playerColors={colors} />}</main>;
+  return <main className="detached-shell">{error ? <div className="detached-error">{error}</div> : <EntityDetailPanel sourceId={sourceId} entity={entity} loading={!entity} playerColors={colors} wide />}</main>;
 }
 
 function DetachedAssetDetail({ assetId }: { assetId: string }) {
@@ -1540,7 +1608,7 @@ function DetachedAssetDetail({ assetId }: { assetId: string }) {
   const previewUrl = asset && imageFormats.includes(asset.format)
     ? api.previewUrl(asset.id, frame, paletteId, asset.format === "pcx" ? 1 : asset.format === "shp" ? 5 : 4)
     : "";
-  return <main className="detached-shell">{error ? <div className="detached-error">{error}</div> : <DetailPanel asset={asset} metadata={metadata} textAsset={textAsset} textQuery={textQuery} setTextQuery={setTextQuery} frame={frame} setFrame={setFrame} playing={playing} setPlaying={setPlaying} palettes={palettes} paletteId={paletteId} setPaletteId={setPaletteId} playerColors={colors} previewUrl={previewUrl} associations={associations} />}</main>;
+  return <main className="detached-shell">{error ? <div className="detached-error">{error}</div> : <DetailPanel asset={asset} metadata={metadata} textAsset={textAsset} textQuery={textQuery} setTextQuery={setTextQuery} frame={frame} setFrame={setFrame} playing={playing} setPlaying={setPlaying} palettes={palettes} paletteId={paletteId} setPaletteId={setPaletteId} playerColors={colors} previewUrl={previewUrl} associations={associations} wide />}</main>;
 }
 
 function App() {
