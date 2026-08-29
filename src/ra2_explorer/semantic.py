@@ -9,10 +9,11 @@ from typing import Any
 
 from PIL import Image
 
-from ra2_explorer.codecs.csf import parse_csf
+from ra2_explorer.codecs.csf import CsfValue, parse_csf
 from ra2_explorer.codecs.hva import parse_hva
+from ra2_explorer.codecs.mix import classic_mix_hash, ra2_mix_hash
 from ra2_explorer.codecs.pal import Palette, grayscale_palette
-from ra2_explorer.codecs.shp import parse_shp
+from ra2_explorer.codecs.shp import ShpFile, parse_shp
 from ra2_explorer.codecs.text import parse_ini
 from ra2_explorer.codecs.vxl import (
     VxlRenderPart,
@@ -62,7 +63,35 @@ _ART_FIELDS = {
     "foundation": "foundation",
     "facings": "facings",
 }
-_THEATER_EXTENSIONS = ("tem", "sno", "urb", "ubn", "lun", "des")
+_AUDIO_RULE_FIELDS = {
+    "select": "voiceselect",
+    "move": "voicemove",
+    "attack": "voiceattack",
+    "feedback": "voicefeedback",
+    "special_attack": "voicespecialattack",
+    "enter": "voiceenter",
+    "capture": "voicecapture",
+    "deploy": "voicedeploy",
+    "harvest": "voiceharvest",
+    "die": "diesound",
+    "create": "createsound",
+    "movement": "movesound",
+    "deploy_sound": "deploysound",
+    "undeploy": "undeploysound",
+    "enter_transport": "entertransportsound",
+    "leave_transport": "leavetransportsound",
+    "turret_rotate": "turretrotatesound",
+    "start_moving": "startmovingsound",
+    "stop_moving": "stopmovingsound",
+    "activate": "activatesound",
+    "deactivate": "deactivatesound",
+    "cloak": "cloaksound",
+    "uncloak": "uncloaksound",
+    "chrono_in": "chronoinsound",
+    "chrono_out": "chronooutsound",
+    "crashing": "crashingsound",
+    "impact_land": "impactlandsound",
+}
 _WEAPON_FIELDS = {
     "damage": "damage",
     "rate_of_fire": "rof",
@@ -150,6 +179,38 @@ class EntityDependency:
 
 
 @dataclass(frozen=True, slots=True)
+class MediaSample:
+    name: str
+    text: str | None
+    asset: dict[str, Any] | None
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "text": self.text,
+            "asset": _asset_summary(self.asset),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class MediaAssociation:
+    kind: str
+    slot: str
+    event: str
+    source: str
+    samples: tuple[MediaSample, ...]
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "kind": self.kind,
+            "slot": self.slot,
+            "event": self.event,
+            "source": self.source,
+            "samples": [sample.as_dict() for sample in self.samples],
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class GameEntity:
     id: str
     kind: str
@@ -163,6 +224,7 @@ class GameEntity:
     art: dict[str, str]
     components: tuple[EntityComponent, ...]
     dependencies: tuple[EntityDependency, ...]
+    media: tuple[MediaAssociation, ...]
 
     @property
     def renderable(self) -> bool:
@@ -175,6 +237,7 @@ class GameEntity:
         )
 
     def summary(self) -> dict[str, object]:
+        body = self.component("body")
         return {
             "id": self.id,
             "kind": self.kind,
@@ -185,6 +248,9 @@ class GameEntity:
             "voxel": self.voxel,
             "renderable": self.renderable,
             "component_count": sum(component.asset is not None for component in self.components),
+            "body_format": body["format"] if body else None,
+            "media_kinds": sorted({association.kind for association in self.media}),
+            "media_count": len(self.media),
             "cost": self.rules.get("cost"),
             "strength": self.rules.get("strength"),
             "owner": self.rules.get("owner"),
@@ -198,6 +264,7 @@ class GameEntity:
             "art": self.art,
             "components": [component.as_dict() for component in self.components],
             "dependencies": [dependency.as_dict() for dependency in self.dependencies],
+            "media": [association.as_dict() for association in self.media],
         }
 
 
@@ -207,6 +274,8 @@ class SemanticCatalog:
     entities: tuple[GameEntity, ...]
     inputs: dict[str, tuple[dict[str, object], ...]]
     warnings: tuple[str, ...]
+    audio_events: dict[str, tuple[MediaSample, ...]]
+    eva_events: tuple[MediaAssociation, ...]
 
     def get(self, entity_id: str) -> GameEntity:
         folded = entity_id.casefold()
@@ -222,7 +291,8 @@ class SemanticLibrary:
         self.reader = reader
         self._cache: dict[str, tuple[tuple[object, ...], SemanticCatalog]] = {}
         self._parsed_cache: OrderedDict[str, object] = OrderedDict()
-        self._lock = threading.Lock()
+        self._shp_frame_cache: dict[str, tuple[int, ...]] = {}
+        self._lock = threading.RLock()
 
     def catalog(self, source_id: str) -> SemanticCatalog:
         source = self.database.get_source(source_id)
@@ -231,13 +301,11 @@ class SemanticLibrary:
             cached = self._cache.get(source_id)
             if cached and cached[0] == token:
                 return cached[1]
-        catalog = self._build(source_id)
-        with self._lock:
-            previous = self._cache.get(source_id)
-            if previous is None or previous[0] != token:
-                self._parsed_cache.clear()
+            self._parsed_cache.clear()
+            self._shp_frame_cache.clear()
+            catalog = self._build(source_id)
             self._cache[source_id] = (token, catalog)
-        return catalog
+            return catalog
 
     def list_entities(
         self,
@@ -274,6 +342,87 @@ class SemanticLibrary:
     def get_entity(self, source_id: str, entity_id: str) -> dict[str, object]:
         entity = self.catalog(source_id).get(entity_id)
         return {**entity.as_dict(), "preview": self._preview_info(entity)}
+
+    def asset_associations(self, source_id: str, asset_id: str) -> dict[str, object]:
+        catalog = self.catalog(source_id)
+        items: list[dict[str, object]] = []
+        seen: set[tuple[str, ...]] = set()
+
+        def append(item: dict[str, object], key: tuple[str, ...]) -> None:
+            if key not in seen:
+                seen.add(key)
+                items.append(item)
+
+        for entity in catalog.entities:
+            for component in entity.components:
+                if component.asset and component.asset["id"] == asset_id:
+                    append(
+                        {
+                            "scope": "entity",
+                            "kind": "component",
+                            "slot": component.role,
+                            "event": component.expected_name,
+                            "entity": entity.summary(),
+                            "text": None,
+                        },
+                        ("entity", entity.id, "component", component.role),
+                    )
+            for association in entity.media:
+                for sample in association.samples:
+                    if sample.asset and sample.asset["id"] == asset_id:
+                        append(
+                            {
+                                "scope": "entity",
+                                "kind": association.kind,
+                                "slot": association.slot,
+                                "event": association.event,
+                                "entity": entity.summary(),
+                                "text": sample.text,
+                            },
+                            (
+                                "entity",
+                                entity.id,
+                                association.kind,
+                                association.slot,
+                                association.event.casefold(),
+                            ),
+                        )
+
+        for association in catalog.eva_events:
+            for sample in association.samples:
+                if sample.asset and sample.asset["id"] == asset_id:
+                    append(
+                        {
+                            "scope": "event",
+                            "kind": association.kind,
+                            "slot": association.slot,
+                            "event": association.event,
+                            "entity": None,
+                            "text": sample.text,
+                        },
+                        (
+                            "event",
+                            association.slot,
+                            association.event.casefold(),
+                            sample.name.casefold(),
+                        ),
+                    )
+
+        for event, samples in catalog.audio_events.items():
+            for sample in samples:
+                if sample.asset and sample.asset["id"] == asset_id:
+                    append(
+                        {
+                            "scope": "event",
+                            "kind": "sound",
+                            "slot": "sound_event",
+                            "event": event,
+                            "entity": None,
+                            "text": sample.text,
+                        },
+                        ("sound", event.casefold(), sample.name.casefold()),
+                    )
+        return {"items": items[:100], "total": len(items)}
 
     def diagnostics(self, source_id: str, *, limit: int = 20) -> dict[str, object]:
         catalog = self.catalog(source_id)
@@ -378,11 +527,14 @@ class SemanticLibrary:
         sprite = self._parse_asset(body, parse_shp)
         if not sprite.frames:
             raise InvalidFormatError("单位 SHP 没有可渲染帧")
+        visible_frames = self._visible_shp_frames(body, sprite)
+        if not visible_frames:
+            raise InvalidFormatError("单位 SHP 的所有帧均为空")
         active_palette = palette
         if player_color:
             active_palette = (palette or grayscale_palette()).with_player_color(player_color)
         return entity, sprite.render(
-            frame % len(sprite.frames),
+            visible_frames[frame % len(visible_frames)],
             active_palette,
             scale=scale,
         )
@@ -464,9 +616,12 @@ class SemanticLibrary:
                 )
             else:
                 sprite = self._parse_asset(body, parse_shp)
+                visible_frames = self._visible_shp_frames(body, sprite)
                 base.update(
                     {
-                        "frame_count": len(sprite.frames),
+                        "frame_count": len(visible_frames),
+                        "source_frame_count": len(sprite.frames),
+                        "frame_indices": visible_frames,
                         "width": sprite.width,
                         "height": sprite.height,
                     }
@@ -476,6 +631,25 @@ class SemanticLibrary:
         if warnings:
             base["warnings"] = warnings
         return base
+
+    def _visible_shp_frames(
+        self,
+        asset: dict[str, Any],
+        sprite: ShpFile,
+    ) -> tuple[int, ...]:
+        asset_id = str(asset["id"])
+        with self._lock:
+            cached = self._shp_frame_cache.get(asset_id)
+            if cached is not None:
+                return cached
+        visible = tuple(
+            frame.index
+            for frame in sprite.frames
+            if not frame.empty and any(sprite.pixels(frame.index))
+        )
+        with self._lock:
+            self._shp_frame_cache[asset_id] = visible
+        return visible
 
     def _parse_asset(
         self,
@@ -500,22 +674,37 @@ class SemanticLibrary:
     def _build(self, source_id: str) -> SemanticCatalog:
         assets = self.database.assets_for_formats(
             source_id,
-            ("ini", "csf", "vxl", "hva", "shp"),
+            (
+                "ini",
+                "csf",
+                "vxl",
+                "hva",
+                "shp",
+                "bag_audio",
+                "wav",
+                "aud",
+                "video",
+                "binary",
+            ),
         )
-        by_name: dict[str, list[dict[str, Any]]] = {}
-        for asset in assets:
-            by_name.setdefault(str(asset["display_name"]).casefold(), []).append(asset)
+        asset_index = _index_assets(assets)
 
         warnings = []
-        rules_assets = _named_inputs(by_name, ("rules.ini", "rulesmd.ini"))
-        art_assets = _named_inputs(by_name, ("art.ini", "artmd.ini"))
+        rules_assets = _named_inputs(asset_index.by_name, ("rules.ini", "rulesmd.ini"))
+        art_assets = _named_inputs(asset_index.by_name, ("art.ini", "artmd.ini"))
+        sound_assets = _named_inputs(asset_index.by_name, ("sound.ini", "soundmd.ini"))
+        eva_assets = _named_inputs(asset_index.by_name, ("eva.ini", "evamd.ini"))
         csf_assets = sorted(
             (asset for asset in assets if asset["format"] == "csf"),
             key=_config_precedence,
         )
         rules = _merge_ini_inputs(self.reader, rules_assets, warnings)
         art = _merge_ini_inputs(self.reader, art_assets, warnings)
-        strings = _merge_csf_inputs(self.reader, csf_assets, warnings)
+        sounds = _merge_ini_inputs(self.reader, sound_assets, warnings)
+        eva = _merge_ini_inputs(self.reader, eva_assets, warnings)
+        strings, voice_strings = _merge_csf_inputs(self.reader, csf_assets, warnings)
+        audio_events = _build_audio_events(sounds, asset_index, voice_strings)
+        eva_events = _build_eva_events(eva, asset_index, voice_strings)
 
         entities = []
         seen = set()
@@ -535,12 +724,13 @@ class SemanticLibrary:
                 display_name = localized_name or internal_name
                 voxel = _yes(art_values.get("voxel"))
                 components, detected_voxel = _resolve_components(
-                    by_name,
+                    asset_index,
                     image,
                     art_values,
                     voxel,
                     _yes(rule_values.get("turret")),
                 )
+                dependencies = _resolve_dependencies(rule_values, rules)
                 entities.append(
                     GameEntity(
                         entity_id,
@@ -554,20 +744,40 @@ class SemanticLibrary:
                         _selected_fields(rule_values, _RULE_FIELDS),
                         _selected_fields(art_values, _ART_FIELDS),
                         components,
-                        _resolve_dependencies(rule_values, rules),
+                        dependencies,
+                        _resolve_media(
+                            entity_id,
+                            rule_values,
+                            art_values,
+                            components,
+                            dependencies,
+                            art,
+                            asset_index,
+                            audio_events,
+                            voice_strings,
+                        ),
                     )
                 )
         entities.sort(key=lambda entity: (entity.display_name.casefold(), entity.id.casefold()))
         inputs = {
             "rules": tuple(_input_summary(asset) for asset in rules_assets),
             "art": tuple(_input_summary(asset) for asset in art_assets),
+            "sound": tuple(_input_summary(asset) for asset in sound_assets),
+            "eva": tuple(_input_summary(asset) for asset in eva_assets),
             "csf": tuple(_input_summary(asset) for asset in csf_assets),
         }
         if not rules_assets:
             warnings.append("未找到 rules.ini 或 rulesmd.ini")
         if not art_assets:
             warnings.append("未找到 art.ini 或 artmd.ini")
-        return SemanticCatalog(source_id, tuple(entities), inputs, tuple(warnings))
+        return SemanticCatalog(
+            source_id,
+            tuple(entities),
+            inputs,
+            tuple(warnings),
+            audio_events,
+            eva_events,
+        )
 
 
 def _named_inputs(
@@ -604,8 +814,9 @@ def _merge_csf_inputs(
     reader: AssetReader,
     assets: list[dict[str, Any]],
     warnings: list[str],
-) -> dict[str, str]:
-    strings = {}
+) -> tuple[dict[str, str], dict[str, CsfValue]]:
+    strings: dict[str, str] = {}
+    voice_strings: dict[str, CsfValue] = {}
     for asset in assets:
         try:
             _, data = reader.read(str(asset["id"]))
@@ -615,8 +826,220 @@ def _merge_csf_inputs(
             continue
         for label in parsed.labels:
             if label.values:
-                strings[label.name.casefold()] = label.values[0].text
-    return strings
+                folded = label.name.casefold()
+                strings[folded] = label.values[0].text
+                if folded.startswith("vox:"):
+                    voice_strings[folded[4:]] = label.values[0]
+    return strings, voice_strings
+
+
+@dataclass(slots=True)
+class _AssetIndex:
+    by_name: dict[str, list[dict[str, Any]]]
+    by_crc: dict[int, list[dict[str, Any]]]
+
+
+def _index_assets(assets: list[dict[str, Any]]) -> _AssetIndex:
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    by_crc: dict[int, list[dict[str, Any]]] = {}
+    for asset in assets:
+        for value in (asset.get("display_name"), asset.get("name")):
+            if value:
+                bucket = by_name.setdefault(str(value).casefold(), [])
+                if asset not in bucket:
+                    bucket.append(asset)
+        if isinstance(asset.get("crc"), int):
+            by_crc.setdefault(int(asset["crc"]), []).append(asset)
+    return _AssetIndex(by_name, by_crc)
+
+
+def _asset_summary(asset: dict[str, Any] | None) -> dict[str, object] | None:
+    if asset is None:
+        return None
+    return {
+        key: asset[key]
+        for key in (
+            "id",
+            "display_name",
+            "format",
+            "virtual_path",
+            "size",
+            "storage_kind",
+        )
+    }
+
+
+def _build_audio_events(
+    sections: dict[str, dict[str, str]],
+    assets: _AssetIndex,
+    voice_strings: dict[str, CsfValue],
+) -> dict[str, tuple[MediaSample, ...]]:
+    events = {}
+    for event, values in sections.items():
+        sample_names = _tokens(values.get("sounds") or values.get("sound"))
+        if sample_names:
+            events[event] = tuple(
+                _audio_sample(name, assets, voice_strings) for name in sample_names
+            )
+    return events
+
+
+def _build_eva_events(
+    sections: dict[str, dict[str, str]],
+    assets: _AssetIndex,
+    voice_strings: dict[str, CsfValue],
+) -> tuple[MediaAssociation, ...]:
+    associations = []
+    for event, values in sections.items():
+        fallback_text = values.get("text")
+        for faction in ("allied", "soviet", "yuri"):
+            for sample_name in _tokens(values.get(faction)):
+                sample = _audio_sample(sample_name, assets, voice_strings)
+                if sample.text is None and fallback_text:
+                    sample = MediaSample(sample.name, fallback_text, sample.asset)
+                associations.append(
+                    MediaAssociation("voice", f"eva_{faction}", event, "eva", (sample,))
+                )
+    return tuple(associations)
+
+
+def _resolve_media(
+    entity_id: str,
+    rules: dict[str, str],
+    entity_art: dict[str, str],
+    components: tuple[EntityComponent, ...],
+    dependencies: tuple[EntityDependency, ...],
+    art_sections: dict[str, dict[str, str]],
+    assets: _AssetIndex,
+    audio_events: dict[str, tuple[MediaSample, ...]],
+    voice_strings: dict[str, CsfValue],
+) -> tuple[MediaAssociation, ...]:
+    associations: list[MediaAssociation] = []
+    seen: set[tuple[str, str, str, str]] = set()
+
+    def add(association: MediaAssociation) -> None:
+        key = (
+            association.kind,
+            association.slot,
+            association.event.casefold(),
+            association.source.casefold(),
+        )
+        if association.samples and key not in seen:
+            seen.add(key)
+            associations.append(association)
+
+    for slot, field in _AUDIO_RULE_FIELDS.items():
+        for event in _references(rules.get(field)):
+            samples = audio_events.get(event.casefold()) or (
+                _audio_sample(event, assets, voice_strings),
+            )
+            add(
+                MediaAssociation(
+                    "voice" if field.startswith("voice") else "sound",
+                    slot,
+                    event,
+                    entity_id,
+                    samples,
+                )
+            )
+
+    for dependency in dependencies:
+        if dependency.kind == "weapon":
+            for event in _references(dependency.properties.get("report")):
+                samples = audio_events.get(event.casefold()) or (
+                    _audio_sample(event, assets, voice_strings),
+                )
+                add(MediaAssociation("sound", dependency.slot, event, dependency.id, samples))
+            for animation in _references(dependency.properties.get("animation")):
+                add(
+                    MediaAssociation(
+                        "animation",
+                        dependency.slot,
+                        animation,
+                        dependency.id,
+                        _animation_samples(animation, art_sections, assets),
+                    )
+                )
+        elif dependency.kind == "warhead":
+            for animation in _references(dependency.properties.get("animation_list")):
+                add(
+                    MediaAssociation(
+                        "animation",
+                        dependency.slot,
+                        animation,
+                        dependency.id,
+                        _animation_samples(animation, art_sections, assets),
+                    )
+                )
+
+    body = next((item for item in components if item.role == "body" and item.asset), None)
+    if body and body.asset and body.asset["format"] == "shp":
+        add(
+            MediaAssociation(
+                "animation",
+                "body_animation",
+                entity_id,
+                entity_id,
+                (MediaSample(str(body.asset["display_name"]), None, body.asset),),
+            )
+        )
+    for component in components:
+        if component.asset and component.role.endswith("_hva"):
+            add(
+                MediaAssociation(
+                    "animation",
+                    component.role,
+                    component.expected_name,
+                    entity_id,
+                    (
+                        MediaSample(
+                            str(component.asset["display_name"]),
+                            None,
+                            component.asset,
+                        ),
+                    ),
+                )
+            )
+
+    for field, value in entity_art.items():
+        if not (field.endswith("anim") or field in {"buildup", "bibshape"}):
+            continue
+        for animation in _references(value):
+            add(
+                MediaAssociation(
+                    "animation",
+                    field,
+                    animation,
+                    entity_id,
+                    _animation_samples(animation, art_sections, assets),
+                )
+            )
+    return tuple(associations)
+
+
+def _audio_sample(
+    raw_name: str,
+    assets: _AssetIndex,
+    voice_strings: dict[str, CsfValue],
+) -> MediaSample:
+    name = raw_name.strip().lstrip("$")
+    stem = name.rsplit(".", 1)[0]
+    names = (name,) if "." in name else (f"{name}.wav", f"{name}.aud")
+    asset = _find_asset(assets, names, ("bag_audio", "wav", "aud"))
+    localized = voice_strings.get(stem.casefold())
+    return MediaSample(name, localized.text if localized else None, asset)
+
+
+def _animation_samples(
+    reference: str,
+    art_sections: dict[str, dict[str, str]],
+    assets: _AssetIndex,
+) -> tuple[MediaSample, ...]:
+    values = art_sections.get(reference.casefold(), {})
+    image = values.get("image") or reference
+    names = (image,) if "." in image else (f"{image}.shp", f"{image}.hva")
+    asset = _find_asset(assets, names, ("shp", "hva", "video"))
+    return (MediaSample(image, None, asset),)
 
 
 def _type_values(section: dict[str, str]) -> list[str]:
@@ -628,13 +1051,13 @@ def _type_values(section: dict[str, str]) -> list[str]:
 
 
 def _resolve_components(
-    by_name: dict[str, list[dict[str, Any]]],
+    assets: _AssetIndex,
     image: str,
     art: dict[str, str],
     voxel: bool,
     has_turret: bool,
 ) -> tuple[tuple[EntityComponent, ...], bool]:
-    body_vxl = _find_asset(by_name, (f"{image}.vxl",), ("vxl",))
+    body_vxl = _find_asset(assets, (f"{image}.vxl",), ("vxl",))
     detected_voxel = body_vxl is not None
     components = []
     if voxel or detected_voxel:
@@ -643,34 +1066,52 @@ def _resolve_components(
             EntityComponent(
                 "body_hva",
                 f"{image}.hva",
-                _find_asset(by_name, (f"{image}.hva",), ("hva",)),
+                _find_asset(assets, (f"{image}.hva",), ("hva",)),
             )
         )
         for role, suffix in (("turret", "TUR"), ("barrel", "BARL")):
-            asset = _find_asset(by_name, (f"{image}{suffix}.vxl",), ("vxl",))
+            asset = _find_asset(assets, (f"{image}{suffix}.vxl",), ("vxl",))
             if asset or (role == "turret" and has_turret):
                 components.append(EntityComponent(role, f"{image}{suffix}.vxl", asset))
                 components.append(
                     EntityComponent(
                         f"{role}_hva",
                         f"{image}{suffix}.hva",
-                        _find_asset(by_name, (f"{image}{suffix}.hva",), ("hva",)),
+                        _find_asset(assets, (f"{image}{suffix}.hva",), ("hva",)),
                     )
                 )
     else:
-        theater = _yes(art.get("newtheater"))
-        extensions = (*_THEATER_EXTENSIONS, "shp") if theater else ("shp", *_THEATER_EXTENSIONS)
-        names = tuple(f"{image}.{extension}" for extension in extensions)
-        components.append(EntityComponent("body", names[0], _find_asset(by_name, names, ("shp",))))
+        expected = f"{image}.shp"
+        components.append(
+            EntityComponent(
+                "body",
+                expected,
+                _find_asset(
+                    assets,
+                    _theater_shp_names(image, _yes(art.get("newtheater"))),
+                    ("shp",),
+                ),
+            )
+        )
 
     for role, field in (("cameo", "cameo"), ("alt_cameo", "altcameo")):
         value = art.get(field)
         if value:
             expected = f"{value}.shp"
             components.append(
-                EntityComponent(role, expected, _find_asset(by_name, (expected,), ("shp",)))
+                EntityComponent(role, expected, _find_asset(assets, (expected,), ("shp",)))
             )
     return tuple(components), detected_voxel
+
+
+def _theater_shp_names(image: str, new_theater: bool) -> tuple[str, ...]:
+    names = [f"{image}.shp"]
+    if new_theater and len(image) > 1:
+        for theater in "ATSUNLD":
+            variant = f"{image[0]}{theater}{image[2:]}.shp"
+            if variant.casefold() not in {name.casefold() for name in names}:
+                names.append(variant)
+    return tuple(names)
 
 
 def _resolve_dependencies(
@@ -714,16 +1155,52 @@ def _resolve_dependencies(
 
 
 def _find_asset(
-    by_name: dict[str, list[dict[str, Any]]],
+    assets: _AssetIndex,
     names: tuple[str, ...],
     formats: tuple[str, ...],
 ) -> dict[str, Any] | None:
     for name in names:
         candidates = [
-            asset for asset in by_name.get(name.casefold(), ()) if asset["format"] in formats
+            asset
+            for asset in assets.by_name.get(name.casefold(), ())
+            if asset["format"] in formats
         ]
         if candidates:
             return max(candidates, key=_asset_precedence)
+        try:
+            hashes = {ra2_mix_hash(name), classic_mix_hash(name)}
+        except ValueError:
+            continue
+        candidates = [
+            asset
+            for crc in hashes
+            for asset in assets.by_crc.get(crc, ())
+            if asset["format"] in formats or asset["format"] == "binary"
+        ]
+        if candidates:
+            selected = dict(max(candidates, key=_asset_precedence))
+            display_name = name.replace("\\", "/").rsplit("/", 1)[-1]
+            extension = display_name.rsplit(".", 1)[-1].casefold() if "." in display_name else ""
+            expected_format = {
+                "aud": "aud",
+                "bik": "video",
+                "hva": "hva",
+                "shp": "shp",
+                "vqa": "video",
+                "vxl": "vxl",
+                "wav": "wav",
+            }.get(extension)
+            selected.update(
+                {
+                    "name": display_name,
+                    "display_name": display_name,
+                    "extension": extension,
+                    "confidence": "semantic",
+                }
+            )
+            if selected["format"] == "binary" and expected_format:
+                selected["format"] = expected_format
+            return selected
     return None
 
 
@@ -779,6 +1256,16 @@ def _references(value: str | None) -> tuple[str, ...]:
     )
 
 
+def _tokens(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    return tuple(
+        token
+        for token in re.split(r"[,\s]+", value)
+        if token and token.casefold() != "none"
+    )
+
+
 def _yes(value: str | None) -> bool:
     return bool(value and value.casefold() in {"yes", "true", "1"})
 
@@ -810,6 +1297,13 @@ def _entity_search_text(entity: GameEntity) -> str:
                 for dependency in entity.dependencies
                 for value in dependency.properties.values()
             ),
+            *(association.event for association in entity.media),
+            *(sample.name for association in entity.media for sample in association.samples),
+            *(
+                sample.text or ""
+                for association in entity.media
+                for sample in association.samples
+            ),
         )
     ).casefold()
 
@@ -819,6 +1313,8 @@ __all__ = [
     "EntityComponent",
     "EntityDependency",
     "GameEntity",
+    "MediaAssociation",
+    "MediaSample",
     "SemanticCatalog",
     "SemanticLibrary",
 ]

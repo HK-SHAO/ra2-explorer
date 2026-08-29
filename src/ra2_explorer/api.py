@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
@@ -23,6 +23,7 @@ from ra2_explorer.codecs.bag import (
 )
 from ra2_explorer.codecs.csf import parse_csf
 from ra2_explorer.codecs.hva import parse_hva
+from ra2_explorer.codecs.map import parse_map
 from ra2_explorer.codecs.pal import PLAYER_COLOR_PRESETS, grayscale_palette, parse_palette
 from ra2_explorer.codecs.shp import parse_shp
 from ra2_explorer.codecs.text import decode_legacy_text, parse_ini, text_excerpt
@@ -41,6 +42,23 @@ from ra2_explorer.reference_data import (
 )
 from ra2_explorer.semantic import ENTITY_KINDS, SemanticLibrary
 from ra2_explorer.storage import Database
+from ra2_explorer.video import VideoTranscoder
+
+INSPECTABLE_FORMATS = {
+    "aud",
+    "bag_audio",
+    "csf",
+    "hva",
+    "ini",
+    "map",
+    "pal",
+    "pcx",
+    "shp",
+    "text",
+    "tmp",
+    "vxl",
+    "wav",
+}
 
 
 class SourceRequest(BaseModel):
@@ -60,6 +78,7 @@ class Services:
         )
         self.reader = AssetReader(self.database, self.derived)
         self.semantic = SemanticLibrary(self.database, self.reader)
+        self.video = VideoTranscoder(self.database, self.reader, self.derived)
 
     def reload_names(self) -> None:
         self.library = SourceLibrary(
@@ -139,6 +158,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         q: str | None = Query(default=None, max_length=200),
         format: str | None = Query(default=None, max_length=24),
         formats: str | None = Query(default=None, max_length=240),
+        sort: str = Query(default="name_asc", max_length=20),
         limit: int = Query(default=100, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, object]:
@@ -151,11 +171,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             not item.replace("_", "").isalnum() for item in selected_formats
         ):
             raise HTTPException(status_code=422, detail="资源格式筛选无效")
+        if sort not in {"name_asc", "name_desc", "size_desc", "size_asc"}:
+            raise HTTPException(status_code=422, detail="资源排序方式无效")
         return services.database.list_assets(
             source_id=source_id,
             query=q,
             asset_format=format,
             asset_formats=selected_formats,
+            sort_by=sort,
             limit=limit,
             offset=offset,
         )
@@ -163,6 +186,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/assets/{asset_id}")
     def asset(asset_id: str) -> dict[str, object]:
         return services.database.get_asset(asset_id)
+
+    @app.get("/api/assets/{asset_id}/associations")
+    def asset_associations(asset_id: str) -> dict[str, object]:
+        asset_record = services.database.get_asset(asset_id)
+        return services.semantic.asset_associations(
+            str(asset_record["source_id"]), asset_id
+        )
 
     @app.get("/api/entities")
     def entities(
@@ -268,6 +298,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "models",
             source_id,
             entity_id,
+            "scene-v2",
             f"frame-{frame}",
             f"color-{player_color or 'original'}",
             f"palette-{palette_id or 'auto'}",
@@ -330,18 +361,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/assets/{asset_id}/model.json")
     def asset_model(
         asset_id: str,
+        frame: int = Query(default=0, ge=0),
         player_color: str | None = Query(default=None, max_length=24),
         palette_id: str | None = None,
     ) -> dict[str, object]:
         asset_record = services.database.get_asset(asset_id)
-        if asset_record["format"] != "vxl":
-            raise HTTPException(status_code=409, detail="该资产不是 VXL 模型")
-        palette = _select_palette(services, asset_record, palette_id)
+        if asset_record["format"] not in {"vxl", "hva"}:
+            raise HTTPException(status_code=409, detail="该资产不是 VXL/HVA 模型")
+        source_id = str(asset_record["source_id"])
+        stem = Path(str(asset_record["display_name"])).stem
+        related = services.database.assets_named(
+            source_id,
+            (f"{stem}.vxl", f"{stem}.hva"),
+        )
+        model_asset = (
+            asset_record
+            if asset_record["format"] == "vxl"
+            else next((item for item in related if item["format"] == "vxl"), None)
+        )
+        animation_asset = (
+            asset_record
+            if asset_record["format"] == "hva"
+            else next((item for item in related if item["format"] == "hva"), None)
+        )
+        if model_asset is None:
+            raise HTTPException(status_code=409, detail="没有找到与 HVA 同名的 VXL 模型")
+        palette = _select_palette(services, model_asset, palette_id)
         player_color = _validated_player_color(player_color)
         artifact_path = _asset_artifact_path(
             services,
             "models",
             asset_record,
+            "scene-v2",
+            f"model-{model_asset['id']}",
+            f"animation-{animation_asset['id'] if animation_asset else 'none'}",
+            f"frame-{frame}",
             f"color-{player_color or 'original'}",
             f"palette-{palette_id or 'auto'}",
             extension="json",
@@ -349,10 +403,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         cached = services.derived.read_json(artifact_path)
         if cached is not None:
             return cached
-        asset_record, data = services.reader.read(asset_id)
+        _, model_data = services.reader.read(str(model_asset["id"]))
+        animation = None
+        if animation_asset is not None:
+            _, animation_data = services.reader.read(str(animation_asset["id"]))
+            animation = parse_hva(animation_data)
         scene = build_vxl_scene(
-            (VxlRenderPart(parse_vxl(data)),),
+            (VxlRenderPart(parse_vxl(model_data), animation),),
             palette=palette,
+            frame=frame,
             player_color=player_color,
         )
         result = scene.as_dict()
@@ -372,8 +431,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         cached = services.derived.read_json(artifact_path)
         if cached is not None:
             return cached
-        asset_record, data = services.reader.read(asset_id)
-        result = _inspect_asset(asset_record, data)
+        if asset_record["format"] in INSPECTABLE_FORMATS:
+            asset_record, data = services.reader.read(asset_id)
+            result = _inspect_asset(asset_record, data)
+        else:
+            result = {
+                "format": asset_record["format"],
+                "size": asset_record["size"],
+            }
         services.derived.write_json(artifact_path, result)
         return result
 
@@ -423,7 +488,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Response:
         asset_record = services.database.get_asset(asset_id)
         player_color = _validated_player_color(player_color)
-        if asset_record["format"] not in {"pal", "shp", "vxl", "tmp", "pcx"}:
+        if asset_record["format"] not in {"pal", "shp", "vxl", "tmp", "pcx", "map"}:
             raise HTTPException(status_code=409, detail="该格式没有图像预览")
         artifact_path = _asset_artifact_path(
             services,
@@ -486,6 +551,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     (image.width * scale, image.height * scale),
                     resample=Image.Resampling.NEAREST,
                 )
+        elif asset_record["format"] == "map":
+            image = parse_map(data).render(scale=scale)
         else:
             raise HTTPException(status_code=409, detail="该格式没有图像预览")
         output = io.BytesIO()
@@ -508,6 +575,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content=playable_data,
             media_type="audio/wav",
             headers=headers,
+        )
+
+    @app.get("/api/assets/{asset_id}/video.mp4")
+    def asset_video(asset_id: str) -> FileResponse:
+        path = services.video.browser_video(asset_id)
+        return FileResponse(
+            path,
+            media_type="video/mp4",
+            headers={"Cache-Control": "private, max-age=86400"},
         )
 
     @app.get("/api/palettes")
@@ -802,7 +878,19 @@ def _inspect_asset(asset: dict[str, object], data: bytes) -> dict[str, object]:
             "string_count": strings.string_count,
             "declared_string_count": strings.declared_string_count,
         }
-    if asset_format in {"ini", "map"}:
+    if asset_format == "map":
+        overview = parse_map(data)
+        return {
+            **base,
+            "encoding": overview.ini.encoding,
+            "section_count": len(overview.ini.sections),
+            "entry_count": overview.ini.entry_count,
+            "width": overview.width,
+            "height": overview.height,
+            "theater": overview.theater,
+            "object_counts": overview.counts,
+        }
+    if asset_format == "ini":
         ini = parse_ini(data)
         return {
             **base,

@@ -10,7 +10,7 @@ from typing import Any
 from ra2_explorer.errors import Ra2ExplorerError
 
 DERIVED_SCHEMA_VERSION = 1
-_KINDS = {"audio", "extracted", "metadata", "models", "previews"}
+_KINDS = {"audio", "extracted", "metadata", "models", "previews", "video"}
 _UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -91,6 +91,21 @@ class DerivedStore:
             path,
             json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
         )
+
+    def commit_file(self, path: Path, temporary: Path) -> None:
+        """Atomically publish a file already produced inside the target directory."""
+        self._validate_target(path)
+        self._validate_target(temporary)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_file():
+            temporary.unlink(missing_ok=True)
+            return
+        try:
+            os.replace(temporary, path)
+        except OSError:
+            if not path.is_file():
+                raise
+            temporary.unlink(missing_ok=True)
 
     def _validate_target(self, path: Path) -> None:
         try:

@@ -14,11 +14,14 @@ FIXTURE_NAMES = (
     "fixture.shp",
     "rules.ini",
     "art.ini",
+    "sound.ini",
     "fixture.csf",
     "fixture.vxl",
     "fixture.hva",
     "fixture.tem",
     "fixture.wav",
+    "fixture.map",
+    "infantry.shp",
 )
 
 
@@ -30,6 +33,8 @@ def create_fixture_installation(target: Path) -> Path:
     rules = (
         b"[VehicleTypes]\r\n"
         b"0=DemoVehicle\r\n"
+        b"\r\n[InfantryTypes]\r\n"
+        b"0=DemoInfantry\r\n"
         b"\r\n[DemoVehicle]\r\n"
         b"UIName=UNIT:DemoVehicle\r\n"
         b"Name=Explorer Test Vehicle\r\n"
@@ -38,6 +43,13 @@ def create_fixture_installation(target: Path) -> Path:
         b"Secondary=none\r\n"
         b"Strength=400\r\n"
         b"Cost=800\r\n"
+        b"VoiceSelect=FixtureSelect\r\n"
+        b"\r\n[DemoInfantry]\r\n"
+        b"UIName=UNIT:DemoInfantry\r\n"
+        b"Name=Explorer Test Infantry\r\n"
+        b"Image=INFANTRY\r\n"
+        b"Strength=125\r\n"
+        b"Cost=200\r\n"
         b"\r\n[DemoCannon]\r\n"
         b"Damage=75\r\n"
         b"ROF=50\r\n"
@@ -57,18 +69,26 @@ def create_fixture_installation(target: Path) -> Path:
         b"Voxel=yes\r\n"
         b"Remapable=yes\r\n"
         b"Cameo=FIXTURE\r\n"
+        b"\r\n[INFANTRY]\r\n"
+        b"Image=INFANTRY\r\n"
+        b"Remapable=yes\r\n"
+        b"Facings=8\r\n"
     )
+    sound = b"[FixtureSelect]\r\nSounds=fixture\r\n"
     nested = build_mix(
         [
             ("fixture.pal", palette),
             ("fixture.shp", sprite),
             ("rules.ini", rules),
             ("art.ini", art),
+            ("sound.ini", sound),
             ("fixture.csf", _build_fixture_csf()),
             ("fixture.vxl", _build_fixture_vxl(palette)),
             ("fixture.hva", _build_fixture_hva()),
             ("fixture.tem", _build_fixture_tmp()),
             ("fixture.wav", _build_fixture_wav()),
+            ("fixture.map", _build_fixture_map()),
+            ("infantry.shp", _build_fixture_infantry_shp()),
         ],
         hash_type=MixHashType.RA2,
     )
@@ -128,7 +148,9 @@ def _build_fixture_csf() -> bytes:
     labels = (
         ("UI:ExplorerTitle", "RA2 Explorer format sample", None),
         ("VOX:ExplorerReady", "Asset pipeline ready.", "explorer-ready"),
+        ("VOX:fixture", "Ready for the test.", "fixture-extra"),
         ("UNIT:DemoVehicle", "Generated test vehicle", None),
+        ("UNIT:DemoInfantry", "Generated test infantry", None),
     )
     output = bytearray(b" FSC")
     output.extend(struct.pack("<IIIII", 3, len(labels), len(labels), 0, 0))
@@ -286,6 +308,29 @@ def _build_fixture_wav() -> bytes:
         audio.setframerate(sample_rate)
         audio.writeframes(frames)
     return output.getvalue()
+
+
+def _build_fixture_map() -> bytes:
+    return (
+        b"[Map]\r\nSize=0,0,64,48\r\nLocalSize=2,3,60,42\r\nTheater=TEMPERATE\r\n"
+        b"[Structures]\r\n0=Americans,GAPOWR,256,12,14,0,None,0,0,1,0,0,None,None,None\r\n"
+        b"[Units]\r\n0=Americans,MTNK,256,18,20,0,Guard,None,0,0,0,-1,-1,None\r\n"
+        b"[Infantry]\r\n0=Americans,E1,256,17,19,0,Guard,0,None,0,0\r\n"
+        b"[Waypoints]\r\n0=12014\r\n"
+        b"[Terrain]\r\n15016=TREE01\r\n"
+    )
+
+
+def _build_fixture_infantry_shp() -> bytes:
+    width, height = 24, 32
+    visible = []
+    for frame_index in range(3):
+        pixels = bytearray(width * height)
+        _fill_circle(pixels, width, height, 12, 8, 4, 42 + frame_index)
+        _fill_rect(pixels, width, 9, 12, 16, 25, 112)
+        visible.append(bytes(pixels))
+    empty = bytes(width * height)
+    return _encode_shp(width, height, [visible[0], empty, visible[1], empty, visible[2], empty])
 
 
 def _fill_rect(

@@ -30,7 +30,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     source = source_response.json()
     assert source["state"] == "ready"
     assert source["archive_count"] == 2
-    assert source["asset_count"] == 11
+    assert source["asset_count"] == 14
 
     assets_response = client.get(
         "/api/assets", params={"source_id": source["id"], "q": "fixture.shp"}
@@ -59,6 +59,16 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
         params={"source_id": source["id"], "formats": "vxl,wav"},
     ).json()
     assert {asset["format"] for asset in filtered["items"]} == {"vxl", "wav"}
+    largest_first = client.get(
+        "/api/assets",
+        params={"source_id": source["id"], "sort": "size_desc", "limit": 100},
+    ).json()["items"]
+    assert [asset["size"] for asset in largest_first] == sorted(
+        (asset["size"] for asset in largest_first), reverse=True
+    )
+    assert client.get(
+        "/api/assets", params={"source_id": source["id"], "sort": "unsupported"}
+    ).status_code == 422
 
     vxl = by_name["fixture.vxl"]
     vxl_metadata = client.get(f"/api/assets/{vxl['id']}/metadata")
@@ -67,13 +77,34 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert client.get(f"/api/assets/{vxl['id']}/preview.png").content.startswith(b"\x89PNG")
     vxl_model = client.get(f"/api/assets/{vxl['id']}/model.json")
     assert vxl_model.status_code == 200
+    assert vxl_model.json()["version"] == 2
     assert vxl_model.json()["voxel_count"] > 80
+    assert vxl_model.json()["visible_voxel_count"] <= vxl_model.json()["voxel_count"]
     assert len(vxl_model.json()["voxels"][0]) == 7
+
+    animation = by_name["fixture.hva"]
+    animated_model = client.get(
+        f"/api/assets/{animation['id']}/model.json",
+        params={"frame": 3},
+    )
+    assert animated_model.status_code == 200
+    assert animated_model.json()["frame"] == 3
+    assert animated_model.json()["frame_count"] == 4
 
     terrain = by_name["fixture.tem"]
     terrain_preview = client.get(f"/api/assets/{terrain['id']}/preview.png")
     assert terrain_preview.status_code == 200
     assert terrain_preview.content.startswith(b"\x89PNG")
+
+    game_map = by_name["fixture.map"]
+    map_metadata = client.get(f"/api/assets/{game_map['id']}/metadata")
+    assert map_metadata.status_code == 200
+    assert map_metadata.json()["width"] == 60
+    assert map_metadata.json()["height"] == 42
+    assert map_metadata.json()["object_counts"]["structure"] == 1
+    assert client.get(f"/api/assets/{game_map['id']}/preview.png").content.startswith(
+        b"\x89PNG"
+    )
 
     strings = by_name["fixture.csf"]
     text = client.get(f"/api/assets/{strings['id']}/text", params={"q": "ready"})
@@ -89,10 +120,13 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     entities = client.get("/api/entities", params={"source_id": source["id"]})
     assert entities.status_code == 200
     entity_page = entities.json()
-    assert entity_page["total"] == 1
-    assert entity_page["items"][0]["id"] == "DemoVehicle"
-    assert entity_page["items"][0]["display_name"] == "Generated test vehicle"
-    assert entity_page["items"][0]["renderable"] is True
+    assert entity_page["total"] == 2
+    entity_summaries = {item["id"]: item for item in entity_page["items"]}
+    assert entity_summaries["DemoVehicle"]["display_name"] == "Generated test vehicle"
+    assert entity_summaries["DemoVehicle"]["renderable"] is True
+    assert entity_summaries["DemoVehicle"]["body_format"] == "vxl"
+    assert entity_summaries["DemoVehicle"]["media_count"] > 0
+    assert "voice" in entity_summaries["DemoVehicle"]["media_kinds"]
 
     entity = client.get(f"/api/entities/{source['id']}/DemoVehicle")
     assert entity.status_code == 200
@@ -108,6 +142,33 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert dependencies[("weapon", "DemoCannon")]["properties"]["damage"] == "75"
     assert dependencies[("projectile", "DemoShell")]["resolved"] is True
     assert dependencies[("warhead", "DemoWarhead")]["resolved"] is True
+    select_voice = next(item for item in entity_body["media"] if item["slot"] == "select")
+    assert select_voice["event"] == "FixtureSelect"
+    assert select_voice["samples"][0]["text"] == "Ready for the test."
+    assert select_voice["samples"][0]["asset"]["display_name"] == "fixture.wav"
+
+    associations = client.get(f"/api/assets/{sound['id']}/associations")
+    assert associations.status_code == 200
+    association_items = associations.json()["items"]
+    assert any(
+        item["entity"]["id"] == "DemoVehicle"
+        and item["text"] == "Ready for the test."
+        for item in association_items
+        if item["entity"]
+    )
+
+    infantry = client.get(f"/api/entities/{source['id']}/DemoInfantry")
+    assert infantry.status_code == 200
+    infantry_preview = infantry.json()["preview"]
+    assert infantry_preview["frame_count"] == 3
+    assert infantry_preview["source_frame_count"] == 6
+    assert infantry_preview["frame_indices"] == [0, 2, 4]
+    infantry_image = client.get(
+        f"/api/entities/{source['id']}/DemoInfantry/preview.png",
+        params={"frame": 2},
+    )
+    assert infantry_image.status_code == 200
+    assert infantry_image.content.startswith(b"\x89PNG")
 
     entity_preview = client.get(
         f"/api/entities/{source['id']}/DemoVehicle/preview.png",
@@ -129,7 +190,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert diagnostics.status_code == 200
     diagnostic_body = diagnostics.json()
     assert diagnostic_body["status"] == "ready"
-    assert diagnostic_body["entity_count"] == 1
+    assert diagnostic_body["entity_count"] == 2
     assert diagnostic_body["renderable_percent"] == 100.0
     assert diagnostic_body["unresolved_dependency_count"] == 0
 

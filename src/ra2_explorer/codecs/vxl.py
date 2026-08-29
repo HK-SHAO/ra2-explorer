@@ -177,6 +177,7 @@ class VxlScene:
     frame: int
     frame_count: int
     part_count: int
+    source_voxel_count: int
 
     def as_dict(self) -> dict[str, object]:
         if self.voxels:
@@ -192,11 +193,12 @@ class VxlScene:
             minimum = [0.0, 0.0, 0.0]
             maximum = [0.0, 0.0, 0.0]
         return {
-            "version": 1,
+            "version": 2,
             "frame": self.frame,
             "frame_count": self.frame_count,
             "part_count": self.part_count,
-            "voxel_count": len(self.voxels),
+            "voxel_count": self.source_voxel_count,
+            "visible_voxel_count": len(self.voxels),
             "bounds": {
                 "min": [round(value, 6) for value in minimum],
                 "max": [round(value, 6) for value in maximum],
@@ -252,7 +254,13 @@ def build_vxl_scene(
         ),
         default=1,
     )
-    return VxlScene(tuple(voxels), frame % frame_count, frame_count, len(parts))
+    return VxlScene(
+        tuple(voxels),
+        frame % frame_count,
+        frame_count,
+        len(parts),
+        sum(part.model.voxel_count for part in parts),
+    )
 
 
 def render_vxl_composite(
@@ -381,7 +389,7 @@ def _collect_world_voxels(
                     start=part.model.remap_start,
                     end=part.model.remap_end,
                 )
-            for voxel in limb.voxels:
+            for voxel in _surface_voxels(limb.voxels):
                 local_x, local_y, local_z = _apply_transform(
                     transform,
                     float(voxel.x),
@@ -402,6 +410,20 @@ def _collect_world_voxels(
                     )
                 )
     return world_voxels
+
+
+def _surface_voxels(voxels: tuple[Voxel, ...]) -> tuple[Voxel, ...]:
+    """Discard voxels fully enclosed by the six axis-aligned neighbours."""
+    occupied = {(voxel.x, voxel.y, voxel.z) for voxel in voxels}
+    offsets = ((-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0, 0, 1))
+    return tuple(
+        voxel
+        for voxel in voxels
+        if any(
+            (voxel.x + x, voxel.y + y, voxel.z + z) not in occupied
+            for x, y, z in offsets
+        )
+    )
 
 
 def _hva_transform(

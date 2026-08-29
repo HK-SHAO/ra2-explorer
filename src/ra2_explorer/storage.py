@@ -280,6 +280,7 @@ class Database:
         query: str | None = None,
         asset_format: str | None = None,
         asset_formats: tuple[str, ...] = (),
+        sort_by: str = "name_asc",
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, Any]:
@@ -303,6 +304,18 @@ class Database:
             clauses.append("assets.format = ?")
             parameters.append(asset_format)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        ordering = {
+            "name_asc": (
+                "CASE WHEN assets.name IS NULL THEN 1 ELSE 0 END, "
+                "lower(assets.display_name), assets.virtual_path"
+            ),
+            "name_desc": (
+                "CASE WHEN assets.name IS NULL THEN 1 ELSE 0 END, "
+                "lower(assets.display_name) DESC, assets.virtual_path DESC"
+            ),
+            "size_desc": "assets.size DESC, lower(assets.display_name), assets.virtual_path",
+            "size_asc": "assets.size, lower(assets.display_name), assets.virtual_path",
+        }.get(sort_by, "lower(assets.display_name), assets.virtual_path")
         with self.connect() as connection:
             total = connection.execute(
                 f"SELECT COUNT(*) FROM assets {where}", parameters
@@ -313,8 +326,7 @@ class Database:
                 FROM assets
                 LEFT JOIN archives ON archives.id = assets.archive_id
                 {where}
-                ORDER BY CASE WHEN assets.name IS NULL THEN 1 ELSE 0 END,
-                         lower(assets.display_name), assets.virtual_path
+                ORDER BY {ordering}
                 LIMIT ? OFFSET ?
                 """,
                 (*parameters, limit, offset),
@@ -335,6 +347,26 @@ class Database:
         if not row:
             raise AssetNotFoundError("资产不存在")
         return dict(row)
+
+    def assets_named(self, source_id: str, names: tuple[str, ...]) -> list[dict[str, Any]]:
+        normalized = tuple(dict.fromkeys(name.casefold() for name in names if name))
+        if not normalized:
+            return []
+        placeholders = ", ".join("?" for _ in normalized)
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT assets.*, archives.virtual_path AS archive_path
+                FROM assets
+                LEFT JOIN archives ON archives.id = assets.archive_id
+                WHERE assets.source_id = ?
+                  AND (lower(assets.display_name) IN ({placeholders})
+                       OR lower(assets.name) IN ({placeholders}))
+                ORDER BY lower(assets.display_name), assets.virtual_path
+                """,
+                (source_id, *normalized, *normalized),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def get_archive(self, archive_id: str) -> dict[str, Any]:
         with self.connect() as connection:

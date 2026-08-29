@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import mmap
 import os
 import uuid
 from dataclasses import dataclass
@@ -439,39 +440,83 @@ class AssetReader:
                 return asset, cached
 
         if asset["storage_kind"] == "bag":
-            _, container_data = self.read(str(segment["container_asset_id"]))
-            start = int(segment["data_offset"])
-            end = start + int(segment["data_size"])
-            if start < 0 or end > len(container_data):
-                raise Ra2ExplorerError("AUDIO.BAG 已变化，请重新扫描")
-            return asset, self._store(cache_path, container_data[start:end])
-        root = Path(source["root_path"])
-        if asset["storage_kind"] == "loose":
-            path = SourceLibrary._safe_source_path(root, asset["loose_relative_path"])
-            data = path.read_bytes()
-            if len(data) != asset["size"]:
-                raise Ra2ExplorerError("源文件已变化，请重新扫描")
-            return asset, self._store(cache_path, data)
+            container = self.database.get_asset(str(segment["container_asset_id"]))
+            data = self._read_storage(
+                container,
+                source,
+                offset=int(segment["data_offset"]),
+                length=int(segment["data_size"]),
+            )
+        else:
+            data = self._read_storage(asset, source)
+        return asset, self._store(cache_path, data)
 
-        archive = self.database.get_archive(asset["archive_id"])
-        root_archive_path = SourceLibrary._safe_source_path(root, archive["root_relative_path"])
-        data = root_archive_path.read_bytes()
-        for ordinal in json.loads(archive["entry_chain"]):
-            index = parse_mix(data)
+    def materialize(self, asset_id: str) -> tuple[dict[str, object], Path]:
+        asset, data = self.read(asset_id)
+        source = self.database.get_source(str(asset["source_id"]))
+        path = self._cache_path(asset, source)
+        if path is None or self.derived is None:
+            raise Ra2ExplorerError("派生工作区不可用")
+        self.derived.write_bytes(path, data)
+        return asset, path
+
+    def _read_storage(
+        self,
+        asset: dict[str, object],
+        source: dict[str, object],
+        *,
+        offset: int = 0,
+        length: int | None = None,
+    ) -> bytes:
+        size = int(asset["size"])
+        selected_length = size - offset if length is None else length
+        if offset < 0 or selected_length < 0 or offset + selected_length > size:
+            raise Ra2ExplorerError("资产片段范围无效，请重新扫描")
+        root = Path(str(source["root_path"]))
+        if asset["storage_kind"] == "loose":
+            path = SourceLibrary._safe_source_path(root, str(asset["loose_relative_path"]))
+            if path.stat().st_size != size:
+                raise Ra2ExplorerError("源文件已变化，请重新扫描")
+            with path.open("rb") as stream:
+                stream.seek(offset)
+                data = stream.read(selected_length)
+            if len(data) != selected_length:
+                raise Ra2ExplorerError("源文件已变化，请重新扫描")
+            return data
+
+        archive = self.database.get_archive(str(asset["archive_id"]))
+        root_archive_path = SourceLibrary._safe_source_path(
+            root, str(archive["root_relative_path"])
+        )
+        with (
+            root_archive_path.open("rb") as stream,
+            mmap.mmap(stream.fileno(), 0, access=mmap.ACCESS_READ) as mapped,
+        ):
+            views = [memoryview(mapped)]
             try:
-                entry = index.entries[ordinal]
-            except IndexError as error:
-                raise Ra2ExplorerError("源归档已变化，请重新扫描") from error
-            data = bytes(index.payload(data, entry))
-        index = parse_mix(data)
-        ordinal = asset["ordinal"]
-        try:
-            entry = index.entries[ordinal]
-        except (IndexError, TypeError) as error:
-            raise Ra2ExplorerError("源归档已变化，请重新扫描") from error
-        if entry.crc != asset["crc"] or entry.size != asset["size"]:
-            raise Ra2ExplorerError("源归档已变化，请重新扫描")
-        return asset, self._store(cache_path, bytes(index.payload(data, entry)))
+                current = views[-1]
+                for ordinal in json.loads(str(archive["entry_chain"])):
+                    index = parse_mix(current)
+                    try:
+                        entry = index.entries[ordinal]
+                    except IndexError as error:
+                        raise Ra2ExplorerError("源归档已变化，请重新扫描") from error
+                    current = index.payload(current, entry)
+                    views.append(current)
+                index = parse_mix(current)
+                ordinal = asset["ordinal"]
+                try:
+                    entry = index.entries[int(ordinal)]
+                except (IndexError, TypeError, ValueError) as error:
+                    raise Ra2ExplorerError("源归档已变化，请重新扫描") from error
+                if entry.crc != asset["crc"] or entry.size != size:
+                    raise Ra2ExplorerError("源归档已变化，请重新扫描")
+                payload = index.payload(current, entry)
+                views.append(payload)
+                return bytes(payload[offset : offset + selected_length])
+            finally:
+                for view in reversed(views):
+                    view.release()
 
     def _cache_path(
         self,

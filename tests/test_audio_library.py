@@ -74,3 +74,7 @@ def test_audio_bag_entries_are_indexed_and_streamed_as_wav(tmp_path: Path) -> No
     assert exported.status_code == 200
     assert exported.headers["content-type"] == "audio/wav"
     assert exported.content.startswith(b"RIFF")
+    assert list(settings.derived_root.rglob("*.bag")) == []
+    bag_segments = list(settings.derived_root.rglob("*.bagseg"))
+    assert bag_segments
+    assert max(path.stat().st_size for path in bag_segments) <= max(len(pcm), len(ima))

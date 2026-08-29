@@ -36,7 +36,7 @@ def test_csf_decodes_inverted_utf16_and_extra_value() -> None:
     strings = parse_csf(data)
 
     assert sniff_format(data) == "csf"
-    assert strings.string_count == 3
+    assert strings.string_count == 5
     assert strings.labels[1].values[0].text == "Asset pipeline ready."
     assert strings.labels[1].values[0].extra == "explorer-ready"
 
@@ -100,7 +100,8 @@ def test_vxl_composite_applies_hva_facing_and_player_color() -> None:
     assert scene["frame"] == 3
     assert scene["frame_count"] == 4
     assert scene["voxel_count"] == model.voxel_count
-    assert len(scene["voxels"]) == model.voxel_count
+    assert scene["visible_voxel_count"] == len(scene["voxels"])
+    assert scene["visible_voxel_count"] < model.voxel_count
     assert scene["bounds"]["max"][2] > scene["bounds"]["min"][2]
 
 
