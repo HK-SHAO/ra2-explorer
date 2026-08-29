@@ -38,7 +38,7 @@ Steam 常见路径示例：
 D:\SteamLibrary\steamapps\common\Command & Conquer Red Alert II
 ```
 
-实际路径由 Steam 库位置决定，不要假定一定在系统盘。导入后源文件保持只读；索引、解包缓存、解析元数据、PNG、WAV 和三维场景 JSON 统一位于 `.runtime\RA2MD-Ext`，扫描器不会把该目录重新当成游戏源。
+实际路径由 Steam 库位置决定，不要假定一定在系统盘。导入后源文件保持只读；索引、解包缓存、解析元数据、PNG、WAV、MP4 和三维场景 JSON 统一位于 `.runtime\RA2MD-Ext`，扫描器不会把该目录重新当成游戏源。
 
 导入后可执行确定性的按格式抽样验证。验证会读取解析结果，并对可视格式实际渲染首个可用帧或地块；它不会运行游戏：
 

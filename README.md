@@ -7,10 +7,11 @@ RA2 Explorer 是一个本地优先的《命令与征服：红色警戒 2》资�
 - 扫描本地目录中的松散资产和 MIX / MMX / YRO；
 - 读取基础、扩展和 Blowfish 加密 MIX，并递归索引已知的嵌套 MIX；
 - 同时解析 RA2/TS CRC32 与早期 Westwood 文件名哈希；
-- 预览 PAL、RA2/TS SHP、TMP 和 PCX，并用 Three.js/WebGL 交互查看 VXL/HVA 三维组合；
+- 预览 PAL、RA2/TS SHP、TMP、PCX 和地图对象布局，并用 Three.js/WebGL 交互查看 VXL/HVA 三维组合与时间轴；
 - 读取 CSF/INI/MAP 文本，解码 AUD 与 AUDIO.IDX/BAG，并把 Westwood/IMA ADPCM 转为浏览器可播放 WAV；
-- 叠加 RULES/ART/CSF 建立单位目录，解析武器、弹体、弹头依赖，并组合车辆主体、炮塔、炮管 VXL/HVA；
-- 对组合 VXL/HVA 选择时间帧、阵营色和调色板，并用鼠标旋转、缩放和平移三维模型；
+- 叠加 RULES/ART/SOUND/EVA/CSF 建立单位目录，关联武器、弹体、弹头、动画、语音、音效和本地化台词；
+- 组合车辆主体、炮塔、炮管 VXL/HVA，按真实索引配色和阵营色显示，并用鼠标旋转、缩放和平移；
+- 按需把 VQA/BIK 转为浏览器可播放 MP4，转换结果跨进程复用；
 - 自动发现项目内 `.runtime\RA2MD`、Steam App 2229850、EA App/Origin 与兼容旧版安装；
 - 对真实来源按格式均匀抽样，执行解析和首帧渲染验证；
 - 通过 SQLite、HTTP API、CLI 和浏览器界面访问同一份索引；
@@ -21,13 +22,13 @@ RA2 Explorer 是一个本地优先的《命令与征服：红色警戒 2》资�
 
 ## 立即运行
 
-开发、构建、测试、检查和运行命令强制使用 `cmd.exe`；只有 Git 操作使用 Git Bash。以下命令均为 `cmd.exe` 语法，要求 Python 3.11+ 和 Node 18+：
+开发、构建、测试、检查、运行和 Git 命令全部强制使用 `cmd.exe`。以下命令均为 `cmd.exe` 语法，要求 Python 3.11+ 和 Node 18+：
 
 ```bat
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -e .[dev]
 .venv\Scripts\ra2exp.exe sync-names
-.venv\Scripts\ra2exp.exe import .runtime\RA2MD --name RA2MD-官方安装
+.venv\Scripts\ra2exp.exe import .runtime\RA2MD --name 本地游戏文件
 cd frontend
 npm ci
 npm run build
@@ -37,7 +38,7 @@ cd ..
 
 服务在 `http://127.0.0.1:46120` 无窗口后台运行，并登记为当前 Windows 用户的登录自启项。构建后的页面由 Python 服务从 `frontend\dist` 提供；运行时不需要 Node，也不会加载 CDN。`.runtime\RA2MD` 始终只读，应用不会启动其中的 EXE；所有派生结果进入独立的 `.runtime\RA2MD-Ext`。
 
-页面左侧可在“资源文件”和“游戏单位”之间切换。资产默认突出单位模型、地图、动画、语音和音效；设置可以启用底层格式，list/grid 共用查询、选中与增量分页状态。详情根据类型切换为三维模型、帧动画、图像、音频播放器、地图/配置文本或结构信息，不展示重复位置列和无操作价值的完整路径。重扫后页面按新的 source revision 刷新并隔离旧派生产物。
+页面左侧使用统一树状导航：“单位”下直接选择载具、航空器、步兵和建筑，动画、语音和音效是同级内容节点，不再设置“资源 / 单位”切换或重复的原始模型分类。地图、图像、地形、规则文本及其他底层格式可在显示设置中按需启用。中栏按当前类型提供格式或语义标签以及名称、体积、造价、生命值等有效排序；list/grid 共用查询、筛选、选中与增量分页状态。详情根据类型切换为三维模型、有效帧动画、图像、音频、视频、地图布局或文本。
 
 只开发 API 时可以不构建前端，接口文档位于 `http://127.0.0.1:46120/api/docs`。前端热更新使用 `cd frontend` 后运行 `npm run dev`。后台管理命令为：
 
