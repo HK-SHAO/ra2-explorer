@@ -28,7 +28,12 @@ from ra2_explorer.codecs.pal import PLAYER_COLOR_PRESETS, grayscale_palette, par
 from ra2_explorer.codecs.shp import parse_shp
 from ra2_explorer.codecs.text import decode_legacy_text, parse_ini, text_excerpt
 from ra2_explorer.codecs.tmp import parse_tmp
-from ra2_explorer.codecs.vxl import VxlRenderPart, build_vxl_scene, parse_vxl
+from ra2_explorer.codecs.vxl import (
+    VxlRenderPart,
+    build_vxl_scene,
+    parse_vxl,
+    render_vxl_composite,
+)
 from ra2_explorer.codecs.wav import parse_wav, wav_for_browser
 from ra2_explorer.config import Settings, load_settings
 from ra2_explorer.derived import DerivedStore
@@ -159,7 +164,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         format: str | None = Query(default=None, max_length=24),
         formats: str | None = Query(default=None, max_length=240),
         sort: str = Query(default="name_asc", max_length=20),
-        limit: int = Query(default=100, ge=1, le=500),
+        limit: int = Query(default=100, ge=1, le=1_000),
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, object]:
         selected_formats = tuple(
@@ -200,7 +205,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         q: str | None = Query(default=None, max_length=200),
         kind: str | None = Query(default=None),
         renderable: bool | None = Query(default=None),
-        limit: int = Query(default=100, ge=1, le=500),
+        limit: int = Query(default=100, ge=1, le=1_000),
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, object]:
         if kind is not None and kind not in ENTITY_KINDS:
@@ -210,6 +215,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             query=q,
             kind=kind,
             renderable=renderable,
+            limit=limit,
+            offset=offset,
+        )
+
+    @app.get("/api/media")
+    def media(
+        source_id: str,
+        q: str | None = Query(default=None, max_length=200),
+        kind: str | None = Query(default=None),
+        group: str | None = Query(default=None, max_length=64),
+        limit: int = Query(default=500, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict[str, object]:
+        if kind is not None and kind not in {"voice", "sound", "unknown"}:
+            raise HTTPException(status_code=422, detail="未知音频类型")
+        return services.semantic.list_media(
+            source_id,
+            query=q,
+            kind=kind,
+            group=group,
             limit=limit,
             offset=offset,
         )
@@ -298,7 +323,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "models",
             source_id,
             entity_id,
-            "scene-v2",
+            "scene-v3",
             f"frame-{frame}",
             f"color-{player_color or 'original'}",
             f"palette-{palette_id or 'auto'}",
@@ -392,7 +417,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             services,
             "models",
             asset_record,
-            "scene-v2",
+            "scene-v3",
             f"model-{model_asset['id']}",
             f"animation-{animation_asset['id'] if animation_asset else 'none'}",
             f"frame-{frame}",
@@ -488,7 +513,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> Response:
         asset_record = services.database.get_asset(asset_id)
         player_color = _validated_player_color(player_color)
-        if asset_record["format"] not in {"pal", "shp", "vxl", "tmp", "pcx", "map"}:
+        if asset_record["format"] not in {
+            "pal",
+            "shp",
+            "vxl",
+            "hva",
+            "tmp",
+            "pcx",
+            "map",
+        }:
             raise HTTPException(status_code=409, detail="该格式没有图像预览")
         artifact_path = _asset_artifact_path(
             services,
@@ -526,6 +559,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             image = model.render(
                 frame,
                 palette=palette,
+                player_color=player_color,
+                scale=scale,
+            )
+        elif asset_record["format"] == "hva":
+            source_id = str(asset_record["source_id"])
+            stem = Path(str(asset_record["display_name"])).stem
+            related = services.database.assets_named(source_id, (f"{stem}.vxl",))
+            model_asset = next((item for item in related if item["format"] == "vxl"), None)
+            if model_asset is None:
+                raise HTTPException(status_code=409, detail="没有找到与 HVA 同名的 VXL 模型")
+            _, model_data = services.reader.read(str(model_asset["id"]))
+            animation = parse_hva(data)
+            if frame >= animation.frame_count:
+                raise HTTPException(status_code=416, detail="帧编号超出范围")
+            palette = _select_palette(services, model_asset, palette_id)
+            image = render_vxl_composite(
+                (VxlRenderPart(parse_vxl(model_data), animation),),
+                palette=palette,
+                frame=frame,
                 player_color=player_color,
                 scale=scale,
             )

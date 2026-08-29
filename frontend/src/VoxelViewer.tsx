@@ -50,6 +50,13 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
       renderer.domElement.setAttribute("aria-label", `${label} 交互式三维模型`);
       mount.appendChild(renderer.domElement);
 
+      const skyLight = new THREE.HemisphereLight(0xe8efff, 0x30271f, 1.35);
+      const keyLight = new THREE.DirectionalLight(0xfff3dc, 2.15);
+      keyLight.position.set(-3.5, 6, 4.5);
+      const fillLight = new THREE.DirectionalLight(0xbccfff, 0.55);
+      fillLight.position.set(4, 2, -3);
+      scene.add(skyLight, keyLight, fillLight);
+
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = false;
       controls.screenSpacePanning = true;
@@ -114,7 +121,7 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
         return response.json() as Promise<VoxelSceneData>;
       })
       .then((scene) => {
-        if (![1, 2].includes(scene.version) || !Array.isArray(scene.voxels)) {
+        if (![1, 2, 3].includes(scene.version) || !Array.isArray(scene.voxels)) {
           throw new Error("模型数据版本不受支持");
         }
         setData(scene);
@@ -135,7 +142,7 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
     disposeModel(engine);
 
     const geometry = new THREE.BoxGeometry(1, 1, 1);
-    const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const material = new THREE.MeshLambertMaterial({ color: 0xffffff });
     const model = new THREE.InstancedMesh(geometry, material, data.voxels.length);
     model.instanceMatrix.setUsage(THREE.StaticDrawUsage);
     const transform = new THREE.Object3D();

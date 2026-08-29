@@ -33,6 +33,15 @@ def create_fixture_installation(target: Path) -> Path:
     rules = (
         b"[VehicleTypes]\r\n"
         b"0=DemoVehicle\r\n"
+        b"\r\n[Countries]\r\n"
+        b"0=Americans\r\n"
+        b"1=Russians\r\n"
+        b"\r\n[Americans]\r\n"
+        b"UIName=Name:Americans\r\n"
+        b"Side=GDI\r\n"
+        b"\r\n[Russians]\r\n"
+        b"UIName=Name:Russians\r\n"
+        b"Side=Nod\r\n"
         b"\r\n[InfantryTypes]\r\n"
         b"0=DemoInfantry\r\n"
         b"\r\n[DemoVehicle]\r\n"
@@ -43,6 +52,7 @@ def create_fixture_installation(target: Path) -> Path:
         b"Secondary=none\r\n"
         b"Strength=400\r\n"
         b"Cost=800\r\n"
+        b"Owner=Americans,Russians\r\n"
         b"VoiceSelect=FixtureSelect\r\n"
         b"\r\n[DemoInfantry]\r\n"
         b"UIName=UNIT:DemoInfantry\r\n"
@@ -151,6 +161,8 @@ def _build_fixture_csf() -> bytes:
         ("VOX:fixture", "Ready for the test.", "fixture-extra"),
         ("UNIT:DemoVehicle", "Generated test vehicle", None),
         ("UNIT:DemoInfantry", "Generated test infantry", None),
+        ("Name:Americans", "United States", None),
+        ("Name:Russians", "Russia", None),
     )
     output = bytearray(b" FSC")
     output.extend(struct.pack("<IIIII", 3, len(labels), len(labels), 0, 0))

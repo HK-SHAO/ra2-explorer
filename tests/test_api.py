@@ -77,10 +77,11 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert client.get(f"/api/assets/{vxl['id']}/preview.png").content.startswith(b"\x89PNG")
     vxl_model = client.get(f"/api/assets/{vxl['id']}/model.json")
     assert vxl_model.status_code == 200
-    assert vxl_model.json()["version"] == 2
+    assert vxl_model.json()["version"] == 3
     assert vxl_model.json()["voxel_count"] > 80
     assert vxl_model.json()["visible_voxel_count"] <= vxl_model.json()["voxel_count"]
-    assert len(vxl_model.json()["voxels"][0]) == 7
+    assert len(vxl_model.json()["voxels"][0]) == 9
+    assert vxl_model.json()["voxels"][0][-2:] == [20, 4]
 
     animation = by_name["fixture.hva"]
     animated_model = client.get(
@@ -90,6 +91,12 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert animated_model.status_code == 200
     assert animated_model.json()["frame"] == 3
     assert animated_model.json()["frame_count"] == 4
+    animated_preview = client.get(
+        f"/api/assets/{animation['id']}/preview.png",
+        params={"frame": 3, "player_color": "blue"},
+    )
+    assert animated_preview.status_code == 200
+    assert animated_preview.content.startswith(b"\x89PNG")
 
     terrain = by_name["fixture.tem"]
     terrain_preview = client.get(f"/api/assets/{terrain['id']}/preview.png")
@@ -127,6 +134,23 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert entity_summaries["DemoVehicle"]["body_format"] == "vxl"
     assert entity_summaries["DemoVehicle"]["media_count"] > 0
     assert "voice" in entity_summaries["DemoVehicle"]["media_kinds"]
+    assert entity_summaries["DemoVehicle"]["countries"] == ["Americans", "Russians"]
+    assert entity_summaries["DemoVehicle"]["sides"] == ["GDI", "Nod"]
+    assert {item["display_name"] for item in entity_page["countries"]} == {
+        "United States",
+        "Russia",
+    }
+
+    semantic_media = client.get(
+        "/api/media",
+        params={"source_id": source["id"], "kind": "voice"},
+    )
+    assert semantic_media.status_code == 200
+    media_items = semantic_media.json()["items"]
+    assert len(media_items) == 1
+    assert media_items[0]["asset"]["display_name"] == "fixture.wav"
+    assert media_items[0]["description"] == "Ready for the test."
+    assert media_items[0]["groups"] == ["unit_voice"]
 
     entity = client.get(f"/api/entities/{source['id']}/DemoVehicle")
     assert entity.status_code == 200

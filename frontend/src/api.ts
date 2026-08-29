@@ -141,6 +141,8 @@ export interface EntitySummary {
   strength: string | null;
   owner: string | null;
   primary: string | null;
+  countries: string[];
+  sides: string[];
 }
 
 export type AssetSort = "name_asc" | "name_desc" | "size_desc" | "size_asc";
@@ -228,7 +230,31 @@ export interface EntityPage {
   items: EntitySummary[];
   total: number;
   kinds: Array<{ kind: EntityKind; count: number }>;
+  countries: Array<{ id: string; display_name: string; side: string; count: number }>;
+  sides: Array<{ id: string; count: number }>;
   warnings: string[];
+}
+
+export type MediaKind = "voice" | "sound" | "unknown";
+
+export interface MediaItem {
+  asset: EntityComponentAsset;
+  kind: MediaKind;
+  groups: string[];
+  texts: string[];
+  events: string[];
+  slots: string[];
+  entities: Array<{ id: string; display_name: string; kind: EntityKind }>;
+  countries: string[];
+  sides: string[];
+  description: string | null;
+}
+
+export interface MediaPage {
+  items: MediaItem[];
+  total: number;
+  kinds: Array<{ kind: MediaKind; count: number }>;
+  groups: Array<{ group: string; count: number }>;
 }
 
 export interface SemanticDiagnostics {
@@ -321,11 +347,28 @@ export const api = {
     kind: EntityKind | "",
     renderable: "" | "true" | "false" = "",
   ) => {
-    const params = new URLSearchParams({ source_id: sourceId, limit: "500" });
+    const params = new URLSearchParams({ source_id: sourceId, limit: "1000" });
     if (query.trim()) params.set("q", query.trim());
     if (kind) params.set("kind", kind);
     if (renderable) params.set("renderable", renderable);
     return request<EntityPage>(`/api/entities?${params}`);
+  },
+  media: (
+    sourceId: string,
+    query: string,
+    kind: MediaKind,
+    group = "",
+    offset = 0,
+  ) => {
+    const params = new URLSearchParams({
+      source_id: sourceId,
+      kind,
+      limit: "500",
+      offset: String(offset),
+    });
+    if (query.trim()) params.set("q", query.trim());
+    if (group) params.set("group", group);
+    return request<MediaPage>(`/api/media?${params}`);
   },
   entity: (sourceId: string, entityId: string) =>
     request<GameEntity>(
@@ -338,6 +381,8 @@ export const api = {
       components: entity.components ?? [],
       dependencies: entity.dependencies ?? [],
       media: entity.media ?? [],
+      countries: entity.countries ?? [],
+      sides: entity.sides ?? [],
       rules: entity.rules ?? {},
       art: entity.art ?? {},
       preview: entity.preview ?? {
@@ -402,9 +447,16 @@ export const api = {
     if (paletteId) params.set("palette_id", paletteId);
     return `/api/assets/${assetId}/model.json?${params}`;
   },
-  previewUrl: (assetId: string, frame: number, paletteId: string, scale = 4) => {
+  previewUrl: (
+    assetId: string,
+    frame: number,
+    paletteId: string,
+    scale = 4,
+    playerColor = "",
+  ) => {
     const params = new URLSearchParams({ frame: String(frame), scale: String(scale) });
     if (paletteId) params.set("palette_id", paletteId);
+    if (playerColor) params.set("player_color", playerColor);
     return `/api/assets/${assetId}/preview.png?${params}`;
   },
 };

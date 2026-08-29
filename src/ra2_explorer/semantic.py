@@ -220,6 +220,8 @@ class GameEntity:
     ui_name_resolved: bool
     image: str
     voxel: bool
+    countries: tuple[str, ...]
+    sides: tuple[str, ...]
     rules: dict[str, str]
     art: dict[str, str]
     components: tuple[EntityComponent, ...]
@@ -246,6 +248,8 @@ class GameEntity:
             "ui_name": self.ui_name,
             "image": self.image,
             "voxel": self.voxel,
+            "countries": list(self.countries),
+            "sides": list(self.sides),
             "renderable": self.renderable,
             "component_count": sum(component.asset is not None for component in self.components),
             "body_format": body["format"] if body else None,
@@ -276,6 +280,8 @@ class SemanticCatalog:
     warnings: tuple[str, ...]
     audio_events: dict[str, tuple[MediaSample, ...]]
     eva_events: tuple[MediaAssociation, ...]
+    countries: tuple[dict[str, str], ...]
+    media_items: tuple[dict[str, object], ...]
 
     def get(self, entity_id: str) -> GameEntity:
         folded = entity_id.casefold()
@@ -319,11 +325,13 @@ class SemanticLibrary:
     ) -> dict[str, object]:
         catalog = self.catalog(source_id)
         entities = list(catalog.entities)
-        counts = Counter(entity.kind for entity in entities)
-        if kind:
-            entities = [entity for entity in entities if entity.kind == kind]
         if renderable is not None:
             entities = [entity for entity in entities if entity.renderable is renderable]
+        counts = Counter(entity.kind for entity in entities)
+        country_counts = Counter(country for entity in entities for country in entity.countries)
+        side_counts = Counter(side for entity in entities for side in entity.sides)
+        if kind:
+            entities = [entity for entity in entities if entity.kind == kind]
         if query:
             needle = query.casefold()
             entities = [entity for entity in entities if needle in _entity_search_text(entity)]
@@ -336,7 +344,57 @@ class SemanticLibrary:
                 {"kind": entity_kind, "count": counts.get(entity_kind, 0)}
                 for entity_kind in ENTITY_KINDS
             ],
+            "countries": [
+                {**country, "count": country_counts.get(country["id"], 0)}
+                for country in catalog.countries
+                if country_counts.get(country["id"], 0)
+            ],
+            "sides": [
+                {"id": side, "count": count}
+                for side, count in sorted(side_counts.items())
+                if side
+            ],
             "warnings": list(catalog.warnings),
+        }
+
+    def list_media(
+        self,
+        source_id: str,
+        *,
+        query: str | None = None,
+        kind: str | None = None,
+        group: str | None = None,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> dict[str, object]:
+        catalog = self.catalog(source_id)
+        all_items = list(catalog.media_items)
+        kind_counts = Counter(str(item["kind"]) for item in all_items)
+        group_counts = Counter(
+            str(media_group)
+            for item in all_items
+            for media_group in item["groups"]  # type: ignore[union-attr]
+        )
+        items = all_items
+        if kind:
+            items = [item for item in items if item["kind"] == kind]
+        if group:
+            items = [item for item in items if group in item["groups"]]  # type: ignore[operator]
+        if query:
+            needle = query.casefold()
+            items = [item for item in items if needle in _media_search_text(item)]
+        total = len(items)
+        return {
+            "items": items[offset : offset + limit],
+            "total": total,
+            "kinds": [
+                {"kind": media_kind, "count": kind_counts.get(media_kind, 0)}
+                for media_kind in ("voice", "sound", "unknown")
+            ],
+            "groups": [
+                {"group": media_group, "count": count}
+                for media_group, count in sorted(group_counts.items())
+            ],
         }
 
     def get_entity(self, source_id: str, entity_id: str) -> dict[str, object]:
@@ -411,16 +469,17 @@ class SemanticLibrary:
         for event, samples in catalog.audio_events.items():
             for sample in samples:
                 if sample.asset and sample.asset["id"] == asset_id:
+                    media_kind = _media_kind_for_asset(catalog.media_items, sample.asset)
                     append(
                         {
                             "scope": "event",
-                            "kind": "sound",
+                            "kind": media_kind,
                             "slot": "sound_event",
                             "event": event,
                             "entity": None,
                             "text": sample.text,
                         },
-                        ("sound", event.casefold(), sample.name.casefold()),
+                        (media_kind, event.casefold(), sample.name.casefold()),
                     )
         return {"items": items[:100], "total": len(items)}
 
@@ -705,6 +764,10 @@ class SemanticLibrary:
         strings, voice_strings = _merge_csf_inputs(self.reader, csf_assets, warnings)
         audio_events = _build_audio_events(sounds, asset_index, voice_strings)
         eva_events = _build_eva_events(eva, asset_index, voice_strings)
+        country_definitions = _build_country_definitions(rules, strings)
+        country_lookup = {
+            country["id"].casefold(): country for country in country_definitions
+        }
 
         entities = []
         seen = set()
@@ -731,6 +794,13 @@ class SemanticLibrary:
                     _yes(rule_values.get("turret")),
                 )
                 dependencies = _resolve_dependencies(rule_values, rules)
+                countries = _references(rule_values.get("owner"))
+                sides = tuple(
+                    dict.fromkeys(
+                        country_lookup.get(country.casefold(), {}).get("side", "")
+                        for country in countries
+                    )
+                )
                 entities.append(
                     GameEntity(
                         entity_id,
@@ -741,6 +811,8 @@ class SemanticLibrary:
                         localized_name is not None,
                         image,
                         voxel or detected_voxel,
+                        countries,
+                        tuple(side for side in sides if side),
                         _selected_fields(rule_values, _RULE_FIELDS),
                         _selected_fields(art_values, _ART_FIELDS),
                         components,
@@ -770,6 +842,13 @@ class SemanticLibrary:
             warnings.append("未找到 rules.ini 或 rulesmd.ini")
         if not art_assets:
             warnings.append("未找到 art.ini 或 artmd.ini")
+        media_items = _build_media_items(
+            assets,
+            tuple(entities),
+            audio_events,
+            eva_events,
+            voice_strings,
+        )
         return SemanticCatalog(
             source_id,
             tuple(entities),
@@ -777,7 +856,236 @@ class SemanticLibrary:
             tuple(warnings),
             audio_events,
             eva_events,
+            country_definitions,
+            media_items,
         )
+
+
+def _build_country_definitions(
+    rules: dict[str, dict[str, str]],
+    strings: dict[str, str],
+) -> tuple[dict[str, str], ...]:
+    countries = []
+    for country_id in _type_values(rules.get("countries", {})):
+        values = rules.get(country_id.casefold(), {})
+        ui_name = values.get("uiname")
+        display_name = (
+            strings.get(ui_name.casefold(), "") if ui_name else ""
+        ) or values.get("name") or country_id
+        countries.append(
+            {
+                "id": country_id,
+                "display_name": display_name,
+                "side": values.get("side", ""),
+            }
+        )
+    return tuple(countries)
+
+
+def _build_media_items(
+    assets: list[dict[str, Any]],
+    entities: tuple[GameEntity, ...],
+    audio_events: dict[str, tuple[MediaSample, ...]],
+    eva_events: tuple[MediaAssociation, ...],
+    voice_strings: dict[str, CsfValue],
+) -> tuple[dict[str, object], ...]:
+    representatives: dict[str, dict[str, Any]] = {}
+    for asset in assets:
+        if asset["format"] not in {"bag_audio", "wav", "aud"}:
+            continue
+        key = str(asset["display_name"]).casefold()
+        current = representatives.get(key)
+        if current is None or _asset_precedence(asset) > _asset_precedence(current):
+            representatives[key] = asset
+
+    states: dict[str, dict[str, Any]] = {
+        key: {
+            "asset": asset,
+            "voice": False,
+            "sound": False,
+            "groups": set(),
+            "texts": set(),
+            "events": set(),
+            "slots": set(),
+            "entities": {},
+            "countries": set(),
+            "sides": set(),
+        }
+        for key, asset in representatives.items()
+    }
+
+    def state_for(sample: MediaSample) -> dict[str, Any] | None:
+        if sample.asset is None:
+            return None
+        return states.get(str(sample.asset["display_name"]).casefold())
+
+    def add_sample(
+        sample: MediaSample,
+        *,
+        kind: str,
+        group: str,
+        event: str,
+        slot: str,
+        entity: GameEntity | None = None,
+    ) -> None:
+        state = state_for(sample)
+        if state is None:
+            return
+        state[kind] = True
+        state["groups"].add(group)
+        if sample.text:
+            state["texts"].add(sample.text.strip())
+        if event:
+            state["events"].add(event)
+        if slot:
+            state["slots"].add(slot)
+        if entity is not None:
+            state["entities"][entity.id.casefold()] = {
+                "id": entity.id,
+                "display_name": entity.display_name,
+                "kind": entity.kind,
+            }
+            state["countries"].update(entity.countries)
+            state["sides"].update(entity.sides)
+
+    combat_slots = {slot for slot, _ in _WEAPON_SLOTS}
+    for entity in entities:
+        for association in entity.media:
+            if association.kind == "animation":
+                continue
+            for sample in association.samples:
+                is_voice = association.kind == "voice" or sample.text is not None
+                if is_voice:
+                    add_sample(
+                        sample,
+                        kind="voice",
+                        group="unit_voice",
+                        event=association.event,
+                        slot=association.slot,
+                        entity=entity,
+                    )
+                else:
+                    group = (
+                        "combat_sound"
+                        if association.slot in combat_slots or association.source != entity.id
+                        else "unit_sound"
+                    )
+                    add_sample(
+                        sample,
+                        kind="sound",
+                        group=group,
+                        event=association.event,
+                        slot=association.slot,
+                        entity=entity,
+                    )
+
+    for association in eva_events:
+        for sample in association.samples:
+            add_sample(
+                sample,
+                kind="voice",
+                group="eva_voice",
+                event=association.event,
+                slot=association.slot,
+            )
+
+    for event, samples in audio_events.items():
+        for sample in samples:
+            if sample.text:
+                add_sample(
+                    sample,
+                    kind="voice",
+                    group="other_voice",
+                    event=event,
+                    slot="sound_event",
+                )
+                continue
+            folded = f"{event} {sample.name}".casefold()
+            if any(token in folded for token in ("ambient", "_amb", "bird", "wind", "water")):
+                group = "ambient_sound"
+            elif any(
+                token in folded
+                for token in ("attack", "fire", "expl", "impact", "weapon", "shot", "hit")
+            ):
+                group = "combat_sound"
+            else:
+                group = "other_sound"
+            add_sample(
+                sample,
+                kind="sound",
+                group=group,
+                event=event,
+                slot="sound_event",
+            )
+
+    for key, value in voice_strings.items():
+        for suffix in (".wav", ".aud"):
+            state = states.get(f"{key}{suffix}")
+            if state is None:
+                continue
+            state["voice"] = True
+            state["texts"].add(value.text.strip())
+            stem = key.casefold()
+            if not any(group.endswith("_voice") for group in state["groups"]):
+                state["groups"].add(
+                    "mission_voice"
+                    if re.match(r"^[a-z]\d{2}[_-]p\d+", stem)
+                    else "other_voice"
+                )
+
+    items = []
+    for state in states.values():
+        kind = "voice" if state["voice"] else "sound" if state["sound"] else "unknown"
+        groups = sorted(
+            group
+            for group in state["groups"]
+            if (kind == "voice" and group.endswith("_voice"))
+            or (kind == "sound" and group.endswith("_sound"))
+        )
+        if kind == "voice" and len(groups) > 1 and "other_voice" in groups:
+            groups.remove("other_voice")
+        if kind == "sound" and len(groups) > 1 and "other_sound" in groups:
+            groups.remove("other_sound")
+        if kind == "unknown":
+            groups = ["unclassified"]
+        asset_stem = str(state["asset"]["display_name"]).rsplit(".", 1)[0].casefold()
+        if (
+            kind == "voice"
+            and "other_voice" in groups
+            and re.match(r"^[a-z]\d{2}[_-]p\d+", asset_stem)
+        ):
+            groups[groups.index("other_voice")] = "mission_voice"
+        texts = sorted(state["texts"], key=str.casefold)
+        events = sorted(state["events"], key=str.casefold)
+        entity_refs = sorted(
+            state["entities"].values(),
+            key=lambda item: (item["display_name"].casefold(), item["id"].casefold()),
+        )
+        description = texts[0] if texts else None
+        if description is None and entity_refs:
+            description = str(entity_refs[0]["display_name"])
+            if events:
+                description += f" · {events[0]}"
+        elif description is None and events:
+            description = events[0]
+        items.append(
+            {
+                "asset": _asset_summary(state["asset"]),
+                "kind": kind,
+                "groups": groups,
+                "texts": texts,
+                "events": events,
+                "slots": sorted(state["slots"]),
+                "entities": entity_refs,
+                "countries": sorted(state["countries"], key=str.casefold),
+                "sides": sorted(state["sides"], key=str.casefold),
+                "description": description,
+            }
+        )
+    items.sort(
+        key=lambda item: str(item["asset"]["display_name"]).casefold()  # type: ignore[index]
+    )
+    return tuple(items)
 
 
 def _named_inputs(
@@ -1306,6 +1614,42 @@ def _entity_search_text(entity: GameEntity) -> str:
             ),
         )
     ).casefold()
+
+
+def _media_search_text(item: dict[str, object]) -> str:
+    asset = item["asset"]
+    entities = item["entities"]
+    return "\n".join(
+        (
+            str(asset["display_name"]),  # type: ignore[index]
+            str(item.get("description") or ""),
+            *(str(value) for value in item["texts"]),  # type: ignore[union-attr]
+            *(str(value) for value in item["events"]),  # type: ignore[union-attr]
+            *(str(value) for value in item["slots"]),  # type: ignore[union-attr]
+            *(str(value) for value in item["countries"]),  # type: ignore[union-attr]
+            *(str(value) for value in item["sides"]),  # type: ignore[union-attr]
+            *(
+                f"{entity['id']} {entity['display_name']}"
+                for entity in entities  # type: ignore[union-attr]
+            ),
+        )
+    ).casefold()
+
+
+def _media_kind_for_asset(
+    media_items: tuple[dict[str, object], ...],
+    asset: dict[str, Any],
+) -> str:
+    asset_id = str(asset["id"])
+    display_name = str(asset["display_name"]).casefold()
+    for item in media_items:
+        selected = item["asset"]
+        if (
+            str(selected["id"]) == asset_id  # type: ignore[index]
+            or str(selected["display_name"]).casefold() == display_name  # type: ignore[index]
+        ):
+            return str(item["kind"])
+    return "unknown"
 
 
 __all__ = [

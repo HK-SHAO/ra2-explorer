@@ -158,6 +158,8 @@ class _WorldVoxel:
     size: float
     color: int
     palette: Palette
+    normal: int
+    normals_mode: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +171,8 @@ class VxlSceneVoxel:
     red: int
     green: int
     blue: int
+    normal: int
+    normals_mode: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,7 +197,7 @@ class VxlScene:
             minimum = [0.0, 0.0, 0.0]
             maximum = [0.0, 0.0, 0.0]
         return {
-            "version": 2,
+            "version": 3,
             "frame": self.frame,
             "frame_count": self.frame_count,
             "part_count": self.part_count,
@@ -212,6 +216,8 @@ class VxlScene:
                     voxel.red,
                     voxel.green,
                     voxel.blue,
+                    voxel.normal,
+                    voxel.normals_mode,
                 ]
                 for voxel in self.voxels
             ],
@@ -244,6 +250,8 @@ def build_vxl_scene(
                 red,
                 green,
                 blue,
+                voxel.normal,
+                voxel.normals_mode,
             )
         )
     frame_count = max(
@@ -407,6 +415,8 @@ def _collect_world_voxels(
                         limb.scale,
                         voxel.color,
                         active_palette,
+                        voxel.normal,
+                        limb.normals_mode,
                     )
                 )
     return world_voxels

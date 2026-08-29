@@ -36,7 +36,7 @@ def test_csf_decodes_inverted_utf16_and_extra_value() -> None:
     strings = parse_csf(data)
 
     assert sniff_format(data) == "csf"
-    assert strings.string_count == 5
+    assert strings.string_count == 7
     assert strings.labels[1].values[0].text == "Asset pipeline ready."
     assert strings.labels[1].values[0].extra == "explorer-ready"
 
