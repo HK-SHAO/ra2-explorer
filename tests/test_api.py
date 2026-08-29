@@ -289,6 +289,16 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert infantry_preview["source_frame_count"] == 6
     assert infantry_preview["frame_indices"] == [0, 2, 4]
     assert infantry_preview["supports_facing"] is True
+    ready_animation = next(
+        item
+        for item in infantry.json()["media"]
+        if item["kind"] == "animation" and item["event"] == "ready"
+    )
+    assert ready_animation["aliases"] == ["guard"]
+    assert not any(
+        item["kind"] == "animation" and item["event"] == "guard"
+        for item in infantry.json()["media"]
+    )
     walk_animation = next(
         item
         for item in infantry.json()["media"]
@@ -312,6 +322,15 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     )
     assert infantry_image.status_code == 200
     assert infantry_image.content.startswith(b"\x89PNG")
+    infantry_facing = client.get(
+        f"/api/entities/{source['id']}/DemoInfantry/preview.png",
+        params={"frame": 0, "facing": 2},
+    )
+    assert infantry_facing.status_code == 200
+    assert infantry_facing.content != client.get(
+        f"/api/entities/{source['id']}/DemoInfantry/preview.png",
+        params={"frame": 0, "facing": 0},
+    ).content
     infantry_thumbnail = client.get(
         f"/api/entities/{source['id']}/DemoInfantry/preview.png",
         params={"frame": 2, "thumbnail": "true"},

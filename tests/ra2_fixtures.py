@@ -95,6 +95,7 @@ def create_fixture_installation(target: Path) -> Path:
         b"Sequence=INFANTRYSEQ\r\n"
         b"\r\n[INFANTRYSEQ]\r\n"
         b"Ready=0,1,1\r\n"
+        b"Guard=0,1,1\r\n"
         b"Walk=0,2,1\r\n"
     )
     sound = b"[FixtureSelect]\r\nSounds=fixture fixture\r\n"

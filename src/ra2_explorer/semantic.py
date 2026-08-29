@@ -256,6 +256,7 @@ class MediaAssociation:
     source: str
     samples: tuple[MediaSample, ...]
     role: str | None = None
+    aliases: tuple[str, ...] = ()
 
     def as_dict(
         self, language: GameLanguage = DEFAULT_GAME_LANGUAGE
@@ -266,6 +267,7 @@ class MediaAssociation:
             "event": self.event,
             "source": self.source,
             "role": self.role,
+            "aliases": list(self.aliases),
             "samples": [sample.as_dict(language) for sample in self.samples],
         }
 
@@ -747,8 +749,14 @@ class SemanticLibrary:
         active_palette = palette
         if player_color:
             active_palette = (palette or grayscale_palette()).with_player_color(player_color)
+        sequence_frame = _body_sequence_preview_frame(entity, frame, facing)
+        source_frame = (
+            sequence_frame
+            if sequence_frame is not None and sequence_frame < len(sprite.frames)
+            else visible_frames[frame % len(visible_frames)]
+        )
         return entity, sprite.render(
-            visible_frames[frame % len(visible_frames)],
+            source_frame,
             active_palette,
             scale=scale,
         )
@@ -1495,6 +1503,82 @@ def _build_eva_events(
     return tuple(associations)
 
 
+def _body_sequence_preview_frame(
+    entity: GameEntity,
+    frame: int,
+    facing: int,
+) -> int | None:
+    sequences = [
+        association
+        for association in entity.media
+        if association.slot == "body_sequence"
+        and association.samples
+        and association.samples[0].animation is not None
+    ]
+    if not sequences:
+        return None
+    preferred_events = ("ready", "guard", "deployed", "hover", "fly", "walk")
+    sequence = next(
+        (
+            association
+            for event in preferred_events
+            for association in sequences
+            if association.event.casefold() == event
+        ),
+        sequences[0],
+    )
+    playback = sequence.samples[0].animation
+    if playback is None:
+        return None
+    frame_count = max(1, playback.frame_count or 1)
+    facing_offset = (facing % 8) * playback.facing_step if playback.facing_step else 0
+    return playback.start_frame + facing_offset + frame % frame_count
+
+
+def _merge_duplicate_body_sequences(
+    associations: list[MediaAssociation],
+) -> tuple[MediaAssociation, ...]:
+    merged: list[MediaAssociation] = []
+    sequence_indices: dict[tuple[object, ...], int] = {}
+    for association in associations:
+        if (
+            association.slot != "body_sequence"
+            or len(association.samples) != 1
+            or association.samples[0].animation is None
+        ):
+            merged.append(association)
+            continue
+        sample = association.samples[0]
+        playback = sample.animation
+        asset_key = sample.asset["id"] if sample.asset else sample.name.casefold()
+        key = (
+            association.source.casefold(),
+            asset_key,
+            playback.start_frame,
+            playback.frame_count,
+            playback.facing_step,
+            playback.rate_ms,
+            playback.loop_start,
+            playback.loop_end,
+            playback.loop_count,
+            playback.direction,
+        )
+        existing_index = sequence_indices.get(key)
+        if existing_index is None:
+            sequence_indices[key] = len(merged)
+            merged.append(association)
+            continue
+        existing = merged[existing_index]
+        aliases = list(existing.aliases)
+        known = {existing.event.casefold(), *(alias.casefold() for alias in aliases)}
+        for alias in (association.event, *association.aliases):
+            if alias.casefold() not in known:
+                known.add(alias.casefold())
+                aliases.append(alias)
+        merged[existing_index] = replace(existing, aliases=tuple(aliases))
+    return tuple(merged)
+
+
 def _resolve_media(
     entity_id: str,
     rules: dict[str, str],
@@ -1620,7 +1704,7 @@ def _resolve_media(
                     role="body",
                 )
             )
-    return tuple(associations)
+    return _merge_duplicate_body_sequences(associations)
 
 
 def _audio_sample(

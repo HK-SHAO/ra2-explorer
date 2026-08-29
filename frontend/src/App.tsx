@@ -304,9 +304,10 @@ const mediaSlotLabels: Record<string, string> = {
 const animationEventLabels: Record<string, string> = {
   ready: "准备",
   guard: "警戒",
-  prone: "卧倒",
+  prone: "卧姿",
   walk: "行走",
   fireup: "站立开火",
+  fireprone: "卧姿开火",
   firedown: "卧倒开火",
   crawl: "匍匐",
   up: "起身",
@@ -322,6 +323,18 @@ const animationEventLabels: Record<string, string> = {
   paradrop: "空降",
   deploy: "部署",
   undeploy: "取消部署",
+  deployed: "已部署",
+  deployedfire: "部署开火",
+  panic: "惊慌奔跑",
+  fly: "飞行",
+  hover: "悬停",
+  firefly: "空中开火",
+  tumble: "失控翻滚",
+  airdeathstart: "空中阵亡",
+  airdeathfalling: "坠落",
+  airdeathfinish: "落地",
+  secondaryfire: "副武器开火",
+  secondaryprone: "卧姿副武器",
 };
 
 function animationEventLabel(event: string) {
@@ -1834,6 +1847,26 @@ function animationAssociationTitle(association: MediaAssociation) {
   return animationEventLabel(association.event);
 }
 
+function animationAssociationMeta(association: MediaAssociation, sample: MediaSample) {
+  const directional = association.samples.length > 1
+    && association.samples.every((item) => item.animation?.direction);
+  const frameSuffix = directional
+    ? ` · ${association.samples.length} 个朝向`
+    : sample.animation?.frame_count
+      ? ` · ${sample.animation.frame_count} 帧`
+      : "";
+  const bodyPrefix = association.aliases?.length
+    ? `${association.aliases.length + 1} 个事件共用`
+    : mediaSlotLabels[association.slot] || association.slot;
+  const prefix = association.role === "body" ? bodyPrefix : association.event;
+  return `${prefix}${frameSuffix}${sample.asset ? "" : " · 未解析"}`;
+}
+
+function animationAssociationAliasTitle(association: MediaAssociation) {
+  if (!association.aliases?.length) return undefined;
+  return `共用帧：${[association.event, ...association.aliases].map(animationEventLabel).join("、")}`;
+}
+
 function CompactAudioPlayer({ assetId, label, active, onPlaybackChange }: {
   assetId: string;
   label: string;
@@ -2544,7 +2577,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
               {animationTab === "body" && hasRawBodyAnimation && <button type="button" className={!activeAnimation ? "active" : ""} onClick={() => { setActiveAnimation(null); setFrameMode("sequence"); setPlaying(true); }}><span className="animation-thumbnail body-action"><Icon name="unit" size={24} /></span><span><strong>全部主体帧</strong><small>{frameCount} 帧 · 顺序预览</small></span><Icon name="play" size={16} /></button>}
               {visibleAnimationAssociations.flatMap((association) => animationCardSamples(association, facing).map((sample, index) => <button type="button" disabled={!sample.asset} className={activeAnimation?.event === association.event && activeAnimation.slot === association.slot && activeAnimation.source === association.source && activeAnimation.sample.name === sample.name ? "active" : ""} onClick={() => { if (!sample.asset) return; setPlaying(false); setActiveAnimation({ event: association.event, slot: association.slot, source: association.source, role: association.role, sample }); }} key={`${association.slot}-${association.source}-${association.event}-${sample.name}-${index}`}>
                 <span className={`animation-thumbnail ${association.role === "body" || association.role === "construction" ? "body-action" : ""}`}>{sample.asset && ["shp", "tmp", "pcx"].includes(sample.asset.format) ? <img loading="lazy" src={api.previewUrl(sample.asset.id, sample.animation?.start_frame || 0, "", 2, playerColor)} alt="" /> : <Icon name="image" size={24} />}</span>
-                <span><strong>{animationAssociationTitle(association)}</strong><small>{association.role === "body" ? (mediaSlotLabels[association.slot] || association.slot) : association.event}{association.samples.length > 1 && association.samples.every((item) => item.animation?.direction) ? ` · ${association.samples.length} 个朝向` : sample.animation?.frame_count ? ` · ${sample.animation.frame_count} 帧` : ""}{sample.asset ? "" : " · 未解析"}</small></span><Icon name="play" size={16} />
+                <span><strong>{animationAssociationTitle(association)}</strong><small title={animationAssociationAliasTitle(association)}>{animationAssociationMeta(association, sample)}</small></span><Icon name="play" size={16} />
               </button>))}
             </div>
           </section>}

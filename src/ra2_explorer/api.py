@@ -299,12 +299,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail="该单位没有可渲染的主体资产")
         palette = _select_palette(services, body, palette_id)
         player_color = _validated_player_color(player_color)
+        renderer_version = (
+            "renderer-shp-sequence-facing-v1"
+            if body["format"] == "shp"
+            else "renderer-vpl-techno-body-v3"
+        )
         artifact_path = _source_artifact_path(
             services,
             "previews",
             source_id,
             entity_id,
-            "renderer-vpl-techno-body-v3",
+            renderer_version,
             f"frame-{frame}",
             f"facing-{facing}",
             f"color-{player_color or 'original'}",
