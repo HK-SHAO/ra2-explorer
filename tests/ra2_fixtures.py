@@ -80,6 +80,7 @@ def create_fixture_installation(target: Path) -> Path:
     )
     art = (
         b"[FIXTURE]\r\n"
+        b"Image=INFANTRY\r\n"
         b"Voxel=yes\r\n"
         b"Remapable=yes\r\n"
         b"Cameo=FIXTURE\r\n"

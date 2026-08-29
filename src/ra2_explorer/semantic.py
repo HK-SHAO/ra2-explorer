@@ -919,7 +919,14 @@ class SemanticLibrary:
                 rule_values = rules.get(folded, {})
                 art_key = rule_values.get("image") or entity_id
                 art_values = art.get(art_key.casefold(), {})
-                image = art_values.get("image") or art_key
+                # A TechnoType's body is selected by the Rules Image key.  An
+                # Image value inside that ART section is meaningful to several
+                # animation definitions, but retail ARTMD also uses it on
+                # concrete units such as BFRT and CAML even though their own
+                # BFRT.VXL/CAML.SHP bodies exist.  Following it here therefore
+                # replaces those units with SREF/JOSH instead of resolving the
+                # body named by the TechnoType.
+                image = art_key
                 ui_name = rule_values.get("uiname")
                 internal_name = rule_values.get("name") or entity_id
                 localized_name = strings.get(ui_name.casefold()) if ui_name else None

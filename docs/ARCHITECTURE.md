@@ -58,7 +58,7 @@ Python 服务是唯一的数据访问入口。CLI 和 HTTP API 都调用 `Source
 
 语义层按实际游戏覆盖顺序合并 `rules.ini` / `rulesmd.ini`、`art.ini` / `artmd.ini` 和 CSF。松散文件优先于 MIX，`expandmd##` / `expand##` 优先于基础归档，MD 配置叠加在原版配置之上。缓存键包含来源扫描时间、状态与资产数量，重新扫描后自动失效。
 
-实体来自 `VehicleTypes`、`InfantryTypes`、`AircraftTypes` 和 `BuildingTypes`，经规则 `Image`、ART `Image` 与 `Voxel/NewTheater` 解析到真实文件。列表不再以 `renderable` 作为默认条件，因此类型表中的所有规则对象都可检索，主体缺失是状态而不是隐藏条件。`Owner`、`TechLevel`、`Cost`、`BuildLimit`、`Capturable`、`NeedsEngineer`、`Civilian` 等 RULES 字段组合出可建造、英雄、中立科技、平民/场景和任务用途分支。VXL 单位会关联主体、HVA、`TUR` 炮塔、`BARL` 炮管与 Cameo；SHP 单位会按剧场扩展选择主体。组合预览按部件名或合法序号匹配 HVA section，并复刻 Westwood/OpenRA 的变换顺序：HVA 平移先按部件比例和边界/尺寸修正，局部坐标加入最小边界后应用矩阵，最后统一进行比例和 Y 轴翻转。这样主体、旋翼和附属件位于同一个世界坐标系，不再分别居中或远离主体；同一接口可选择 HVA 帧、8 向朝向和阵营色。解析后的 VXL/HVA/SHP/VPL 对象保留一个有界的进程内 LRU，避免时间轴连续预览反复解码同一批组件，来源重扫后自动失效。
+实体来自 `VehicleTypes`、`InfantryTypes`、`AircraftTypes` 和 `BuildingTypes`，以规则节的 `Image`（缺省为实体 ID）选择 Techno 的 ART 节和主体文件，再结合 `Voxel/NewTheater` 解析真实资产；不能继续把该 ART 节自身的 `Image` 当作主体重定向，否则官方 `BFRT`、`CAML` 会分别被错误替换成 `SREF`、`JOSH`。ART 动画节仍按各自格式使用其 `Image`。列表不再以 `renderable` 作为默认条件，因此类型表中的所有规则对象都可检索，主体缺失是状态而不是隐藏条件。`Owner`、`TechLevel`、`Cost`、`BuildLimit`、`Capturable`、`NeedsEngineer`、`Civilian` 等 RULES 字段组合出可建造、英雄、中立科技、平民/场景和任务用途分支。VXL 单位会关联主体、HVA、`TUR` 炮塔、`BARL` 炮管与 Cameo；SHP 单位会按剧场扩展选择主体。组合预览按部件名或合法序号匹配 HVA section，并复刻 Westwood/OpenRA 的变换顺序：HVA 平移先按部件比例和边界/尺寸修正，局部坐标加入最小边界后应用矩阵，最后统一进行比例和 Y 轴翻转。这样主体、旋翼和附属件位于同一个世界坐标系，不再分别居中或远离主体；同一接口可选择 HVA 帧、8 向朝向和阵营色。解析后的 VXL/HVA/SHP/VPL 对象保留一个有界的进程内 LRU，避免时间轴连续预览反复解码同一批组件，来源重扫后自动失效。
 
 单位的 `Primary`、`Secondary`、`ElitePrimary` 与 `EliteSecondary` 会继续解析到武器节，再关联 `Projectile` 和 `Warhead` 节。详情接口保留每条关系的槽位、父节点、解析状态和关键参数；检索也覆盖这些依赖名称和参数。值 `none` 是游戏规则中的空引用，不计为缺失依赖。
 
