@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import threading
-from collections import Counter, OrderedDict
+from collections import Counter, OrderedDict, defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any
@@ -313,7 +313,9 @@ class GameEntity:
         )
 
     def summary(
-        self, language: GameLanguage = DEFAULT_GAME_LANGUAGE
+        self,
+        language: GameLanguage = DEFAULT_GAME_LANGUAGE,
+        name_qualifier: str | None = None,
     ) -> dict[str, object]:
         body = self.component("body")
         return {
@@ -321,6 +323,7 @@ class GameEntity:
             "kind": self.kind,
             "usage": self.usage,
             "display_name": localize_game_text(self.display_name, language),
+            "name_qualifier": name_qualifier,
             "internal_name": self.internal_name,
             "ui_name": self.ui_name,
             "image": self.image,
@@ -370,6 +373,33 @@ class SemanticCatalog:
         return entity
 
 
+def _entity_name_qualifiers(
+    entities: tuple[GameEntity, ...] | list[GameEntity],
+    language: GameLanguage = DEFAULT_GAME_LANGUAGE,
+) -> dict[str, str]:
+    groups: dict[tuple[str, str], list[GameEntity]] = defaultdict(list)
+    for entity in entities:
+        display_name = localize_game_text(entity.display_name, language).strip().casefold()
+        groups[(entity.kind, display_name)].append(entity)
+
+    qualifiers: dict[str, str] = {}
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        side_candidates = {
+            entity.id.casefold(): entity.sides[0] if len(entity.sides) == 1 else ""
+            for entity in members
+        }
+        side_counts = Counter(value.casefold() for value in side_candidates.values() if value)
+        for entity in members:
+            side = side_candidates[entity.id.casefold()]
+            if side and side_counts[side.casefold()] == 1:
+                qualifiers[entity.id.casefold()] = side
+            else:
+                qualifiers[entity.id.casefold()] = entity.id
+    return qualifiers
+
+
 class SemanticLibrary:
     def __init__(
         self,
@@ -412,6 +442,7 @@ class SemanticLibrary:
         offset: int = 0,
     ) -> dict[str, object]:
         catalog = self.catalog(source_id)
+        name_qualifiers = _entity_name_qualifiers(catalog.entities, language)
         entities = list(catalog.entities)
         if renderable is not None:
             entities = [entity for entity in entities if entity.renderable is renderable]
@@ -439,7 +470,10 @@ class SemanticLibrary:
         total = len(entities)
         selected = entities[offset : offset + limit]
         return {
-            "items": [entity.summary(language) for entity in selected],
+            "items": [
+                entity.summary(language, name_qualifiers.get(entity.id.casefold()))
+                for entity in selected
+            ],
             "total": total,
             "kinds": [
                 {"kind": entity_kind, "count": counts.get(entity_kind, 0)}

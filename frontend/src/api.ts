@@ -131,6 +131,7 @@ export interface EntitySummary {
   kind: EntityKind;
   usage: EntityUsage;
   display_name: string;
+  name_qualifier: string | null;
   internal_name: string;
   ui_name: string | null;
   image: string;

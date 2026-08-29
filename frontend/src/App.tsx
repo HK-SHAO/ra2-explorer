@@ -443,7 +443,7 @@ function assetIcon(format: string): IconName {
 
 type LayoutMode = "list" | "grid";
 type DetailPlacement = "right" | "bottom";
-type EntitySort = "name_asc" | "name_desc" | "cost_desc" | "strength_desc";
+type EntitySort = "name_asc" | "name_desc" | "cost_asc" | "cost_desc" | "strength_asc" | "strength_desc";
 
 type BrowsingLocation = {
   view: "assets" | "entities";
@@ -499,6 +499,17 @@ const entityUsageLabels: Record<EntityKind, Partial<Record<EntityUsage, string>>
 
 function entityUsageLabel(kind: EntityKind, usage: EntityUsage) {
   return entityUsageLabels[kind][usage] || usage;
+}
+
+function entityNameQualifierLabel(entity: EntitySummary) {
+  return entity.name_qualifier
+    ? sideLabels[entity.name_qualifier] || entity.name_qualifier
+    : "";
+}
+
+function EntityDisplayName({ entity }: { entity: EntitySummary }) {
+  const qualifier = entityNameQualifierLabel(entity);
+  return <>{entity.display_name}{qualifier && <em className="entity-name-qualifier">{qualifier}</em>}</>;
 }
 
 function readBrowsingLocation(): Partial<BrowsingLocation> {
@@ -574,11 +585,27 @@ function useRememberedScroll<T extends HTMLElement = HTMLDivElement>(key: string
 
 function sortEntities(entities: EntitySummary[], sort: EntitySort, language: GameLanguage) {
   const selected = [...entities];
-  const numeric = (value: string | null) => Number.parseInt(value || "0", 10) || 0;
+  const numeric = (value: string | null) => {
+    const parsed = Number.parseInt(value || "", 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  const compareNames = (left: EntitySummary, right: EntitySummary) => left.display_name.localeCompare(
+    right.display_name,
+    language,
+    { numeric: true },
+  ) || left.id.localeCompare(right.id, undefined, { numeric: true });
+  const compareNumbers = (left: string | null, right: string | null, ascending: boolean) => {
+    const leftValue = numeric(left);
+    const rightValue = numeric(right);
+    if (leftValue === null && rightValue === null) return 0;
+    if (leftValue === null) return 1;
+    if (rightValue === null) return -1;
+    return ascending ? leftValue - rightValue : rightValue - leftValue;
+  };
   selected.sort((left, right) => {
-    if (sort === "cost_desc") return numeric(right.cost) - numeric(left.cost) || left.display_name.localeCompare(right.display_name, language);
-    if (sort === "strength_desc") return numeric(right.strength) - numeric(left.strength) || left.display_name.localeCompare(right.display_name, language);
-    const compared = left.display_name.localeCompare(right.display_name, language, { numeric: true });
+    if (sort.startsWith("cost_")) return compareNumbers(left.cost, right.cost, sort === "cost_asc") || compareNames(left, right);
+    if (sort.startsWith("strength_")) return compareNumbers(left.strength, right.strength, sort === "strength_asc") || compareNames(left, right);
+    const compared = compareNames(left, right);
     return sort === "name_desc" ? -compared : compared;
   });
   return selected;
@@ -1624,7 +1651,9 @@ function EntityListPanel({ entities, total, loading, query, setQuery, sort, setS
         <label className="sort-control"><span>排序</span><select value={sort} onChange={(event) => setSort(event.target.value as EntitySort)}>
           <option value="name_asc">名称 A–Z</option>
           <option value="name_desc">名称 Z–A</option>
+          <option value="cost_asc">造价从低到高</option>
           <option value="cost_desc">造价从高到低</option>
+          <option value="strength_asc">生命值从低到高</option>
           <option value="strength_desc">生命值从高到低</option>
         </select></label>
       </div>
@@ -1632,7 +1661,7 @@ function EntityListPanel({ entities, total, loading, query, setQuery, sort, setS
         {layout === "list" ? entities.map((entity) => (
           <button key={entity.id} className={`asset-row entity-row ${selectedId === entity.id ? "selected" : ""}`} onClick={() => setSelectedId(entity.id)}>
             <span className={`file-icon entity-icon ${entity.renderable ? "ready" : "missing"}`}><Icon name="unit" /></span>
-            <span className="asset-main"><strong>{entity.display_name}</strong><small>{entity.id} → {entity.image}{entity.internal_name !== entity.display_name ? ` · ${entity.internal_name}` : ""}</small></span>
+            <span className="asset-main"><strong><EntityDisplayName entity={entity} /></strong><small>{entity.id} → {entity.image}{entity.internal_name !== entity.display_name ? ` · ${entity.internal_name}` : ""}</small></span>
             <span className="entity-kind">{entityUsageLabel(entity.kind, entity.usage)}</span>
             <span className="entity-stats"><strong>{entity.cost ? `$${entity.cost}` : "—"}</strong><small>{entity.strength ? `${entity.strength} HP` : entity.renderable ? `${entity.component_count} 个组件` : "缺少主体"}</small></span>
             <Icon name="chevron" size={15} />
@@ -1649,7 +1678,7 @@ function EntityGridCard({ entity, sourceId, selected, onSelect }: { entity: Enti
   return (
     <button className={`asset-card entity-card ${selected ? "selected" : ""}`} onClick={() => onSelect(entity.id)}>
       <EntityCardPreview entity={entity} sourceId={sourceId} />
-      <span className="asset-card-copy"><strong title={entity.display_name}>{entity.display_name}</strong></span>
+      <span className="asset-card-copy"><strong title={`${entity.display_name}${entity.name_qualifier ? ` · ${entityNameQualifierLabel(entity)}` : ""}`}><EntityDisplayName entity={entity} /></strong></span>
     </button>
   );
 }
@@ -1748,7 +1777,7 @@ function EntityCardPreview({ entity, sourceId }: { entity: EntitySummary; source
     finishRef.current = null;
   }
 
-  return <span ref={previewRef} className={`asset-card-preview entity-card-preview ${entity.renderable ? "ready" : "missing"}`}>
+  return <span ref={previewRef} className={`asset-card-preview entity-card-preview format-${entity.body_format || "unknown"} ${entity.renderable ? "ready" : "missing"}`}>
     {entity.renderable
       ? requested && <img decoding="async" fetchPriority="low" src={url} alt="" onLoad={finish} onError={(event) => { finish(); event.currentTarget.hidden = true; }} />
       : <Icon name="unit" size={34} />}
