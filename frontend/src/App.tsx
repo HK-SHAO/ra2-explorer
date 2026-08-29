@@ -392,6 +392,15 @@ function formatDuration(value: number) {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
+function canUseCompactTextTag(value: string) {
+  if (value.includes("\n")) return false;
+  const widthHint = Array.from(value.trim()).reduce((total, character) => {
+    const point = character.codePointAt(0) || 0;
+    return total + (point >= 0x2e80 ? 2 : 1);
+  }, 0);
+  return widthHint <= 48;
+}
+
 function crcLabel(value: number | null) {
   return value === null ? "—" : value.toString(16).toUpperCase().padStart(8, "0");
 }
@@ -2697,9 +2706,9 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
     ...(associations?.items || []).map((item) => item.localized_text).filter((item): item is string => Boolean(item)),
   ])]
     .filter((item) => !originalTextKeys.has(item.trim().replace(/\s+/g, " ").toLocaleLowerCase()));
-  const metadataRows: Array<{ label: string; value: string; tone?: string; span?: 1 | 2 | 3 }> = [
-    { label: "文件大小", value: formatBytes(asset.size) },
-  ];
+  const metadataRows: Array<{ label: string; value: string; tone?: string; span?: 1 | 2 | 3 }> = isAudio
+    ? []
+    : [{ label: "文件大小", value: formatBytes(asset.size) }];
   if (metadata?.width !== undefined && metadata?.height !== undefined) metadataRows.push({ label: asset.format === "map" ? "地图尺寸" : "画布 / 地块", value: `${metadata.width} × ${metadata.height}${asset.format === "map" ? " 格" : " px"}` });
   if (metadata?.theater) metadataRows.push({ label: "地图环境", value: metadata.theater });
   if (metadata?.object_counts) metadataRows.push({ label: "地图对象", value: Object.entries(metadata.object_counts).map(([kind, count]) => `${mapObjectLabels[kind] || kind} ${count}`).join(" · ") });
@@ -2712,12 +2721,23 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   if (metadata?.label_count !== undefined) metadataRows.push({ label: "CSF 文本", value: `${metadata.label_count} 标签 · ${metadata.string_count} 字符串` });
   if (metadata?.entry_count !== undefined) metadataRows.push({ label: "配置结构", value: `${metadata.section_count} 节 · ${metadata.entry_count} 项` });
   if (metadata?.encoding) metadataRows.push({ label: "文本编码", value: metadata.encoding });
-  if (metadata?.duration_seconds !== undefined) metadataRows.push({ label: "音频", value: `${formatDuration(metadata.duration_seconds)} · ${metadata.sample_rate?.toLocaleString("zh-CN")} Hz · ${metadata.bits_per_sample} bit${metadata.audio_codec ? ` · ${metadata.audio_codec}` : ""}` });
-  if (isAudio && originalTexts.length > 0) metadataRows.push({ label: "原文文本", value: originalTexts.join("\n"), tone: "metadata-text", span: 1 });
-  if (isAudio && localizedTexts.length > 0) metadataRows.push({ label: "中文文本", value: localizedTexts.join("\n"), tone: "metadata-text", span: 1 });
   if (!isAudio) metadataRows.push({ label: "来源", value: asset.storage_kind === "loose" ? "松散文件" : asset.storage_kind === "bag" ? "音频包" : "MIX 归档" });
-  if (asset.crc !== null) metadataRows.push({ label: "CRC", value: crcLabel(asset.crc), tone: "mono" });
+  if (!isAudio && asset.crc !== null) metadataRows.push({ label: "CRC", value: crcLabel(asset.crc), tone: "mono" });
   if (!isAudio) metadataRows.push({ label: "识别", value: asset.confidence === "name" ? "名称库匹配" : asset.confidence === "content" ? "内容探测" : asset.confidence === "filename" ? "文件名" : asset.confidence === "index" ? "音频索引" : "未知" });
+  const audioMetadataTags = isAudio ? [
+    { label: "大小", value: formatBytes(asset.size) },
+    ...(metadata?.duration_seconds !== undefined ? [{ label: "时长", value: formatDuration(metadata.duration_seconds) }] : []),
+    ...(metadata?.sample_rate !== undefined ? [{ label: "采样率", value: `${metadata.sample_rate.toLocaleString("zh-CN")} Hz` }] : []),
+    ...(metadata?.bits_per_sample !== undefined ? [{ label: "位深", value: `${metadata.bits_per_sample} bit` }] : []),
+    ...(metadata?.channels !== undefined ? [{ label: "声道", value: metadata.channels === 1 ? "单声道" : metadata.channels === 2 ? "双声道" : `${metadata.channels} 声道` }] : []),
+    ...(metadata?.audio_codec ? [{ label: "编码", value: metadata.audio_codec }] : []),
+    ...(asset.crc !== null ? [{ label: "CRC", value: crcLabel(asset.crc), mono: true }] : []),
+  ] : [];
+  const audioTextRows = isAudio ? [
+    ...(originalTexts.length > 0 ? [{ label: "原文", value: originalTexts.join("\n") }] : []),
+    ...(localizedTexts.length > 0 ? [{ label: "中文", value: localizedTexts.join("\n") }] : []),
+  ] : [];
+  const audioDataCount = audioMetadataTags.length + audioTextRows.length;
   return (
     <aside ref={detailScroll.ref} onScroll={detailScroll.remember} className={`detail-panel asset-detail panel ${wide ? "detail-panel-wide" : "detail-panel-narrow"}`}>
       <div className={`detail-title ${isAudio ? "audio-detail-title" : ""}`}>
@@ -2736,7 +2756,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
 
       {isAudio && <div className="entity-detail-tabs asset-detail-tabs" role="tablist" aria-label="声音详细信息">
         <button type="button" role="tab" id="audio-associations-tab" aria-controls="audio-associations-panel" aria-selected={activeAudioDetailTab === "associations"} className={activeAudioDetailTab === "associations" ? "active" : ""} disabled={associations !== null && associations.items.length === 0} onClick={() => selectAudioDetailTab("associations")}>关联 <em>{associations?.items.length || 0}</em></button>
-        <button type="button" role="tab" id="audio-data-tab" aria-controls="audio-data-panel" aria-selected={activeAudioDetailTab === "data"} className={activeAudioDetailTab === "data" ? "active" : ""} onClick={() => selectAudioDetailTab("data")}>数据 <em>{metadataRows.length}</em></button>
+        <button type="button" role="tab" id="audio-data-tab" aria-controls="audio-data-panel" aria-selected={activeAudioDetailTab === "data"} className={activeAudioDetailTab === "data" ? "active" : ""} onClick={() => selectAudioDetailTab("data")}>数据 <em>{audioDataCount}</em></button>
       </div>}
 
       {isModel && <div className="preview-block">
@@ -2792,7 +2812,12 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
         {canChoosePalette && <label><span>配色表</span><select value={paletteId} onChange={(event) => setPaletteId(event.target.value)}><option value="">自动</option>{palettes.map((palette) => <option key={palette.id} value={palette.id}>{palette.display_name}</option>)}</select></label>}
       </div>}
 
-      {(!isAudio || activeAudioDetailTab === "data") && <div className="metadata" role={isAudio ? "tabpanel" : undefined} id={isAudio ? "audio-data-panel" : undefined} aria-labelledby={isAudio ? "audio-data-tab" : undefined}>
+      {isAudio && activeAudioDetailTab === "data" && <div className="metadata sound-metadata" role="tabpanel" id="audio-data-panel" aria-labelledby="audio-data-tab">
+        <h3>资产信息</h3>
+        <ul className="sound-metadata-tags" aria-label="音频元信息">{audioMetadataTags.map((tag) => <li key={tag.label} title={`${tag.label}：${tag.value}`}><span>{tag.label}</span><strong className={tag.mono ? "mono" : ""}>{tag.value}</strong></li>)}</ul>
+        {audioTextRows.length > 0 && <dl className="sound-transcript-list">{audioTextRows.map((row) => <div className={canUseCompactTextTag(row.value) ? "sound-transcript-tag" : "sound-transcript-block"} key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl>}
+      </div>}
+      {!isAudio && <div className="metadata">
         <h3>资产信息</h3>
         <dl>{metadataRows.map((row) => <div className={`metadata-span-${isAudio ? 1 : row.span ?? ruleColumnSpan(row.label, row.value)}`} key={row.label}><dt>{row.label}</dt><dd className={row.tone || ""}>{row.value}</dd></div>)}</dl>
       </div>}
