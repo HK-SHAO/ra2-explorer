@@ -1791,8 +1791,8 @@ function EntityCardPreview({ entity, sourceId }: { entity: EntitySummary; source
     {entity.renderable
       ? requested && <img decoding="async" fetchPriority="low" src={url} alt="" onLoad={finish} onError={(event) => { finish(); event.currentTarget.hidden = true; }} />
       : <Icon name="unit" size={34} />}
-    {entity.affiliation?.icon && <span className="entity-affiliation-badge" role="img" aria-label={entity.affiliation.display_name} title={entity.affiliation.display_name}>
-      <img src={api.previewUrl(entity.affiliation.icon.id, 0, "", 1)} alt="" />
+    {entity.affiliation && <span className={`entity-affiliation-badge affiliation-${entity.affiliation.kind}`} title={entity.affiliation.display_name}>
+      {entity.affiliation.display_name}
     </span>}
   </span>;
 }
