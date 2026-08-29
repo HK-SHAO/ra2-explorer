@@ -247,6 +247,9 @@ export interface AssetAssociation {
 export interface AssetAssociationPage {
   items: AssetAssociation[];
   total: number;
+  texts: string[];
+  original_texts: string[];
+  localized_texts: string[];
 }
 
 export interface EntityPage {

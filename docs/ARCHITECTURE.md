@@ -64,7 +64,7 @@ Python 服务是唯一的数据访问入口。CLI 和 HTTP API 都调用 `Source
 
 动画关系在接口中带有明确角色：步兵 ART `Sequence` 生成主体动作，武器 `Anim` 生成开火效果，弹头 `AnimList` 生成命中效果；建筑 `Buildup` 生成建造序列，`ActiveAnim*`、`ProductionAnim`、`SpecialAnim`、展开和舱门字段生成运行附属层。`BibShape` 是地基图层而不是动画。建筑主体 SHP 的六帧通常表示普通、受损、残骸及剧场状态，不能当作时间轴顺序播放。武器或弹头列表会在保留不同候选的同时去除重复引用；N/NE/E/SE/S/SW/W/NW 开火素材作为同一武器事件的方向样本返回。
 
-声音关系从 RULES/ART 的语音、移动、部署、武器报告和动画字段继续追踪到 SOUNDMD/EVA、AUDIO.IDX/BAG、WAV/AUD 与 CSF。语音和音效以这些引用证据分类，容器格式不参与语义判断，因此 BAG 中的战斗音效和松散 WAV 中的台词不会再被颠倒。`VOX:` 的 Extra Value 会作为实际音频别名解析；官方中文 CSF 与 CnCNet 社区英文转录表按音频 stem 合并，接口分别保留原文、中文和文本标签。没有逐句转录的战役片段会从稳定文件名生成任务/段落说明。独立媒体目录按单位语音、EVA 播报、战役语音、战斗音效、单位音效和环境音效分组，并保留事件、单位、阵营和国家反向关系。关系是从官方配置计算出的可重建视图，不写回源文件。
+声音关系从 RULES/ART 的语音、移动、部署、武器报告和动画字段继续追踪到 SOUNDMD/EVA、AUDIO.IDX/BAG、WAV/AUD 与 CSF。语音和音效以这些引用证据分类，容器格式不参与语义判断，因此 BAG 中的战斗音效和松散 WAV 中的台词不会再被颠倒。`VOX:` 的 Extra Value 会作为实际音频别名解析；官方中文 CSF 与 CnCNet 社区英文转录表按音频 stem 合并，接口分别保留原文、中文和文本标签。资产关系接口还直接返回媒体目录中的转录文本，因此 `tauli02` 等存在 CSF/社区字幕但没有单位、SOUND 或 EVA 事件绑定的语音，也能在数据详情中显示中英文。没有逐句转录的战役片段会从稳定文件名生成任务/段落说明。独立媒体目录按单位语音、EVA 播报、战役语音、战斗音效、单位音效和环境音效分组，并保留事件、单位、阵营和国家反向关系。关系是从官方配置计算出的可重建视图，不写回源文件。
 
 配色表（PAL）是 RA2 索引色资源的 256 色查找表：SHP/VXL 像素或体素保存的是颜色索引，而不是现代模型的位图贴图。TMP 使用 `iso*.pal`，SHP/VXL 使用 `unit*.pal`；具体 TEM/SNO/URB/UBN/LUN/DES 变体优先从资产所在剧场归档判断。建筑 SHP 即使来自 `SNOW.MIX` 也使用 `unitsno.pal`，不能因其等距布局误用 `isosno.pal`。VXL 场景契约 v4 标记 `westwood_vpl` 或兼容 `lambert` 光照；后端依据 VXL 的 TS 36 项或 RA2 244 项法线表、HVA 旋转和 Westwood 漫反射/高光公式选择 VPL 亮度层，再经游戏 PAL 与玩家色生成最终颜色。WebGL 对 VPL 结果使用无额外光照材质，避免重复着色。查看器从实际变换后的体素边界重新计算三维包围盒，把八个角投影到当前相机平面后同时适配横向与纵向视野；容器尺寸变化和重置视角都会重新适配完整模型。
 
@@ -98,7 +98,7 @@ RA2/TS 的文件名标识是对大写文件名执行带特殊尾部填充的 CRC
 - `GET /api/assets/{id}/shp`、`preview.png`：兼容 SHP 帧接口及统一图像预览；HVA 可按帧生成同名 VXL 组合缩略图；
 - `GET /api/assets/{id}/media`：播放 WAV、AUD 或 AUDIO.BAG 虚拟语音；
 - `GET /api/assets/{id}/video.mp4`：按需转换并播放 VQA/BIK；
-- `GET /api/assets/{id}/associations`：读取声音、动画和单位的反向语义关系；
+- `GET /api/assets/{id}/associations`：读取声音、动画和单位的反向语义关系，并返回未绑定事件的直接音频转录；
 - `GET /api/assets/{id}/model.json`：读取 VXL 或同名 VXL/HVA 的 v4 浏览器三维场景，可选择 HVA 帧并返回 VPL 光照后的颜色；
 - `GET /api/entities`：按来源、名称、类型、阵营和可预览状态检索规则实体，并返回与查询一致的 facets；
 - `GET /api/media`：按语音/音效、游戏事件、阵营、说明或文件名分页检索语义媒体，并返回事件 facets；

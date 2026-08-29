@@ -545,6 +545,7 @@ class SemanticLibrary:
         language: GameLanguage = DEFAULT_GAME_LANGUAGE,
     ) -> dict[str, object]:
         catalog = self.catalog(source_id)
+        requested_asset = self.database.get_asset(asset_id)
         items: list[dict[str, object]] = []
         seen: set[tuple[str, ...]] = set()
 
@@ -637,7 +638,41 @@ class SemanticLibrary:
                         },
                         (media_kind, event.casefold(), sample.name.casefold()),
                     )
-        return {"items": items[:100], "total": len(items)}
+        requested_name = str(requested_asset["display_name"]).casefold()
+        media_item = next(
+            (
+                item
+                for item in catalog.media_items
+                if str(item["asset"]["id"]) == asset_id  # type: ignore[index]
+            ),
+            None,
+        )
+        if media_item is None:
+            media_item = next(
+                (
+                    item
+                    for item in catalog.media_items
+                    if str(item["asset"]["display_name"]).casefold()  # type: ignore[index]
+                    == requested_name
+                ),
+                None,
+            )
+        return {
+            "items": items[:100],
+            "total": len(items),
+            "texts": [
+                localize_game_text(str(value), language)
+                for value in (media_item or {}).get("texts", [])  # type: ignore[union-attr]
+            ],
+            "original_texts": [
+                str(value)
+                for value in (media_item or {}).get("original_texts", [])  # type: ignore[union-attr]
+            ],
+            "localized_texts": [
+                localize_game_text(str(value), language)
+                for value in (media_item or {}).get("localized_texts", [])  # type: ignore[union-attr]
+            ],
+        }
 
     def diagnostics(self, source_id: str, *, limit: int = 20) -> dict[str, object]:
         catalog = self.catalog(source_id)

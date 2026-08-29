@@ -10,7 +10,11 @@ from PIL import Image
 from ra2_explorer.api import create_app
 from ra2_explorer.config import Settings
 from ra2_explorer.semantic import _entity_animation_role, _entity_usage
-from tests.ra2_fixtures import FIXTURE_NAMES, create_fixture_installation
+from tests.ra2_fixtures import (
+    FIXTURE_NAMES,
+    _build_fixture_wav,
+    create_fixture_installation,
+)
 
 
 def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
@@ -418,6 +422,60 @@ def test_api_rejects_untrusted_host(tmp_path: Path) -> None:
     response = client.get("/api/health")
 
     assert response.status_code == 400
+
+
+def test_unassociated_voice_keeps_catalog_transcript_in_asset_data(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "runtime"
+    settings = Settings(
+        data_dir=data_dir,
+        database_path=data_dir / "library.db",
+        frontend_dir=tmp_path / "missing-frontend",
+        known_names_path=data_dir / "reference" / "known_names_ra2.txt",
+    )
+    settings.prepare()
+    settings.mission_audio_transcript_path.parent.mkdir(parents=True, exist_ok=True)
+    settings.mission_audio_transcript_path.write_text(
+        json.dumps(
+            {
+                "entries": {
+                    "tauli02": {
+                        "original_text": "The order is given. Attack!",
+                        "localized_text": "下達指令了：攻擊！",
+                    }
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    source_dir = tmp_path / "voice-only-installation"
+    source_dir.mkdir()
+    (source_dir / "tauli02.wav").write_bytes(_build_fixture_wav())
+    client = TestClient(create_app(settings))
+
+    source = client.post("/api/sources", json={"path": str(source_dir)}).json()
+    media = client.get(
+        "/api/media",
+        params={"source_id": source["id"], "q": "tauli02"},
+    ).json()
+    assert media["total"] == 1
+    asset = media["items"][0]["asset"]
+
+    associations = client.get(
+        f"/api/assets/{asset['id']}/associations",
+        params={"language": "zh-CN"},
+    )
+
+    assert associations.status_code == 200
+    assert associations.json() == {
+        "items": [],
+        "total": 0,
+        "texts": ["下达指令了：攻击！"],
+        "original_texts": ["The order is given. Attack!"],
+        "localized_texts": ["下达指令了：攻击！"],
+    }
 
 
 def test_retail_class_markers_do_not_fail_a_source(tmp_path: Path) -> None:

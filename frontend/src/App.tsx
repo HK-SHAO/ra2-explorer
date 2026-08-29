@@ -2687,9 +2687,15 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   const activeLimb = metadata?.limbs?.[frame];
   const hasFrameControl = ["shp", "tmp", "hva"].includes(asset.format) && frameCount > 1;
   const canChoosePalette = ["shp", "vxl", "hva", "tmp"].includes(asset.format) && palettes.length > 0;
-  const originalTexts = [...new Set((associations?.items || []).map((item) => item.original_text || item.text).filter((item): item is string => Boolean(item)))];
+  const originalTexts = [...new Set([
+    ...(associations?.original_texts || []),
+    ...(associations?.items || []).map((item) => item.original_text || item.text).filter((item): item is string => Boolean(item)),
+  ])];
   const originalTextKeys = new Set(originalTexts.map((item) => item.trim().replace(/\s+/g, " ").toLocaleLowerCase()));
-  const localizedTexts = [...new Set((associations?.items || []).map((item) => item.localized_text).filter((item): item is string => Boolean(item)))]
+  const localizedTexts = [...new Set([
+    ...(associations?.localized_texts || []),
+    ...(associations?.items || []).map((item) => item.localized_text).filter((item): item is string => Boolean(item)),
+  ])]
     .filter((item) => !originalTextKeys.has(item.trim().replace(/\s+/g, " ").toLocaleLowerCase()));
   const metadataRows: Array<{ label: string; value: string; tone?: string; span?: 1 | 2 | 3 }> = [
     { label: "文件大小", value: formatBytes(asset.size) },
