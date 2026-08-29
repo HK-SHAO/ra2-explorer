@@ -1565,7 +1565,7 @@ function EntityGridCard({ entity, sourceId, selected, onSelect }: { entity: Enti
   return (
     <button className={`asset-card entity-card ${selected ? "selected" : ""}`} onClick={() => onSelect(entity.id)}>
       <span className={`asset-card-preview entity-card-preview ${entity.renderable ? "ready" : "missing"}`}>
-        {entity.renderable ? <img loading="lazy" src={api.entityPreviewUrl(sourceId, entity.id, { scale: 3 })} alt="" onError={(event) => { event.currentTarget.hidden = true; }} /> : <Icon name="unit" size={34} />}
+        {entity.renderable ? <img loading="lazy" src={api.entityPreviewUrl(sourceId, entity.id, { scale: 3, thumbnail: true })} alt="" onError={(event) => { event.currentTarget.hidden = true; }} /> : <Icon name="unit" size={34} />}
       </span>
       <span className="asset-card-copy"><strong title={entity.display_name}>{entity.display_name}</strong></span>
     </button>
@@ -2251,7 +2251,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
                         ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} viewKey={`entity:${sourceId}:${entity.id}`} />
                         : previewFailed
                           ? <div className="preview-stage shp"><div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div></div>
-                          : <ImageViewport className="shp entity-composite-body" fitKey={entity.id} fitContent={frameCount <= 1} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
+                          : <ImageViewport className="shp entity-composite-body" fitKey={entity.id} fitContent={!playing || frameCount <= 1} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
                     {activeAnimationAsset?.format === "shp" && <span className={`entity-effect-overlay ${effectFrameVisible ? "visible" : "hidden"}`} style={{ "--effect-x": `${effectAnchor.x}%`, "--effect-y": `${effectAnchor.y}%` } as CSSProperties} aria-hidden="true">
                       <StablePreviewImage src={activeAnimationPreviewUrl} alt="" />
                     </span>}

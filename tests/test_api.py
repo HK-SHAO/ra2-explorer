@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from ra2_explorer.api import create_app
 from ra2_explorer.config import Settings
@@ -277,6 +279,15 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     )
     assert infantry_image.status_code == 200
     assert infantry_image.content.startswith(b"\x89PNG")
+    infantry_thumbnail = client.get(
+        f"/api/entities/{source['id']}/DemoInfantry/preview.png",
+        params={"frame": 2, "thumbnail": "true"},
+    )
+    with Image.open(io.BytesIO(infantry_image.content)) as full_preview, Image.open(
+        io.BytesIO(infantry_thumbnail.content)
+    ) as thumbnail:
+        assert thumbnail.width < full_preview.width
+        assert thumbnail.height < full_preview.height
 
     entity_preview = client.get(
         f"/api/entities/{source['id']}/DemoVehicle/preview.png",

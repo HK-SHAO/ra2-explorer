@@ -279,6 +279,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         player_color: str | None = Query(default=None, max_length=24),
         palette_id: str | None = None,
         scale: int = Query(default=4, ge=1, le=12),
+        thumbnail: bool = False,
     ) -> Response:
         semantic_entity = services.semantic.catalog(source_id).get(entity_id)
         body = semantic_entity.component("body")
@@ -291,12 +292,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "previews",
             source_id,
             entity_id,
-            "renderer-vpl-v1",
+            "renderer-vpl-techno-body-v2",
             f"frame-{frame}",
             f"facing-{facing}",
             f"color-{player_color or 'original'}",
             f"palette-{palette_id or 'auto'}",
             f"scale-{scale}",
+            f"thumbnail-{thumbnail}",
             extension="png",
         )
         cached = services.derived.read_bytes(artifact_path)
@@ -315,6 +317,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             player_color=player_color,
             scale=scale,
         )
+        if thumbnail:
+            image = _crop_transparent_preview(image)
         output = io.BytesIO()
         image.save(output, format="PNG")
         rendered = output.getvalue()
@@ -767,6 +771,24 @@ def _source_artifact_path(
         revision=source.get("scanned_at") or source["created_at"],
         identity=identity,
         extension=extension,
+    )
+
+
+def _crop_transparent_preview(image):
+    if "A" not in image.getbands():
+        return image
+    bounds = image.getchannel("A").getbbox()
+    if bounds is None:
+        return image
+    left, top, right, bottom = bounds
+    padding = max(2, round(max(right - left, bottom - top) * 0.08))
+    return image.crop(
+        (
+            max(0, left - padding),
+            max(0, top - padding),
+            min(image.width, right + padding),
+            min(image.height, bottom + padding),
+        )
     )
 
 

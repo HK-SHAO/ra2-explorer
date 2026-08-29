@@ -329,6 +329,7 @@ export interface EntityPreviewOptions {
   playerColor?: string;
   paletteId?: string;
   scale?: number;
+  thumbnail?: boolean;
 }
 
 export interface ReferenceStatus {
@@ -462,9 +463,11 @@ export const api = {
       frame: String(options.frame ?? 0),
       facing: String(options.facing ?? 0),
       scale: String(options.scale ?? 4),
+      v: "6",
     });
     if (options.playerColor) params.set("player_color", options.playerColor);
     if (options.paletteId) params.set("palette_id", options.paletteId);
+    if (options.thumbnail) params.set("thumbnail", "true");
     return `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}/preview.png?${params}`;
   },
   entityModelUrl: (
