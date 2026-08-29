@@ -123,10 +123,12 @@ export interface DiscoveryResult {
 }
 
 export type EntityKind = "vehicle" | "infantry" | "aircraft" | "building";
+export type EntityUsage = "buildable" | "hero" | "tech" | "civilian" | "scenario";
 
 export interface EntitySummary {
   id: string;
   kind: EntityKind;
+  usage: EntityUsage;
   display_name: string;
   internal_name: string;
   ui_name: string | null;
@@ -198,6 +200,17 @@ export interface GameEntity extends EntitySummary {
   preview: EntityPreview;
 }
 
+export interface AnimationPlayback {
+  start_frame: number;
+  frame_count: number | null;
+  facing_step: number;
+  rate_ms: number | null;
+  loop_start: number | null;
+  loop_end: number | null;
+  loop_count: number | null;
+  direction: string | null;
+}
+
 export interface MediaSample {
   name: string;
   text: string | null;
@@ -205,6 +218,8 @@ export interface MediaSample {
   localized_text: string | null;
   text_label: string | null;
   asset: EntityComponentAsset | null;
+  animation: AnimationPlayback | null;
+  weight: number;
 }
 
 export interface MediaAssociation {
@@ -235,6 +250,7 @@ export interface EntityPage {
   items: EntitySummary[];
   total: number;
   kinds: Array<{ kind: EntityKind; count: number }>;
+  usages: Array<{ usage: EntityUsage; count: number }>;
   countries: Array<{ id: string; display_name: string; side: string; count: number }>;
   sides: Array<{ id: string; count: number }>;
   warnings: string[];
@@ -263,6 +279,25 @@ export interface MediaPage {
   total: number;
   kinds: Array<{ kind: MediaKind; count: number }>;
   groups: Array<{ group: string; count: number }>;
+  event_types: Array<{ event_type: string; count: number }>;
+}
+
+export interface EntityListOptions {
+  query?: string;
+  kind?: EntityKind | "";
+  usage?: EntityUsage | "";
+  side?: string;
+  renderable?: "" | "true" | "false";
+}
+
+export interface MediaListOptions {
+  query?: string;
+  kind?: MediaKind;
+  group?: string;
+  eventType?: string;
+  offset?: number;
+  limit?: number;
+  sort?: MediaSort;
 }
 
 export interface SemanticDiagnostics {
@@ -349,36 +384,26 @@ export const api = {
     if (formats.length) params.set("formats", formats.join(","));
     return request<AssetPage>(`/api/assets?${params}`);
   },
-  entities: (
-    sourceId: string,
-    query: string,
-    kind: EntityKind | "",
-    renderable: "" | "true" | "false" = "",
-  ) => {
+  entities: (sourceId: string, options: EntityListOptions = {}) => {
     const params = new URLSearchParams({ source_id: sourceId, limit: "1000" });
-    if (query.trim()) params.set("q", query.trim());
-    if (kind) params.set("kind", kind);
-    if (renderable) params.set("renderable", renderable);
+    if (options.query?.trim()) params.set("q", options.query.trim());
+    if (options.kind) params.set("kind", options.kind);
+    if (options.usage) params.set("usage", options.usage);
+    if (options.side) params.set("side", options.side);
+    if (options.renderable) params.set("renderable", options.renderable);
     return request<EntityPage>(`/api/entities?${params}`);
   },
-  media: (
-    sourceId: string,
-    query: string,
-    kind: MediaKind,
-    group = "",
-    offset = 0,
-    limit = 500,
-    sort: MediaSort = "name_asc",
-  ) => {
+  media: (sourceId: string, options: MediaListOptions = {}) => {
     const params = new URLSearchParams({
       source_id: sourceId,
-      kind,
-      limit: String(limit),
-      offset: String(offset),
-      sort,
+      limit: String(options.limit ?? 500),
+      offset: String(options.offset ?? 0),
+      sort: options.sort ?? "name_asc",
     });
-    if (query.trim()) params.set("q", query.trim());
-    if (group) params.set("group", group);
+    if (options.query?.trim()) params.set("q", options.query.trim());
+    if (options.kind) params.set("kind", options.kind);
+    if (options.group) params.set("group", options.group);
+    if (options.eventType) params.set("event_type", options.eventType);
     return request<MediaPage>(`/api/media?${params}`);
   },
   entity: (sourceId: string, entityId: string) =>

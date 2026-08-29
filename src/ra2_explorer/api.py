@@ -28,6 +28,7 @@ from ra2_explorer.codecs.pal import PLAYER_COLOR_PRESETS, grayscale_palette, par
 from ra2_explorer.codecs.shp import parse_shp
 from ra2_explorer.codecs.text import decode_legacy_text, parse_ini, text_excerpt
 from ra2_explorer.codecs.tmp import parse_tmp
+from ra2_explorer.codecs.vpl import parse_vpl
 from ra2_explorer.codecs.vxl import (
     VxlRenderPart,
     build_vxl_scene,
@@ -46,7 +47,7 @@ from ra2_explorer.reference_data import (
     reference_status,
     sync_known_names,
 )
-from ra2_explorer.semantic import ENTITY_KINDS, SemanticLibrary
+from ra2_explorer.semantic import ENTITY_KINDS, ENTITY_USAGES, SemanticLibrary
 from ra2_explorer.storage import Database
 from ra2_explorer.video import VideoTranscoder
 
@@ -63,6 +64,7 @@ INSPECTABLE_FORMATS = {
     "text",
     "tmp",
     "vxl",
+    "vpl",
     "wav",
 }
 
@@ -209,16 +211,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         source_id: str,
         q: str | None = Query(default=None, max_length=200),
         kind: str | None = Query(default=None),
+        usage: str | None = Query(default=None, max_length=32),
+        side: str | None = Query(default=None, max_length=64),
         renderable: bool | None = Query(default=None),
         limit: int = Query(default=100, ge=1, le=1_000),
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, object]:
         if kind is not None and kind not in ENTITY_KINDS:
             raise HTTPException(status_code=422, detail="未知单位类型")
+        if usage is not None and usage not in ENTITY_USAGES:
+            raise HTTPException(status_code=422, detail="未知单位分类")
         return services.semantic.list_entities(
             source_id,
             query=q,
             kind=kind,
+            usage=usage,
+            side=side,
             renderable=renderable,
             limit=limit,
             offset=offset,
@@ -230,6 +238,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         q: str | None = Query(default=None, max_length=200),
         kind: str | None = Query(default=None),
         group: str | None = Query(default=None, max_length=64),
+        event_type: str | None = Query(default=None, max_length=64),
         sort: str = Query(default="name_asc", max_length=24),
         limit: int = Query(default=500, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
@@ -243,6 +252,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             query=q,
             kind=kind,
             group=group,
+            event_type=event_type,
             sort=sort,
             limit=limit,
             offset=offset,
@@ -280,6 +290,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "previews",
             source_id,
             entity_id,
+            "renderer-vpl-v1",
             f"frame-{frame}",
             f"facing-{facing}",
             f"color-{player_color or 'original'}",
@@ -332,7 +343,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "models",
             source_id,
             entity_id,
-            "scene-v3",
+            "scene-v4-vpl",
             f"frame-{frame}",
             f"color-{player_color or 'original'}",
             f"palette-{palette_id or 'auto'}",
@@ -426,7 +437,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             services,
             "models",
             asset_record,
-            "scene-v3",
+            "scene-v4-vpl",
             f"model-{model_asset['id']}",
             f"animation-{animation_asset['id'] if animation_asset else 'none'}",
             f"frame-{frame}",
@@ -447,6 +458,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             palette=palette,
             frame=frame,
             player_color=player_color,
+            vpl=services.semantic.voxel_lighting(source_id),
         )
         result = scene.as_dict()
         services.derived.write_json(artifact_path, result)
@@ -536,6 +548,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             services,
             "previews",
             asset_record,
+            "renderer-vpl-v1",
             f"frame-{frame}",
             f"color-{player_color or 'original'}",
             f"palette-{palette_id or 'auto'}",
@@ -588,6 +601,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 palette=palette,
                 frame=frame,
                 player_color=player_color,
+                vpl=services.semantic.voxel_lighting(source_id),
                 scale=scale,
             )
         elif asset_record["format"] == "tmp":
@@ -894,6 +908,15 @@ def _inspect_asset(asset: dict[str, object], data: bytes) -> dict[str, object]:
                 }
                 for index, limb in enumerate(model.limbs)
             ],
+        }
+    if asset_format == "vpl":
+        lighting = parse_vpl(data)
+        return {
+            **base,
+            "remap_start": lighting.remap_start,
+            "remap_end": lighting.remap_end,
+            "section_count": lighting.section_count,
+            "lookup_entries": lighting.section_count * 256,
         }
     if asset_format == "hva":
         animation = parse_hva(data)

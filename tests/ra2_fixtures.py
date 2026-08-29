@@ -22,6 +22,7 @@ FIXTURE_NAMES = (
     "fixture.wav",
     "fixture.map",
     "infantry.shp",
+    "voxels.vpl",
 )
 
 
@@ -52,6 +53,7 @@ def create_fixture_installation(target: Path) -> Path:
         b"Secondary=none\r\n"
         b"Strength=400\r\n"
         b"Cost=800\r\n"
+        b"TechLevel=2\r\n"
         b"Owner=Americans,Russians\r\n"
         b"VoiceSelect=FixtureSelect\r\n"
         b"\r\n[DemoInfantry]\r\n"
@@ -60,6 +62,8 @@ def create_fixture_installation(target: Path) -> Path:
         b"Image=INFANTRY\r\n"
         b"Strength=125\r\n"
         b"Cost=200\r\n"
+        b"TechLevel=1\r\n"
+        b"Owner=Americans\r\n"
         b"\r\n[DemoCannon]\r\n"
         b"Damage=75\r\n"
         b"ROF=50\r\n"
@@ -83,8 +87,12 @@ def create_fixture_installation(target: Path) -> Path:
         b"Image=INFANTRY\r\n"
         b"Remapable=yes\r\n"
         b"Facings=8\r\n"
+        b"Sequence=INFANTRYSEQ\r\n"
+        b"\r\n[INFANTRYSEQ]\r\n"
+        b"Ready=0,1,1\r\n"
+        b"Walk=0,2,1\r\n"
     )
-    sound = b"[FixtureSelect]\r\nSounds=fixture\r\n"
+    sound = b"[FixtureSelect]\r\nSounds=fixture fixture\r\n"
     nested = build_mix(
         [
             ("fixture.pal", palette),
@@ -99,6 +107,7 @@ def create_fixture_installation(target: Path) -> Path:
             ("fixture.wav", _build_fixture_wav()),
             ("fixture.map", _build_fixture_map()),
             ("infantry.shp", _build_fixture_infantry_shp()),
+            ("voxels.vpl", _build_fixture_vpl(palette)),
         ],
         hash_type=MixHashType.RA2,
     )
@@ -284,6 +293,14 @@ def _build_fixture_hva() -> bytes:
             0.0,
         )
         output.extend(struct.pack("<12f", *transform))
+    return bytes(output)
+
+
+def _build_fixture_vpl(palette: bytes) -> bytes:
+    output = bytearray(struct.pack("<IIII", 16, 31, 32, 0))
+    output.extend(palette)
+    for section in range(32):
+        output.extend(max(0, color - (31 - section)) for color in range(256))
     return bytes(output)
 
 

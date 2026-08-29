@@ -4,7 +4,7 @@ import re
 import threading
 from collections import Counter, OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from PIL import Image
@@ -15,6 +15,7 @@ from ra2_explorer.codecs.mix import classic_mix_hash, ra2_mix_hash
 from ra2_explorer.codecs.pal import Palette, grayscale_palette
 from ra2_explorer.codecs.shp import ShpFile, parse_shp
 from ra2_explorer.codecs.text import parse_ini
+from ra2_explorer.codecs.vpl import VplFile, parse_vpl
 from ra2_explorer.codecs.vxl import (
     VxlRenderPart,
     VxlScene,
@@ -27,6 +28,7 @@ from ra2_explorer.library import AssetReader
 from ra2_explorer.storage import Database
 
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
+ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
 _TYPE_SECTIONS = {
     "vehicle": "VehicleTypes",
     "infantry": "InfantryTypes",
@@ -62,6 +64,7 @@ _ART_FIELDS = {
     "new_theater": "newtheater",
     "foundation": "foundation",
     "facings": "facings",
+    "sequence": "sequence",
 }
 _AUDIO_RULE_FIELDS = {
     "select": "voiceselect",
@@ -187,6 +190,30 @@ class VoiceText:
 
 
 @dataclass(frozen=True, slots=True)
+class AnimationPlayback:
+    start_frame: int = 0
+    frame_count: int | None = None
+    facing_step: int = 0
+    rate_ms: int | None = None
+    loop_start: int | None = None
+    loop_end: int | None = None
+    loop_count: int | None = None
+    direction: str | None = None
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "start_frame": self.start_frame,
+            "frame_count": self.frame_count,
+            "facing_step": self.facing_step,
+            "rate_ms": self.rate_ms,
+            "loop_start": self.loop_start,
+            "loop_end": self.loop_end,
+            "loop_count": self.loop_count,
+            "direction": self.direction,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class MediaSample:
     name: str
     text: str | None
@@ -194,6 +221,8 @@ class MediaSample:
     original_text: str | None = None
     localized_text: str | None = None
     text_label: str | None = None
+    animation: AnimationPlayback | None = None
+    weight: int = 1
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -203,6 +232,8 @@ class MediaSample:
             "localized_text": self.localized_text,
             "text_label": self.text_label,
             "asset": _asset_summary(self.asset),
+            "animation": self.animation.as_dict() if self.animation else None,
+            "weight": self.weight,
         }
 
 
@@ -228,6 +259,7 @@ class MediaAssociation:
 class GameEntity:
     id: str
     kind: str
+    usage: str
     display_name: str
     internal_name: str
     ui_name: str | None
@@ -257,6 +289,7 @@ class GameEntity:
         return {
             "id": self.id,
             "kind": self.kind,
+            "usage": self.usage,
             "display_name": self.display_name,
             "internal_name": self.internal_name,
             "ui_name": self.ui_name,
@@ -339,6 +372,8 @@ class SemanticLibrary:
         *,
         query: str | None = None,
         kind: str | None = None,
+        usage: str | None = None,
+        side: str | None = None,
         renderable: bool | None = None,
         limit: int = 100,
         offset: int = 0,
@@ -348,13 +383,23 @@ class SemanticLibrary:
         if renderable is not None:
             entities = [entity for entity in entities if entity.renderable is renderable]
         counts = Counter(entity.kind for entity in entities)
-        country_counts = Counter(country for entity in entities for country in entity.countries)
-        side_counts = Counter(side for entity in entities for side in entity.sides)
         if kind:
             entities = [entity for entity in entities if entity.kind == kind]
         if query:
             needle = query.casefold()
             entities = [entity for entity in entities if needle in _entity_search_text(entity)]
+        usage_counts = Counter(entity.usage for entity in entities)
+        if usage:
+            entities = [entity for entity in entities if entity.usage == usage]
+        country_counts = Counter(country for entity in entities for country in entity.countries)
+        side_counts = Counter(entity_side for entity in entities for entity_side in entity.sides)
+        if side:
+            selected_side = side.casefold()
+            entities = [
+                entity
+                for entity in entities
+                if any(entity_side.casefold() == selected_side for entity_side in entity.sides)
+            ]
         total = len(entities)
         selected = entities[offset : offset + limit]
         return {
@@ -363,6 +408,11 @@ class SemanticLibrary:
             "kinds": [
                 {"kind": entity_kind, "count": counts.get(entity_kind, 0)}
                 for entity_kind in ENTITY_KINDS
+            ],
+            "usages": [
+                {"usage": entity_usage, "count": usage_counts.get(entity_usage, 0)}
+                for entity_usage in ENTITY_USAGES
+                if usage_counts.get(entity_usage, 0)
             ],
             "countries": [
                 {**country, "count": country_counts.get(country["id"], 0)}
@@ -384,6 +434,7 @@ class SemanticLibrary:
         query: str | None = None,
         kind: str | None = None,
         group: str | None = None,
+        event_type: str | None = None,
         sort: str = "name_asc",
         limit: int = 500,
         offset: int = 0,
@@ -404,6 +455,13 @@ class SemanticLibrary:
         if query:
             needle = query.casefold()
             items = [item for item in items if needle in _media_search_text(item)]
+        event_type_counts = Counter(
+            str(slot)
+            for item in items
+            for slot in item["slots"]  # type: ignore[union-attr]
+        )
+        if event_type:
+            items = [item for item in items if event_type in item["slots"]]  # type: ignore[operator]
         if sort == "description_asc":
             items.sort(
                 key=lambda item: (
@@ -428,6 +486,10 @@ class SemanticLibrary:
             "groups": [
                 {"group": media_group, "count": count}
                 for media_group, count in sorted(group_counts.items())
+            ],
+            "event_types": [
+                {"event_type": slot, "count": count}
+                for slot, count in sorted(event_type_counts.items())
             ],
         }
 
@@ -623,6 +685,7 @@ class SemanticLibrary:
                 frame=frame,
                 facing=facing,
                 player_color=player_color,
+                vpl=self.voxel_lighting(source_id),
                 scale=scale,
             )
         sprite = self._parse_asset(body, parse_shp)
@@ -658,7 +721,23 @@ class SemanticLibrary:
             palette=palette,
             frame=frame,
             player_color=player_color,
+            vpl=self.voxel_lighting(source_id),
         )
+
+    def voxel_lighting(self, source_id: str) -> VplFile | None:
+        candidates = self.database.assets_named(source_id, ("voxels.vpl",))
+        if not candidates:
+            return None
+
+        def priority(asset: dict[str, Any]) -> tuple[int, int, str]:
+            path = str(asset.get("virtual_path") or "").casefold()
+            return (
+                1 if "ra2md.mix" in path else 0,
+                1 if "localmd.mix" in path else 0,
+                path,
+            )
+
+        return self._parse_asset(max(candidates, key=priority), parse_vpl)
 
     def _voxel_parts(self, entity: GameEntity) -> tuple[VxlRenderPart, ...]:
         parts = []
@@ -680,11 +759,22 @@ class SemanticLibrary:
 
     def _preview_info(self, entity: GameEntity) -> dict[str, object]:
         body = entity.component("body")
+        sequence_facings = any(
+            sample.animation and sample.animation.facing_step > 0
+            for association in entity.media
+            if association.slot == "body_sequence"
+            for sample in association.samples
+        )
+        facing_count = (
+            8
+            if entity.voxel or sequence_facings
+            else _positive_int(entity.art.get("facings"), 1)
+        )
         base: dict[str, object] = {
             "format": str(body["format"]) if body else None,
             "frame_count": 0 if body is None else 1,
-            "facing_count": 8 if entity.voxel else _positive_int(entity.art.get("facings"), 1),
-            "supports_facing": bool(body and body["format"] == "vxl"),
+            "facing_count": facing_count,
+            "supports_facing": bool(body and (body["format"] == "vxl" or sequence_facings)),
             # Every VXL carries an explicit remap range. Some retail ART sections omit
             # Remapable even though the renderer can apply that range (for example DDBX).
             "supports_player_color": entity.voxel or _yes(entity.art.get("remapable")),
@@ -843,6 +933,10 @@ class SemanticLibrary:
                     _yes(rule_values.get("turret")),
                 )
                 dependencies = _resolve_dependencies(rule_values, rules)
+                body_asset = next(
+                    (component.asset for component in components if component.role == "body"),
+                    None,
+                )
                 countries = _references(rule_values.get("owner"))
                 sides = tuple(
                     dict.fromkeys(
@@ -854,6 +948,7 @@ class SemanticLibrary:
                     GameEntity(
                         entity_id,
                         kind,
+                        _entity_usage(kind, rule_values),
                         display_name,
                         internal_name,
                         ui_name,
@@ -875,6 +970,7 @@ class SemanticLibrary:
                             asset_index,
                             audio_events,
                             voice_strings,
+                            body_asset,
                         ),
                     )
                 )
@@ -1297,9 +1393,23 @@ def _build_audio_events(
     for event, values in sections.items():
         sample_names = _tokens(values.get("sounds") or values.get("sound"))
         if sample_names:
-            events[event] = tuple(
-                _audio_sample(name, assets, voice_strings) for name in sample_names
-            )
+            samples: list[MediaSample] = []
+            positions: dict[str, int] = {}
+            for name in sample_names:
+                sample = _audio_sample(name, assets, voice_strings)
+                identity = (
+                    str(sample.asset["id"])
+                    if sample.asset is not None
+                    else sample.name.casefold()
+                )
+                position = positions.get(identity)
+                if position is None:
+                    positions[identity] = len(samples)
+                    samples.append(sample)
+                else:
+                    current = samples[position]
+                    samples[position] = replace(current, weight=current.weight + 1)
+            events[event] = tuple(samples)
     return events
 
 
@@ -1337,6 +1447,7 @@ def _resolve_media(
     assets: _AssetIndex,
     audio_events: dict[str, tuple[MediaSample, ...]],
     voice_strings: dict[str, VoiceText],
+    body_asset: dict[str, Any] | None,
 ) -> tuple[MediaAssociation, ...]:
     associations: list[MediaAssociation] = []
     seen: set[tuple[str, str, str, str]] = set()
@@ -1409,6 +1520,28 @@ def _resolve_media(
                     _animation_samples(animation, art_sections, assets),
                 )
             )
+    sequence_name = entity_art.get("sequence")
+    if sequence_name and body_asset and body_asset.get("format") == "shp":
+        for event, value in art_sections.get(sequence_name.casefold(), {}).items():
+            playback = _sequence_playback(value)
+            if playback is None:
+                continue
+            add(
+                MediaAssociation(
+                    "animation",
+                    "body_sequence",
+                    event,
+                    sequence_name,
+                    (
+                        MediaSample(
+                            str(body_asset["display_name"]),
+                            None,
+                            body_asset,
+                            animation=playback,
+                        ),
+                    ),
+                )
+            )
     return tuple(associations)
 
 
@@ -1441,7 +1574,42 @@ def _animation_samples(
     image = values.get("image") or reference
     names = (image,) if "." in image else (f"{image}.shp", f"{image}.hva")
     asset = _find_asset(assets, names, ("shp", "hva", "video"))
-    return (MediaSample(image, None, asset),)
+    return (MediaSample(image, None, asset, animation=_art_animation_playback(values)),)
+
+
+def _art_animation_playback(values: dict[str, str]) -> AnimationPlayback | None:
+    playback_fields = {"start", "loopstart", "loopend", "loopcount", "rate"}
+    if not playback_fields.intersection(values):
+        return None
+    start = _integer(values.get("start"), 0) or 0
+    loop_start = _integer(values.get("loopstart"))
+    loop_end = _integer(values.get("loopend"))
+    frame_count = loop_end - start if loop_end is not None and loop_end > start else None
+    return AnimationPlayback(
+        start_frame=max(0, start),
+        frame_count=frame_count,
+        rate_ms=_integer(values.get("rate")),
+        loop_start=loop_start,
+        loop_end=loop_end,
+        loop_count=_integer(values.get("loopcount")),
+    )
+
+
+def _sequence_playback(value: str) -> AnimationPlayback | None:
+    parts = [part.strip() for part in value.split(",")]
+    if len(parts) < 3:
+        return None
+    start = _integer(parts[0])
+    frame_count = _integer(parts[1])
+    facing_step = _integer(parts[2])
+    if start is None or start < 0 or frame_count is None or frame_count <= 0 or facing_step is None:
+        return None
+    return AnimationPlayback(
+        start_frame=start,
+        frame_count=frame_count,
+        facing_step=max(0, facing_step),
+        direction=parts[3] if len(parts) > 3 and parts[3] else None,
+    )
 
 
 def _type_values(section: dict[str, str]) -> list[str]:
@@ -1628,6 +1796,41 @@ def _config_precedence(asset: dict[str, Any]) -> tuple[int, str]:
     return score, path
 
 
+def _entity_usage(kind: str, values: dict[str, str]) -> str:
+    owners = _references(values.get("owner"))
+    tech_level = _integer(values.get("techlevel"))
+    deployed_construction_yard = kind == "building" and (
+        _yes(values.get("constructionyard")) or bool(values.get("undeploysinto"))
+    )
+    can_build = bool(
+        owners
+        and values.get("cost")
+        and (
+            tech_level is not None
+            and tech_level >= 0
+            or deployed_construction_yard
+        )
+    )
+    if kind == "building":
+        if can_build:
+            return "buildable"
+        if _yes(values.get("needsengineer")) or _yes(values.get("capturable")):
+            return "tech"
+        if any(
+            _yes(values.get(field))
+            for field in ("civilian", "insignificant", "nominal")
+        ):
+            return "civilian"
+        return "scenario"
+    if kind == "infantry":
+        if _yes(values.get("civilian")) or _yes(values.get("nothuman")):
+            return "civilian"
+        if can_build and _integer(values.get("buildlimit")) == 1:
+            return "hero"
+        return "buildable" if can_build else "scenario"
+    return "buildable" if can_build else "scenario"
+
+
 def _selected_fields(values: dict[str, str], mapping: dict[str, str]) -> dict[str, str]:
     return {
         output: values[source]
@@ -1678,6 +1881,13 @@ def _positive_int(value: str | None, fallback: int) -> int:
     except ValueError:
         return fallback
     return parsed if parsed > 0 else fallback
+
+
+def _integer(value: str | None, fallback: int | None = None) -> int | None:
+    try:
+        return int(value or "")
+    except ValueError:
+        return fallback
 
 
 def _percentage(selected: int, total: int) -> float:
@@ -1750,6 +1960,7 @@ def _media_kind_for_asset(
 
 __all__ = [
     "ENTITY_KINDS",
+    "ENTITY_USAGES",
     "EntityComponent",
     "EntityDependency",
     "GameEntity",

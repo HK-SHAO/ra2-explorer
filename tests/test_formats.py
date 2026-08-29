@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import struct
+from dataclasses import replace
 
 from ra2_explorer.codecs.aud import aud_for_browser, parse_aud
 from ra2_explorer.codecs.bag import (
@@ -13,6 +14,8 @@ from ra2_explorer.codecs.pal import parse_palette
 from ra2_explorer.codecs.sniff import sniff_format
 from ra2_explorer.codecs.text import parse_ini
 from ra2_explorer.codecs.tmp import parse_tmp
+from ra2_explorer.codecs.voxel_normals import RA2_NORMALS, TS_NORMALS
+from ra2_explorer.codecs.vpl import parse_vpl
 from ra2_explorer.codecs.vxl import (
     VxlRenderPart,
     build_vxl_scene,
@@ -26,6 +29,7 @@ from tests.ra2_fixtures import (
     _build_fixture_palette,
     _build_fixture_shp,
     _build_fixture_tmp,
+    _build_fixture_vpl,
     _build_fixture_vxl,
     _build_fixture_wav,
 )
@@ -103,6 +107,41 @@ def test_vxl_composite_applies_hva_facing_and_player_color() -> None:
     assert scene["visible_voxel_count"] == len(scene["voxels"])
     assert scene["visible_voxel_count"] < model.voxel_count
     assert scene["bounds"]["max"][2] > scene["bounds"]["min"][2]
+
+
+def test_hva_translation_uses_westwood_double_scale_order() -> None:
+    model = parse_vxl(_build_fixture_vxl(_build_fixture_palette()))
+    limb = replace(model.limbs[0], scale=0.5)
+    model = replace(model, limbs=(limb,))
+    animation = parse_hva(_build_fixture_hva())
+    identity = (1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+    translated = (*identity[:3], 8.0, *identity[4:])
+    static = replace(animation, frame_count=1, transforms=(identity,))
+    moved = replace(animation, frame_count=1, transforms=(translated,))
+
+    static_scene = build_vxl_scene((VxlRenderPart(model, static),)).as_dict()
+    moved_scene = build_vxl_scene((VxlRenderPart(model, moved),)).as_dict()
+    shift = moved_scene["bounds"]["min"][0] - static_scene["bounds"]["min"][0]
+
+    assert shift == 2.0
+
+
+def test_vpl_reads_westwood_lighting_sections_and_normal_tables() -> None:
+    lighting = parse_vpl(_build_fixture_vpl(_build_fixture_palette()))
+    model = parse_vxl(_build_fixture_vxl(_build_fixture_palette()))
+    unlit = build_vxl_scene((VxlRenderPart(model, None),)).as_dict()
+    lit = build_vxl_scene((VxlRenderPart(model, None),), vpl=lighting).as_dict()
+
+    assert lighting.remap_start == 16
+    assert lighting.remap_end == 31
+    assert lighting.section_count == 32
+    assert lighting.color_index(31, 96) == 96
+    assert lighting.color_index(0, 96) == 65
+    assert len(TS_NORMALS) == 36
+    assert len(RA2_NORMALS) == 244
+    assert lit["lighting"] == "westwood_vpl"
+    voxel_pairs = zip(unlit["voxels"], lit["voxels"], strict=True)
+    assert any(left[4:7] != right[4:7] for left, right in voxel_pairs)
 
 
 def test_ini_accepts_retail_section_headers_with_inline_comments() -> None:

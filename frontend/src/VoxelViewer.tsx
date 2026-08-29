@@ -9,6 +9,7 @@ export interface VoxelSceneData {
   part_count: number;
   voxel_count: number;
   visible_voxel_count?: number;
+  lighting?: "westwood_vpl" | "lambert";
   bounds: { min: number[]; max: number[] };
   voxels: number[][];
 }
@@ -38,6 +39,9 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
     const mount = mountRef.current;
     if (!mount) return;
     let resizeObserver: ResizeObserver | null = null;
+    let resizeFrame = 0;
+    let lastWidth = 0;
+    let lastHeight = 0;
     try {
       const scene = new THREE.Scene();
       const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.001, 10_000);
@@ -102,11 +106,17 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
       };
       engine.updateProjection = updateProjection;
       const resize = () => {
-        const width = Math.max(1, mount.clientWidth);
-        const height = Math.max(1, mount.clientHeight);
-        renderer.setSize(width, height, false);
-        updateProjection();
-        render();
+        window.cancelAnimationFrame(resizeFrame);
+        resizeFrame = window.requestAnimationFrame(() => {
+          const width = Math.max(1, mount.clientWidth);
+          const height = Math.max(1, mount.clientHeight);
+          if (width === lastWidth && height === lastHeight) return;
+          lastWidth = width;
+          lastHeight = height;
+          renderer.setSize(width, height, false);
+          updateProjection();
+          render();
+        });
       };
       resizeObserver = new ResizeObserver(resize);
       resizeObserver.observe(mount);
@@ -119,6 +129,7 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
 
     return () => {
       resizeObserver?.disconnect();
+      window.cancelAnimationFrame(resizeFrame);
       const engine = engineRef.current;
       if (!engine) return;
       disposeModel(engine);
@@ -143,7 +154,7 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
         return response.json() as Promise<VoxelSceneData>;
       })
       .then((scene) => {
-        if (![1, 2, 3].includes(scene.version) || !Array.isArray(scene.voxels)) {
+        if (![1, 2, 3, 4].includes(scene.version) || !Array.isArray(scene.voxels)) {
           throw new Error("模型数据版本不受支持");
         }
         setData(scene);
@@ -164,7 +175,9 @@ export function VoxelViewer({ url, label }: { url: string; label: string }) {
     disposeModel(engine);
 
     const geometry = new THREE.BoxGeometry(1, 1, 1);
-    const material = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
+    const material = data.lighting === "westwood_vpl"
+      ? new THREE.MeshBasicMaterial({ color: 0xffffff })
+      : new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
     const model = new THREE.InstancedMesh(geometry, material, data.voxels.length);
     model.instanceMatrix.setUsage(THREE.StaticDrawUsage);
     const transform = new THREE.Object3D();

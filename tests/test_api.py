@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from ra2_explorer.api import create_app
 from ra2_explorer.config import Settings
+from ra2_explorer.semantic import _entity_usage
 from tests.ra2_fixtures import FIXTURE_NAMES, create_fixture_installation
 
 
@@ -30,7 +31,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     source = source_response.json()
     assert source["state"] == "ready"
     assert source["archive_count"] == 2
-    assert source["asset_count"] == 14
+    assert source["asset_count"] == 15
 
     assets_response = client.get(
         "/api/assets", params={"source_id": source["id"], "q": "fixture.shp"}
@@ -77,7 +78,8 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert client.get(f"/api/assets/{vxl['id']}/preview.png").content.startswith(b"\x89PNG")
     vxl_model = client.get(f"/api/assets/{vxl['id']}/model.json")
     assert vxl_model.status_code == 200
-    assert vxl_model.json()["version"] == 3
+    assert vxl_model.json()["version"] == 4
+    assert vxl_model.json()["lighting"] == "westwood_vpl"
     assert vxl_model.json()["voxel_count"] > 80
     assert vxl_model.json()["visible_voxel_count"] <= vxl_model.json()["voxel_count"]
     assert len(vxl_model.json()["voxels"][0]) == 9
@@ -132,6 +134,8 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert entity_summaries["DemoVehicle"]["display_name"] == "Generated test vehicle"
     assert entity_summaries["DemoVehicle"]["renderable"] is True
     assert entity_summaries["DemoVehicle"]["body_format"] == "vxl"
+    assert entity_summaries["DemoVehicle"]["usage"] == "buildable"
+    assert entity_summaries["DemoInfantry"]["usage"] == "buildable"
     assert entity_summaries["DemoVehicle"]["media_count"] > 0
     assert "voice" in entity_summaries["DemoVehicle"]["media_kinds"]
     assert entity_summaries["DemoVehicle"]["countries"] == ["Americans", "Russians"]
@@ -140,6 +144,41 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
         "United States",
         "Russia",
     }
+    assert entity_page["usages"] == [{"usage": "buildable", "count": 2}]
+    allied_vehicles = client.get(
+        "/api/entities",
+        params={
+            "source_id": source["id"],
+            "kind": "vehicle",
+            "side": "GDI",
+            "renderable": "true",
+        },
+    )
+    assert allied_vehicles.status_code == 200
+    assert allied_vehicles.json()["total"] == 1
+    assert allied_vehicles.json()["items"][0]["id"] == "DemoVehicle"
+    empty_side = client.get(
+        "/api/entities",
+        params={"source_id": source["id"], "kind": "building", "side": "GDI"},
+    )
+    assert empty_side.status_code == 200
+    assert empty_side.json()["total"] == 0
+    buildable_infantry = client.get(
+        "/api/entities",
+        params={
+            "source_id": source["id"],
+            "kind": "infantry",
+            "usage": "buildable",
+        },
+    )
+    assert buildable_infantry.status_code == 200
+    assert [item["id"] for item in buildable_infantry.json()["items"]] == [
+        "DemoInfantry"
+    ]
+    assert client.get(
+        "/api/entities",
+        params={"source_id": source["id"], "usage": "invalid"},
+    ).status_code == 422
 
     semantic_media = client.get(
         "/api/media",
@@ -153,6 +192,20 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert media_items[0]["groups"] == ["unit_voice"]
     assert media_items[0]["original_texts"] == ["Ready for the test."]
     assert media_items[0]["localized_texts"] == []
+    assert {item["event_type"] for item in semantic_media.json()["event_types"]} >= {
+        "select",
+        "sound_event",
+    }
+    selected_media = client.get(
+        "/api/media",
+        params={"source_id": source["id"], "kind": "voice", "event_type": "select"},
+    )
+    assert selected_media.status_code == 200
+    assert selected_media.json()["total"] == 1
+    assert client.get(
+        "/api/media",
+        params={"source_id": source["id"], "kind": "voice", "event_type": "move"},
+    ).json()["total"] == 0
     assert client.get(
         "/api/media",
         params={"source_id": source["id"], "sort": "random"},
@@ -180,6 +233,8 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert select_voice["samples"][0]["localized_text"] is None
     assert select_voice["samples"][0]["text_label"] == "VOX:fixture_event"
     assert select_voice["samples"][0]["asset"]["display_name"] == "fixture.wav"
+    assert select_voice["samples"][0]["weight"] == 2
+    assert len(select_voice["samples"]) == 1
 
     associations = client.get(f"/api/assets/{sound['id']}/associations")
     assert associations.status_code == 200
@@ -199,6 +254,23 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert infantry_preview["frame_count"] == 3
     assert infantry_preview["source_frame_count"] == 6
     assert infantry_preview["frame_indices"] == [0, 2, 4]
+    assert infantry_preview["supports_facing"] is True
+    walk_animation = next(
+        item
+        for item in infantry.json()["media"]
+        if item["kind"] == "animation" and item["event"] == "walk"
+    )
+    assert walk_animation["slot"] == "body_sequence"
+    assert walk_animation["samples"][0]["animation"] == {
+        "start_frame": 0,
+        "frame_count": 2,
+        "facing_step": 1,
+        "rate_ms": None,
+        "loop_start": None,
+        "loop_end": None,
+        "loop_count": None,
+        "direction": None,
+    }
     infantry_image = client.get(
         f"/api/entities/{source['id']}/DemoInfantry/preview.png",
         params={"frame": 2},
@@ -326,3 +398,30 @@ def test_canonical_cli_name_is_ra2exp() -> None:
     from ra2_explorer.cli import build_parser
 
     assert build_parser().prog == "ra2exp"
+
+
+def test_entity_usage_distinguishes_player_structures_and_scene_objects() -> None:
+    assert _entity_usage(
+        "building",
+        {
+            "owner": "British,Americans",
+            "cost": "3000",
+            "techlevel": "-1",
+            "constructionyard": "yes",
+            "undeploysinto": "AMCV",
+            "capturable": "yes",
+        },
+    ) == "buildable"
+    assert _entity_usage(
+        "building",
+        {"capturable": "yes", "needsengineer": "yes"},
+    ) == "tech"
+    assert _entity_usage(
+        "building",
+        {"civilian": "yes", "nominal": "yes"},
+    ) == "civilian"
+    assert _entity_usage("building", {"owner": "Americans", "cost": "2800"}) == "scenario"
+    assert _entity_usage(
+        "infantry",
+        {"owner": "Americans", "cost": "1000", "techlevel": "8", "buildlimit": "1"},
+    ) == "hero"

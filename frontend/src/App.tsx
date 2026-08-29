@@ -7,6 +7,7 @@ import {
   ReactNode,
   Suspense,
   UIEvent as ReactUIEvent,
+  WheelEvent as ReactWheelEvent,
   useEffect,
   useMemo,
   useRef,
@@ -23,8 +24,10 @@ import {
   EntityDependency,
   EntityKind,
   EntitySummary,
+  EntityUsage,
   GameEntity,
   GameInstallation,
+  MediaAssociation,
   MediaItem,
   MediaKind,
   MediaSample,
@@ -96,6 +99,30 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <g stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</g>
     </svg>
+  );
+}
+
+function SidebarToggle({ initialCollapsed, onChange }: {
+  initialCollapsed: boolean;
+  onChange: (collapsed: boolean) => void;
+}) {
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
+  function toggle() {
+    const next = !collapsed;
+    setCollapsed(next);
+    onChange(next);
+  }
+  return (
+    <button
+      className="sidebar-toggle"
+      type="button"
+      onClick={toggle}
+      title={collapsed ? "展开导航" : "收起导航"}
+      aria-label={collapsed ? "展开导航" : "收起导航"}
+      aria-expanded={!collapsed}
+    >
+      <Icon name="chevron" size={16} />
+    </button>
   );
 }
 
@@ -236,7 +263,47 @@ const mediaSlotLabels: Record<string, string> = {
   body_hva: "主体动作",
   turret_hva: "炮塔动作",
   barrel_hva: "炮管动作",
+  body_sequence: "主体动作",
+  sound_event: "声音事件",
+  buildup: "建造",
+  activeanim: "运转",
+  activeanimtwo: "辅助运转",
+  productionanim: "生产",
+  idleanim: "待机",
+  specialanim: "特殊",
+  deployinganim: "展开",
+  underdooranim: "门体",
+  roofdeployinganim: "屋顶展开",
+  underroofdooranim: "屋顶门",
+  bibshape: "地基",
 };
+
+const animationEventLabels: Record<string, string> = {
+  ready: "准备",
+  guard: "警戒",
+  prone: "卧倒",
+  walk: "行走",
+  fireup: "站立开火",
+  firedown: "卧倒开火",
+  crawl: "匍匐",
+  up: "起身",
+  down: "卧倒",
+  idle1: "待机一",
+  idle2: "待机二",
+  die1: "阵亡一",
+  die2: "阵亡二",
+  die3: "阵亡三",
+  die4: "阵亡四",
+  die5: "阵亡五",
+  cheer: "欢呼",
+  paradrop: "空降",
+  deploy: "部署",
+  undeploy: "取消部署",
+};
+
+function animationEventLabel(event: string) {
+  return animationEventLabels[event.toLowerCase()] || event;
+}
 
 const mediaGroupLabels: Record<string, string> = {
   unit_voice: "单位语音",
@@ -314,7 +381,9 @@ type BrowsingLocation = {
   assetCategory: string;
   assetFormatTag: string;
   mediaGroup: string;
+  mediaEventType: string;
   entityKind: EntityKind;
+  entityUsage: EntityUsage | "";
   entitySide: string;
   selectedAssetId: string;
   selectedEntityId: string;
@@ -327,9 +396,7 @@ type BrowsingLocation = {
 
 const audioFormats = ["bag_audio", "wav", "aud"];
 const imageFormats = ["shp", "tmp", "pcx", "pal", "map"];
-const defaultVisibleFormats = [
-  "vxl", "hva", "shp", "video", "bag_audio", "wav", "aud",
-];
+const defaultVisibleFormats = ["bag_audio", "wav", "aud"];
 const assetCategories: Array<{
   id: string;
   label: string;
@@ -338,7 +405,6 @@ const assetCategories: Array<{
 }> = [
   { id: "voices", label: "游戏语音", formats: ["bag_audio", "wav", "aud"], icon: "play" },
   { id: "sounds", label: "游戏音效", formats: ["bag_audio", "wav", "aud"], icon: "play" },
-  { id: "animations", label: "动画", formats: ["shp", "hva", "video"], icon: "image" },
   { id: "maps", label: "地图", formats: ["map"], icon: "grid" },
   { id: "images", label: "图像", formats: ["pcx"], icon: "image" },
   { id: "terrain", label: "地形素材", formats: ["tmp"], icon: "image" },
@@ -352,6 +418,18 @@ const entityKindIcons: Record<EntityKind, IconName> = {
   infantry: "infantry",
   building: "building",
 };
+
+const entityUsageOrder: EntityUsage[] = ["buildable", "hero", "tech", "civilian", "scenario"];
+const entityUsageLabels: Record<EntityKind, Partial<Record<EntityUsage, string>>> = {
+  vehicle: { buildable: "可建造", scenario: "任务 / 衍生" },
+  aircraft: { buildable: "可建造", scenario: "任务 / 衍生" },
+  infantry: { buildable: "常规部队", hero: "英雄单位", civilian: "平民 / 生物", scenario: "任务 / 特殊" },
+  building: { buildable: "玩家可建造", tech: "中立科技", civilian: "场景建筑", scenario: "任务 / 特殊" },
+};
+
+function entityUsageLabel(kind: EntityKind, usage: EntityUsage) {
+  return entityUsageLabels[kind][usage] || usage;
+}
 
 function readBrowsingLocation(): Partial<BrowsingLocation> {
   try {
@@ -468,7 +546,11 @@ function ExplorerApp() {
   const [palettes, setPalettes] = useState<Asset[]>([]);
   const [playerColors, setPlayerColors] = useState<PlayerColor[]>([]);
   const [assetQuery, setAssetQuery] = useState(rememberedLocation.assetQuery || "");
-  const [assetCategory, setAssetCategory] = useState(rememberedLocation.assetCategory || "animations");
+  const [assetCategory, setAssetCategory] = useState(
+    rememberedLocation.assetCategory && rememberedLocation.assetCategory !== "animations"
+      ? rememberedLocation.assetCategory
+      : "voices",
+  );
   const [assetFormatTag, setAssetFormatTag] = useState(rememberedLocation.assetFormatTag || "");
   const [assetSort, setAssetSort] = useState<AssetSort>(rememberedLocation.assetSort || "name_asc");
   const [enabledFormats, setEnabledFormats] = useState<string[]>(initialVisibleFormats);
@@ -479,13 +561,21 @@ function ExplorerApp() {
     window.localStorage.getItem("ra2exp-detail-placement") === "right" ? "right" : "bottom",
   );
   const [entities, setEntities] = useState<EntitySummary[]>([]);
+  const [entityTotal, setEntityTotal] = useState(0);
   const [entityKinds, setEntityKinds] = useState<Array<{ kind: EntityKind; count: number }>>([]);
+  const [entityUsages, setEntityUsages] = useState<Array<{ usage: EntityUsage; count: number }>>([]);
+  const [entitySides, setEntitySides] = useState<Array<{ id: string; count: number }>>([]);
   const [entityKind, setEntityKind] = useState<EntityKind | "">(
     entityKindOrder.includes(rememberedLocation.entityKind as EntityKind)
       ? rememberedLocation.entityKind as EntityKind
       : "vehicle",
   );
   const [entityQuery, setEntityQuery] = useState(rememberedLocation.entityQuery || "");
+  const [entityUsage, setEntityUsage] = useState<EntityUsage | "">(
+    entityUsageOrder.includes(rememberedLocation.entityUsage as EntityUsage)
+      ? rememberedLocation.entityUsage as EntityUsage
+      : "",
+  );
   const [entitySide, setEntitySide] = useState(rememberedLocation.entitySide || "");
   const [entitySort, setEntitySort] = useState<EntitySort>(rememberedLocation.entitySort || "name_asc");
   const [selectedEntityId, setSelectedEntityId] = useState(rememberedLocation.selectedEntityId || "");
@@ -495,8 +585,13 @@ function ExplorerApp() {
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [mediaTotal, setMediaTotal] = useState(0);
   const [mediaGroups, setMediaGroups] = useState<Array<{ group: string; count: number }>>([]);
+  const [mediaEventTypes, setMediaEventTypes] = useState<Array<{ event_type: string; count: number }>>([]);
   const [mediaKindCounts, setMediaKindCounts] = useState<Array<{ kind: MediaKind; count: number }>>([]);
   const [mediaGroup, setMediaGroup] = useState(rememberedLocation.mediaGroup || "");
+  const [mediaEventType, setMediaEventType] = useState(rememberedLocation.mediaEventType || "");
+  const [mediaGrouped, setMediaGrouped] = useState(
+    () => window.localStorage.getItem("ra2exp-media-grouped-v1") !== "false",
+  );
   const [mediaLoading, setMediaLoading] = useState(false);
   const [mediaSort, setMediaSort] = useState<MediaSort>(rememberedLocation.mediaSort || "name_asc");
   const [playingMediaId, setPlayingMediaId] = useState("");
@@ -515,11 +610,15 @@ function ExplorerApp() {
   const [notice, setNotice] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(
-    () => window.localStorage.getItem("ra2exp-sidebar-collapsed") === "true",
+  const sidebarCollapsedRef = useRef(
+    window.localStorage.getItem("ra2exp-sidebar-collapsed") === "true",
   );
+  const workspaceRef = useRef<HTMLElement>(null);
   const [detailBottomSize, setDetailBottomSize] = useState(
     () => readStoredNumber("ra2exp-detail-bottom-size", Math.round(window.innerHeight * 0.42), 220, 900),
+  );
+  const [audioDetailBottomSize, setAudioDetailBottomSize] = useState(
+    () => readStoredNumber("ra2exp-detail-bottom-audio-size", 270, 180, 600),
   );
   const [detailRightSize, setDetailRightSize] = useState(
     () => readStoredNumber("ra2exp-detail-right-size", 430, 320, 900),
@@ -544,26 +643,32 @@ function ExplorerApp() {
     ? [assetFormatTag]
     : categoryFormats;
   const assetFormatKey = assetFormats.join(",");
-  const kindEntities = useMemo(
-    () => entities.filter((entity) => !entityKind || entity.kind === entityKind),
-    [entities, entityKind],
-  );
-  const entitySideFacets = useMemo(() => Object.keys(sideLabels)
-    .map((id) => ({ id, count: kindEntities.filter((entity) => entity.sides.includes(id)).length }))
-    .filter((side) => side.count > 0), [kindEntities]);
+  const entitySideFacets = useMemo(() => {
+    const facets = [...entitySides];
+    if (entitySide && !facets.some((side) => side.id === entitySide)) {
+      facets.push({ id: entitySide, count: 0 });
+    }
+    return facets.sort((left, right) => {
+      const known = Object.keys(sideLabels);
+      const leftIndex = known.indexOf(left.id);
+      const rightIndex = known.indexOf(right.id);
+      return (leftIndex < 0 ? 99 : leftIndex) - (rightIndex < 0 ? 99 : rightIndex)
+        || left.id.localeCompare(right.id);
+    });
+  }, [entitySides, entitySide]);
   const visibleEntities = useMemo(
-    () => sortEntities(
-      kindEntities.filter((entity) => !entitySide || entity.sides.includes(entitySide)),
-      entitySort,
-    ),
-    [kindEntities, entitySide, entitySort],
+    () => sortEntities(entities, entitySort),
+    [entities, entitySort],
   );
-  const detailSize = detailPlacement === "bottom" ? detailBottomSize : detailRightSize;
+  const compactAudioDetail = view === "assets" && isMediaCategory;
+  const detailSize = detailPlacement === "bottom"
+    ? compactAudioDetail ? audioDetailBottomSize : detailBottomSize
+    : detailRightSize;
   const workspaceStyle = {
-    "--sidebar-width": sidebarCollapsed ? "58px" : "224px",
+    "--sidebar-width": sidebarCollapsedRef.current ? "58px" : "224px",
     "--detail-panel-size": `${detailSize}px`,
   } as CSSProperties;
-  const assetScrollKey = [sourceId, selectedCategoryId, assetFormatTag, assetQuery, assetSort, layout]
+  const assetScrollKey = [sourceId, selectedCategoryId, assetFormatTag, mediaEventType, assetQuery, assetSort, layout]
     .map((value) => encodeURIComponent(value))
     .join(":");
   const assetListScroll = useRememberedScroll(`assets:${assetScrollKey}`, assets.length);
@@ -579,30 +684,42 @@ function ExplorerApp() {
   }
 
   function updateSidebarCollapsed(next: boolean) {
-    setSidebarCollapsed(next);
+    sidebarCollapsedRef.current = next;
     window.localStorage.setItem("ra2exp-sidebar-collapsed", String(next));
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    workspace.classList.toggle("sidebar-collapsed", next);
+    workspace.style.setProperty("--sidebar-width", next ? "58px" : "224px");
   }
 
-  function clampDetailSize(value: number, placement: DetailPlacement, bounds: DOMRect) {
+  function clampDetailSize(value: number, placement: DetailPlacement, bounds: DOMRect, audioCompact = compactAudioDetail) {
     if (placement === "bottom") {
-      return Math.round(Math.min(Math.max(220, bounds.height - 246), Math.max(220, value)));
+      const minimum = audioCompact ? 180 : 220;
+      return Math.round(Math.min(Math.max(minimum, bounds.height - 246), Math.max(minimum, value)));
     }
-    const sidebarWidth = sidebarCollapsed ? 58 : 224;
+    const sidebarWidth = sidebarCollapsedRef.current ? 58 : 224;
     return Math.round(Math.min(
       Math.max(320, bounds.width - sidebarWidth - 366),
       Math.max(320, value),
     ));
   }
 
-  function setCurrentDetailSize(value: number, placement: DetailPlacement, persist = false) {
-    if (placement === "bottom") setDetailBottomSize(value);
+  function setCurrentDetailSize(value: number, placement: DetailPlacement, persist = false, audioCompact = compactAudioDetail) {
+    if (placement === "bottom" && audioCompact) setAudioDetailBottomSize(value);
+    else if (placement === "bottom") setDetailBottomSize(value);
     else setDetailRightSize(value);
-    if (persist) window.localStorage.setItem(`ra2exp-detail-${placement}-size`, String(value));
+    if (persist) {
+      const key = placement === "bottom" && audioCompact
+        ? "ra2exp-detail-bottom-audio-size"
+        : `ra2exp-detail-${placement}-size`;
+      window.localStorage.setItem(key, String(value));
+    }
   }
 
   function beginDetailResize(event: ReactPointerEvent<HTMLDivElement>) {
     event.preventDefault();
     const placement = detailPlacement;
+    const audioCompact = compactAudioDetail;
     const bounds = event.currentTarget.parentElement!.getBoundingClientRect();
     let latest = detailSize;
     const previousCursor = document.body.style.cursor;
@@ -613,8 +730,8 @@ function ExplorerApp() {
       const requested = placement === "bottom"
         ? bounds.bottom - moveEvent.clientY
         : bounds.right - moveEvent.clientX;
-      latest = clampDetailSize(requested, placement, bounds);
-      setCurrentDetailSize(latest, placement);
+      latest = clampDetailSize(requested, placement, bounds, audioCompact);
+      setCurrentDetailSize(latest, placement, false, audioCompact);
     };
     const stop = () => {
       window.removeEventListener("pointermove", move);
@@ -622,7 +739,7 @@ function ExplorerApp() {
       window.removeEventListener("pointercancel", stop);
       document.body.style.cursor = previousCursor;
       document.body.style.userSelect = previousSelection;
-      setCurrentDetailSize(latest, placement, true);
+      setCurrentDetailSize(latest, placement, true, audioCompact);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop);
@@ -635,8 +752,8 @@ function ExplorerApp() {
     if (!grows && !shrinks) return;
     event.preventDefault();
     const bounds = event.currentTarget.parentElement!.getBoundingClientRect();
-    const next = clampDetailSize(detailSize + (grows ? 20 : -20), detailPlacement, bounds);
-    setCurrentDetailSize(next, detailPlacement, true);
+    const next = clampDetailSize(detailSize + (grows ? 20 : -20), detailPlacement, bounds, compactAudioDetail);
+    setCurrentDetailSize(next, detailPlacement, true, compactAudioDetail);
   }
 
   function updateEnabledFormats(next: string[]) {
@@ -653,7 +770,9 @@ function ExplorerApp() {
       assetCategory,
       assetFormatTag,
       mediaGroup,
+      mediaEventType,
       entityKind: entityKind || "vehicle",
+      entityUsage,
       entitySide,
       selectedAssetId: selectedId,
       selectedEntityId,
@@ -665,14 +784,19 @@ function ExplorerApp() {
     };
     window.localStorage.setItem("ra2exp-browsing-location-v1", JSON.stringify(location));
   }, [
-    loading, sourceId, view, assetCategory, assetFormatTag, mediaGroup, entityKind,
+    loading, sourceId, view, assetCategory, assetFormatTag, mediaGroup, mediaEventType, entityKind, entityUsage,
     entitySide, selectedId, selectedEntityId, assetQuery, entityQuery, assetSort,
     entitySort, mediaSort,
   ]);
 
   function selectEntityKind(kind: EntityKind) {
+    if (kind !== entityKind) {
+      setEntityQuery("");
+      setEntitySide("");
+    }
     setView("entities");
     setEntityKind(kind);
+    setEntityUsage("");
   }
 
   function selectAssetCategory(category: string) {
@@ -680,6 +804,7 @@ function ExplorerApp() {
     setAssetCategory(category);
     setAssetFormatTag("");
     setMediaGroup("");
+    setMediaEventType("");
   }
 
   function openAddSource() {
@@ -700,12 +825,6 @@ function ExplorerApp() {
   useEffect(() => {
     if (assetFormatTag && !categoryFormats.includes(assetFormatTag)) setAssetFormatTag("");
   }, [assetFormatTag, categoryFormats]);
-
-  useEffect(() => {
-    if (entitySide && !entitySideFacets.some((side) => side.id === entitySide)) {
-      setEntitySide("");
-    }
-  }, [entitySide, entitySideFacets]);
 
   useEffect(() => {
     if (view !== "entities" || entityLoading) return;
@@ -743,7 +862,10 @@ function ExplorerApp() {
     setAssociations(null);
     setAssets([]);
     setEntities([]);
+    setEntityTotal(0);
+    setEntitySides([]);
     setMediaItems([]);
+    setMediaEventTypes([]);
     setTotal(0);
     setMediaTotal(0);
     if (!sourceId) {
@@ -755,7 +877,7 @@ function ExplorerApp() {
     Promise.all([
       api.stats(sourceId),
       api.palettes(sourceId),
-      api.media(sourceId, "", "voice", "", 0, 1),
+      api.media(sourceId, { kind: "voice", limit: 1 }),
     ])
       .then(([nextStats, nextPalettes, mediaFacets]) => {
         if (cancelled) return;
@@ -814,13 +936,22 @@ function ExplorerApp() {
     setMediaTotal(0);
     setPlayingMediaId("");
     const timer = window.setTimeout(() => {
-      api.media(sourceId, assetQuery, mediaKind, mediaGroup, 0, 500, mediaSort)
+      api.media(sourceId, {
+        query: assetQuery,
+        kind: mediaKind,
+        group: mediaGroup,
+        eventType: mediaEventType,
+        offset: 0,
+        limit: 500,
+        sort: mediaSort,
+      })
         .then((page) => {
           if (cancelled) return;
           setMediaItems(page.items);
           setMediaTotal(page.total);
           setMediaGroups(page.groups);
           setMediaKindCounts(page.kinds);
+          setMediaEventTypes(page.event_types || []);
           setSelectedId((current) => page.items.some((item) => item.asset.id === current)
             ? current
             : page.items[0]?.asset.id || "");
@@ -832,20 +963,27 @@ function ExplorerApp() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [sourceId, sourceRevision, assetQuery, mediaKind, mediaGroup, mediaSort, view, isMediaCategory]);
+  }, [sourceId, sourceRevision, assetQuery, mediaKind, mediaGroup, mediaEventType, mediaSort, view, isMediaCategory]);
 
   useEffect(() => {
     if (!sourceId || view !== "entities") return;
     let cancelled = false;
     setEntityLoading(true);
     setEntities([]);
-    setSelectedEntity(null);
     const timer = window.setTimeout(() => {
-      api.entities(sourceId, entityQuery, "", "true")
+      api.entities(sourceId, {
+        query: entityQuery,
+        kind: entityKind,
+        usage: entityUsage,
+        side: entitySide,
+      })
         .then((page) => {
           if (cancelled) return;
           setEntities(page.items);
+          setEntityTotal(page.total);
           setEntityKinds(page.kinds);
+          setEntityUsages(page.usages);
+          setEntitySides(page.sides);
           setSelectedEntityId((current) =>
             page.items.some((entity) => entity.id === current)
               ? current
@@ -859,7 +997,7 @@ function ExplorerApp() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [sourceId, sourceRevision, entityQuery, view]);
+  }, [sourceId, sourceRevision, entityQuery, entityKind, entityUsage, entitySide, view]);
 
   useEffect(() => {
     if (!sourceId || !selectedEntityId || view !== "entities") {
@@ -984,12 +1122,21 @@ function ExplorerApp() {
     if (mediaLoading || mediaItems.length >= mediaTotal || !sourceId) return;
     setMediaLoading(true);
     try {
-      const page = await api.media(sourceId, assetQuery, mediaKind, mediaGroup, mediaItems.length, 500, mediaSort);
+      const page = await api.media(sourceId, {
+        query: assetQuery,
+        kind: mediaKind,
+        group: mediaGroup,
+        eventType: mediaEventType,
+        offset: mediaItems.length,
+        limit: 500,
+        sort: mediaSort,
+      });
       setMediaItems((current) => {
         const known = new Set(current.map((item) => item.asset.id));
         return [...current, ...page.items.filter((item) => !known.has(item.asset.id))];
       });
       setMediaTotal(page.total);
+      setMediaEventTypes(page.event_types || []);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "载入失败");
     } finally {
@@ -1014,12 +1161,12 @@ function ExplorerApp() {
           )}
         />
       ) : (
-        <main className={`workspace detail-${detailPlacement} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`} style={workspaceStyle}>
+        <main ref={workspaceRef} className={`workspace detail-${detailPlacement} ${sidebarCollapsedRef.current ? "sidebar-collapsed" : ""}`} style={workspaceStyle}>
           <aside className="source-panel panel">
             <div className="sidebar-brand">
               <div className="brand-mark" aria-hidden="true"><span>R</span><i /></div>
               <strong>RA2 Explorer</strong>
-              <button className="sidebar-toggle" type="button" onClick={() => updateSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? "展开导航" : "收起导航"} aria-label={sidebarCollapsed ? "展开导航" : "收起导航"}><Icon name="chevron" size={16} /></button>
+              <SidebarToggle initialCollapsed={sidebarCollapsedRef.current} onChange={updateSidebarCollapsed} />
             </div>
             {sources.length > 1 && <section className="source-heading">
               <label className="source-select-wrap" title="选择资料库">
@@ -1037,7 +1184,15 @@ function ExplorerApp() {
                 <div className="tree-children">
                   {entityKindOrder.map((kind) => {
                     const count = entityKinds.find((item) => item.kind === kind)?.count || 0;
-                    return <button key={kind} title={entityKindLabels[kind]} className={view === "entities" && entityKind === kind ? "active" : ""} onClick={() => selectEntityKind(kind)}><span><Icon name={entityKindIcons[kind]} /><b>{entityKindLabels[kind]}</b></span><em>{count}</em></button>;
+                    const active = view === "entities" && entityKind === kind;
+                    return <div className="tree-child-group" key={kind}>
+                      <button title={entityKindLabels[kind]} className={active && !entityUsage ? "active" : ""} onClick={() => selectEntityKind(kind)}><span><Icon name={entityKindIcons[kind]} /><b>{entityKindLabels[kind]}</b></span><em>{count}</em></button>
+                      {active && entityUsageOrder.map((usage) => {
+                        const usageCount = entityUsages.find((item) => item.usage === usage)?.count || 0;
+                        const label = entityUsageLabels[kind][usage];
+                        return label && usageCount > 0 ? <button title={label} className={`tree-grandchild ${entityUsage === usage ? "active" : ""}`} key={usage} onClick={() => setEntityUsage(entityUsage === usage ? "" : usage)}><span><Icon name={entityKindIcons[kind]} /><b>{label}</b></span><em>{usageCount}</em></button> : null;
+                      })}
+                    </div>;
                   })}
                 </div>
               </section>
@@ -1050,14 +1205,7 @@ function ExplorerApp() {
                   </div>)}
                 </div>
               </section>}
-              {visibleCategories.some((item) => item.id === "animations") && <section className="tree-branch">
-                <div className="tree-parent"><Icon name="image" /><strong>动画</strong><em>{categoryCount(stats, ["shp", "hva", "video"])}</em></div>
-                <div className="tree-children">
-                  <button title="全部动画" className={view === "assets" && assetCategory === "animations" && !assetFormatTag ? "active" : ""} onClick={() => selectAssetCategory("animations")}><span><Icon name="image" /><b>全部动画</b></span><em>{categoryCount(stats, ["shp", "hva", "video"])}</em></button>
-                  {["shp", "hva", "video"].filter((formatName) => enabledFormats.includes(formatName)).map((formatName) => <button title={formatLabels[formatName]} className={view === "assets" && assetCategory === "animations" && assetFormatTag === formatName ? "active" : ""} key={formatName} onClick={() => { setView("assets"); setAssetCategory("animations"); setAssetFormatTag(formatName); }}><span><Icon name={assetIcon(formatName)} /><b>{formatLabels[formatName]}</b></span><em>{stats.formats.find((item) => item.format === formatName)?.count || 0}</em></button>)}
-                </div>
-              </section>}
-              {visibleCategories.filter((item) => !["voices", "sounds", "animations"].includes(item.id)).map((item) => (
+              {visibleCategories.filter((item) => !["voices", "sounds"].includes(item.id)).map((item) => (
                 <button key={item.id} title={item.label} className={`tree-leaf ${view === "assets" && assetCategory === item.id ? "active" : ""}`} onClick={() => selectAssetCategory(item.id)}>
                   <span><Icon name={item.icon} /><b>{item.label}</b></span><em>{categoryCount(stats, item.formats.filter((formatName) => enabledFormats.includes(formatName)))}</em>
                 </button>
@@ -1075,6 +1223,14 @@ function ExplorerApp() {
             groups={mediaGroups.filter((group) => group.group.endsWith(mediaKind === "voice" ? "_voice" : "_sound"))}
             selectedGroup={mediaGroup}
             setSelectedGroup={setMediaGroup}
+            eventTypes={mediaEventTypes}
+            selectedEventType={mediaEventType}
+            setSelectedEventType={setMediaEventType}
+            grouped={mediaGrouped}
+            setGrouped={(next) => {
+              setMediaGrouped(next);
+              window.localStorage.setItem("ra2exp-media-grouped-v1", String(next));
+            }}
             selectedId={selectedId}
             onSelect={(id) => { setSelectedId(id); setPlayingMediaId((current) => current === id ? "" : id); }}
             playingId={playingMediaId}
@@ -1083,7 +1239,7 @@ function ExplorerApp() {
             layout={layout}
             setLayout={updateLayout}
             onLoadMore={loadMoreMedia}
-            scrollKey={`media:${assetScrollKey}:${mediaGroup}`}
+            scrollKey={`media:${assetScrollKey}:${mediaGroup}:${mediaEventType}:${mediaGrouped}`}
           /> : <section className="asset-panel panel">
             <div className="asset-toolbar">
               <label className="search-box"><Icon name="search" /><input value={assetQuery} onChange={(event) => setAssetQuery(event.target.value)} placeholder="搜索名称或 CRC…" aria-label="搜索资产" />{assetQuery && <button onClick={() => setAssetQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</label>
@@ -1137,6 +1293,8 @@ function ExplorerApp() {
             playerColors={playerColors}
             previewUrl={previewUrl}
             associations={associations}
+            audioActive={playingMediaId === selected?.id}
+            onAudioPlaybackChange={(active) => setPlayingMediaId(active && selected ? selected.id : "")}
             wide={detailPlacement === "bottom"}
             scrollKey={`asset:${sourceId}:${selectedId}`}
             onPopout={() => window.open(`/?detail=asset&asset_id=${encodeURIComponent(selectedId)}`, `ra2exp-asset-${selectedId}`, "popup=yes,width=1100,height=780")}
@@ -1144,7 +1302,7 @@ function ExplorerApp() {
           </> : <>
             <EntityListPanel
               entities={visibleEntities}
-              total={kindEntities.length}
+              total={entityTotal}
               loading={entityLoading}
               query={entityQuery}
               setQuery={setEntityQuery}
@@ -1158,7 +1316,7 @@ function ExplorerApp() {
               setSelectedSide={setEntitySide}
               layout={layout}
               setLayout={updateLayout}
-              scrollKey={`entities:${sourceId}:${entityKind}:${entitySide}:${entityQuery}:${entitySort}:${layout}`}
+              scrollKey={`entities:${sourceId}:${entityKind}:${entityUsage}:${entitySide}:${entityQuery}:${entitySort}:${layout}`}
             />
             <div className="workspace-resizer" role="separator" tabIndex={0} aria-label="调整详情区域大小" aria-orientation={detailPlacement === "bottom" ? "horizontal" : "vertical"} aria-valuenow={detailSize} onPointerDown={beginDetailResize} onKeyDown={resizeDetailWithKeyboard}><span /></div>
             <EntityDetailPanel
@@ -1243,7 +1401,24 @@ function mediaSecondaryText(item: MediaItem) {
     .join(" · ");
 }
 
-function MediaListPanel({ items, total, loading, query, setQuery, groups, selectedGroup, setSelectedGroup, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore, scrollKey }: {
+function mediaSectionIdentity(item: MediaItem) {
+  if (item.entities.length === 1) {
+    const entity = item.entities[0];
+    return { key: `entity:${entity.id}`, label: entity.display_name, subtitle: entity.id };
+  }
+  if (item.entities.length > 1) {
+    const entities = [...item.entities].sort((left, right) => left.id.localeCompare(right.id));
+    return {
+      key: `shared:${entities.map((entity) => entity.id).join("|")}`,
+      label: "共同使用",
+      subtitle: entities.map((entity) => entity.display_name).join(" · "),
+    };
+  }
+  const group = item.groups[0] || "unclassified";
+  return { key: `group:${group}`, label: mediaGroupLabels[group] || group, subtitle: "未关联单位" };
+}
+
+function MediaListPanel({ items, total, loading, query, setQuery, groups, selectedGroup, setSelectedGroup, eventTypes, selectedEventType, setSelectedEventType, grouped, setGrouped, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore, scrollKey }: {
   items: MediaItem[];
   total: number;
   loading: boolean;
@@ -1252,6 +1427,11 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
   groups: Array<{ group: string; count: number }>;
   selectedGroup: string;
   setSelectedGroup: (value: string) => void;
+  eventTypes: Array<{ event_type: string; count: number }>;
+  selectedEventType: string;
+  setSelectedEventType: (value: string) => void;
+  grouped: boolean;
+  setGrouped: (value: boolean) => void;
   selectedId: string;
   onSelect: (id: string) => void;
   playingId: string;
@@ -1262,8 +1442,32 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
   onLoadMore: () => Promise<void>;
   scrollKey: string;
 }) {
-  const playing = items.find((item) => item.asset.id === playingId) || null;
   const listScroll = useRememberedScroll(scrollKey, items.length);
+  const sections = useMemo(() => {
+    const groupedItems = new Map<string, { label: string; subtitle: string; items: MediaItem[] }>();
+    for (const item of items) {
+      const identity = mediaSectionIdentity(item);
+      const section = groupedItems.get(identity.key) || { label: identity.label, subtitle: identity.subtitle, items: [] };
+      section.items.push(item);
+      groupedItems.set(identity.key, section);
+    }
+    return [...groupedItems.entries()].map(([key, section]) => ({ key, ...section }));
+  }, [items]);
+
+  function renderMediaItem(item: MediaItem) {
+    if (layout === "list") {
+      return <button key={item.asset.id} className={`asset-row media-row ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onClick={() => onSelect(item.asset.id)}>
+        <span className="file-icon format-audio"><Icon name={playingId === item.asset.id ? "pause" : "play"} /></span>
+        <span className="asset-main"><strong>{mediaPrimaryText(item)}</strong>{(mediaSecondaryText(item) || item.texts.length > 1) && <small>{mediaSecondaryText(item)}{item.texts.length > 1 ? `${mediaSecondaryText(item) ? " · " : ""}${item.texts.length} 条文本` : ""}</small>}</span>
+        <span className="media-links">{item.entities.slice(0, 2).map((entity) => entity.display_name).join(" · ") || item.slots.slice(0, 2).map((slot) => mediaSlotLabels[slot] || slot).join(" · ") || "未关联"}</span>
+        <Icon name="chevron" size={15} />
+      </button>;
+    }
+    return <button key={item.asset.id} className={`asset-card media-card ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onClick={() => onSelect(item.asset.id)}>
+      <span className="asset-card-copy"><strong title={mediaPrimaryText(item)}>{mediaPrimaryText(item)}</strong>{mediaSecondaryText(item) && <small title={mediaSecondaryText(item)}>{mediaSecondaryText(item)}</small>}<em>{item.slots.slice(0, 2).map((slot) => mediaSlotLabels[slot] || slot).join(" · ") || "未分类"}</em></span>
+    </button>;
+  }
+
   return (
     <section className="asset-panel media-panel panel">
       <div className="asset-toolbar">
@@ -1271,28 +1475,30 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
         <span className="result-count">显示 {items.length} / {total}</span>
         <LayoutToggle layout={layout} onChange={setLayout} />
       </div>
-      <div className="filter-strip">
-        <div className="tag-filter" role="group" aria-label="按声音用途筛选">
-          <button className={!selectedGroup ? "active" : ""} onClick={() => setSelectedGroup("")}>全部</button>
-          {groups.map((group) => <button key={group.group} className={selectedGroup === group.group ? "active" : ""} onClick={() => setSelectedGroup(selectedGroup === group.group ? "" : group.group)}>{mediaGroupLabels[group.group] || group.group}<em>{group.count}</em></button>)}
+      <div className="filter-strip media-filter-strip">
+        <div className="media-filter-groups">
+          <div className="tag-filter" role="group" aria-label="按声音用途筛选">
+            <button className={!selectedGroup ? "active" : ""} onClick={() => setSelectedGroup("")}>全部用途</button>
+            {groups.map((group) => <button key={group.group} className={selectedGroup === group.group ? "active" : ""} onClick={() => setSelectedGroup(selectedGroup === group.group ? "" : group.group)}>{mediaGroupLabels[group.group] || group.group}<em>{group.count}</em></button>)}
+          </div>
+          {eventTypes.length > 0 && <div className="tag-filter event-type-filter" role="group" aria-label="按事件类型筛选">
+            <button className={!selectedEventType ? "active" : ""} onClick={() => setSelectedEventType("")}>全部事件</button>
+            {eventTypes.map((eventType) => <button key={eventType.event_type} className={selectedEventType === eventType.event_type ? "active" : ""} onClick={() => setSelectedEventType(selectedEventType === eventType.event_type ? "" : eventType.event_type)}>{mediaSlotLabels[eventType.event_type] || eventType.event_type}<em>{eventType.count}</em></button>)}
+          </div>}
         </div>
-        <label className="sort-control"><span>排序</span><select value={sort} onChange={(event) => setSort(event.target.value as MediaSort)}><option value="name_asc">文件名 A–Z</option><option value="name_desc">文件名 Z–A</option><option value="description_asc">说明 A–Z</option></select></label>
+        <div className="media-filter-actions">
+          <label className="group-toggle"><input type="checkbox" checked={grouped} onChange={(event) => setGrouped(event.target.checked)} /><span>分组</span></label>
+          <label className="sort-control"><span>排序</span><select value={sort} onChange={(event) => setSort(event.target.value as MediaSort)}><option value="name_asc">文件名 A–Z</option><option value="name_desc">文件名 Z–A</option><option value="description_asc">说明 A–Z</option></select></label>
+        </div>
       </div>
-      <div ref={listScroll.ref} className={`asset-list ${layout === "grid" ? "asset-grid media-grid" : "list-columns"}`} tabIndex={0} aria-label="声音列表" onScroll={(event) => { listScroll.remember(event); const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void onLoadMore(); }}>
-        {layout === "list" ? items.map((item) => <button key={item.asset.id} className={`asset-row media-row ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onClick={() => onSelect(item.asset.id)}>
-          <span className="file-icon format-audio"><Icon name={playingId === item.asset.id ? "pause" : "play"} /></span>
-          <span className="asset-main"><strong>{mediaPrimaryText(item)}</strong>{(mediaSecondaryText(item) || item.texts.length > 1) && <small>{mediaSecondaryText(item)}{item.texts.length > 1 ? `${mediaSecondaryText(item) ? " · " : ""}${item.texts.length} 条文本` : ""}</small>}</span>
-          <span className="media-links">{item.entities.slice(0, 2).map((entity) => entity.display_name).join(" · ") || item.events.slice(0, 2).join(" · ") || "未关联"}</span>
-          <Icon name="chevron" size={15} />
-        </button>) : items.map((item) => <button key={item.asset.id} className={`asset-card media-card ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onClick={() => onSelect(item.asset.id)}>
-          <span className="asset-card-preview format-audio"><span className="audio-glyph" aria-hidden="true">{[4, 11, 7, 17, 12, 20, 9, 14, 5, 10].map((height, index) => <i key={index} style={{ height }} />)}</span><Icon name={playingId === item.asset.id ? "pause" : "play"} size={20} /></span>
-          <span className="asset-card-copy"><strong title={mediaPrimaryText(item)}>{mediaPrimaryText(item)}</strong>{mediaSecondaryText(item) && <small title={mediaSecondaryText(item)}>{mediaSecondaryText(item)}</small>}</span>
-        </button>)}
+      <div ref={listScroll.ref} className={`asset-list ${grouped ? "media-grouped-list" : layout === "grid" ? "asset-grid media-grid" : "list-columns"}`} tabIndex={0} aria-label="声音列表" onScroll={(event) => { listScroll.remember(event); const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void onLoadMore(); }}>
+        {grouped
+          ? sections.map((section) => <section className="media-group-section" key={section.key}><header><span><strong>{section.label}</strong><small>{section.subtitle}</small></span><em>{section.items.length}</em></header><div className={layout === "grid" ? "asset-grid media-grid media-group-items" : "list-columns media-group-items"}>{section.items.map(renderMediaItem)}</div></section>)
+          : items.map(renderMediaItem)}
         {items.length < total && <button className="load-more" disabled={loading} onClick={() => void onLoadMore()}>{loading ? "正在载入…" : `载入更多（剩余 ${(total - items.length).toLocaleString("zh-CN")}）`}</button>}
         {loading && items.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在建立声音关联…</strong></div>}
-        {!loading && items.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的声音</strong><button onClick={() => { setQuery(""); setSelectedGroup(""); }}>清除筛选</button></div>}
+        {!loading && items.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的声音</strong><button onClick={() => { setQuery(""); setSelectedGroup(""); setSelectedEventType(""); }}>清除筛选</button></div>}
       </div>
-      {playing && <div className="media-now-playing"><div><Icon name="play" /><span><strong>{mediaPrimaryText(playing)}</strong>{mediaSecondaryText(playing) && <small>{mediaSecondaryText(playing)}</small>}</span></div><audio key={playing.asset.id} controls autoPlay preload="metadata" src={api.mediaUrl(playing.asset.id)} onEnded={() => undefined} /></div>}
     </section>
   );
 }
@@ -1339,7 +1545,7 @@ function EntityListPanel({ entities, total, loading, query, setQuery, sort, setS
           <button key={entity.id} className={`asset-row entity-row ${selectedId === entity.id ? "selected" : ""}`} onClick={() => setSelectedId(entity.id)}>
             <span className={`file-icon entity-icon ${entity.renderable ? "ready" : "missing"}`}><Icon name="unit" /></span>
             <span className="asset-main"><strong>{entity.display_name}</strong><small>{entity.id} → {entity.image}{entity.internal_name !== entity.display_name ? ` · ${entity.internal_name}` : ""}</small></span>
-            <span className="entity-kind">{entityKindLabels[entity.kind]}</span>
+            <span className="entity-kind">{entityUsageLabel(entity.kind, entity.usage)}</span>
             <span className="entity-stats"><strong>{entity.cost ? `$${entity.cost}` : "—"}</strong><small>{entity.strength ? `${entity.strength} HP` : entity.renderable ? `${entity.component_count} 个组件` : "缺少主体"}</small></span>
             <Icon name="chevron" size={15} />
           </button>
@@ -1357,7 +1563,7 @@ function EntityGridCard({ entity, sourceId, selected, onSelect }: { entity: Enti
       <span className={`asset-card-preview entity-card-preview ${entity.renderable ? "ready" : "missing"}`}>
         {entity.renderable ? <img loading="lazy" src={api.entityPreviewUrl(sourceId, entity.id, { scale: 3 })} alt="" onError={(event) => { event.currentTarget.hidden = true; }} /> : <Icon name="unit" size={34} />}
       </span>
-      <span className="asset-card-copy"><strong title={entity.display_name}>{entity.display_name}</strong><small>{entityKindLabels[entity.kind]} · {entity.cost ? `$${entity.cost}` : entity.component_count ? `${entity.component_count} 个组件` : "缺少主体"}</small></span>
+      <span className="asset-card-copy"><strong title={entity.display_name}>{entity.display_name}</strong></span>
     </button>
   );
 }
@@ -1366,25 +1572,282 @@ function FrameGrid({ count, active, onSelect, urlFor }: { count: number; active:
   return <div className="frame-grid" aria-label="全部动画帧">{Array.from({ length: count }, (_, index) => <button type="button" key={index} className={active === index ? "active" : ""} onClick={() => onSelect(index)}><img loading="lazy" src={urlFor(index)} alt={`第 ${index + 1} 帧`} /><span>{index + 1}</span></button>)}</div>;
 }
 
+function animationSourceFrames(sample: MediaSample | undefined, metadata: AssetMetadata | null, facing: number) {
+  const total = Math.max(0, metadata?.frame_count || 0);
+  const playback = sample?.animation;
+  if (!playback) return Array.from({ length: Math.max(1, total) }, (_, index) => index);
+  const start = playback.start_frame + (playback.facing_step > 0 ? facing * playback.facing_step : 0);
+  const count = playback.frame_count ?? Math.max(1, total - start);
+  const frames = Array.from({ length: Math.max(1, count) }, (_, index) => start + index)
+    .filter((frame) => total === 0 || frame < total);
+  return frames.length > 0 ? frames : [Math.min(Math.max(0, start), Math.max(0, total - 1))];
+}
+
+function CompactAudioPlayer({ assetId, label, active, onPlaybackChange }: {
+  assetId: string;
+  label: string;
+  active?: boolean;
+  onPlaybackChange?: (active: boolean) => void;
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [localActive, setLocalActive] = useState(false);
+  const isActive = active ?? localActive;
+
+  function update(next: boolean) {
+    if (active === undefined) setLocalActive(next);
+    onPlaybackChange?.(next);
+  }
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || active === undefined) return;
+    if (active) void audio.play().catch(() => onPlaybackChange?.(false));
+    else audio.pause();
+  }, [active, assetId]);
+
+  useEffect(() => {
+    setLocalActive(false);
+  }, [assetId]);
+
+  function toggle() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) void audio.play().catch(() => update(false));
+    else audio.pause();
+  }
+
+  return <span className="compact-audio-player">
+    <audio ref={audioRef} preload="none" src={api.mediaUrl(assetId)} onPlay={() => update(true)} onPause={() => update(false)} onEnded={() => update(false)} />
+    <button type="button" onClick={toggle} title={isActive ? `暂停 ${label}` : `播放 ${label}`} aria-label={isActive ? `暂停 ${label}` : `播放 ${label}`}><Icon name={isActive ? "pause" : "play"} size={15} /></button>
+  </span>;
+}
+
+function AudioDownloadAction({ assetId, label }: { assetId: string; label: string }) {
+  return <a className="audio-download-action" href={api.contentUrl(assetId)} download title={`下载 ${label}`} aria-label={`下载 ${label}`}><Icon name="download" size={15} /></a>;
+}
+
+function ImageViewport({ src, alt, fitKey, building = false, className = "", onError }: {
+  src: string;
+  alt: string;
+  fitKey: string;
+  building?: boolean;
+  className?: string;
+  onError?: () => void;
+}) {
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const [imageFit, setImageFit] = useState<{
+    width: number;
+    height: number;
+    bounds: { x: number; y: number; width: number; height: number };
+  } | null>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ pointerId: number; x: number; y: number; panX: number; panY: number } | null>(null);
+
+  function reset() {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }
+
+  useEffect(() => {
+    reset();
+    setImageFit(null);
+  }, [fitKey, src]);
+
+  useEffect(() => {
+    const element = viewportRef.current;
+    if (!element) return;
+    let frame = 0;
+    let previousWidth = -1;
+    let previousHeight = -1;
+    const update = (width: number, height: number) => {
+      const nextWidth = Math.round(width);
+      const nextHeight = Math.round(height);
+      if (nextWidth === previousWidth && nextHeight === previousHeight) return;
+      previousWidth = nextWidth;
+      previousHeight = nextHeight;
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => setViewportSize({ width: nextWidth, height: nextHeight }));
+    };
+    const bounds = element.getBoundingClientRect();
+    update(bounds.width, bounds.height);
+    const observer = new ResizeObserver((entries) => {
+      const size = entries[0]?.contentRect;
+      if (size) update(size.width, size.height);
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  function measureVisibleContent(image: HTMLImageElement) {
+    const width = image.naturalWidth;
+    const height = image.naturalHeight;
+    if (width <= 0 || height <= 0) return;
+    const sampleScale = Math.min(1, 2048 / Math.max(width, height));
+    const sampleWidth = Math.max(1, Math.round(width * sampleScale));
+    const sampleHeight = Math.max(1, Math.round(height * sampleScale));
+    const canvas = document.createElement("canvas");
+    canvas.width = sampleWidth;
+    canvas.height = sampleHeight;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return;
+    context.imageSmoothingEnabled = false;
+    context.drawImage(image, 0, 0, sampleWidth, sampleHeight);
+    try {
+      const pixels = context.getImageData(0, 0, sampleWidth, sampleHeight).data;
+      let left = sampleWidth;
+      let top = sampleHeight;
+      let right = -1;
+      let bottom = -1;
+      for (let y = 0; y < sampleHeight; y += 1) {
+        for (let x = 0; x < sampleWidth; x += 1) {
+          if (pixels[(y * sampleWidth + x) * 4 + 3] <= 4) continue;
+          left = Math.min(left, x);
+          top = Math.min(top, y);
+          right = Math.max(right, x);
+          bottom = Math.max(bottom, y);
+        }
+      }
+      const bounds = right >= left && bottom >= top
+        ? {
+            x: left / sampleScale,
+            y: top / sampleScale,
+            width: (right - left + 1) / sampleScale,
+            height: (bottom - top + 1) / sampleScale,
+          }
+        : { x: 0, y: 0, width, height };
+      setImageFit({ width, height, bounds });
+    } catch {
+      setImageFit({ width, height, bounds: { x: 0, y: 0, width, height } });
+    }
+  }
+
+  const fittedImageStyle = useMemo<CSSProperties | undefined>(() => {
+    if (!imageFit || viewportSize.width <= 0 || viewportSize.height <= 0) return undefined;
+    const padding = 27;
+    const availableWidth = Math.max(1, viewportSize.width - padding * 2);
+    const availableHeight = Math.max(1, viewportSize.height - padding * 2);
+    const scale = Math.min(
+      availableWidth / Math.max(1, imageFit.bounds.width),
+      availableHeight / Math.max(1, imageFit.bounds.height),
+    );
+    return {
+      width: imageFit.width * scale,
+      height: imageFit.height * scale,
+      left: viewportSize.width / 2 - (imageFit.bounds.x + imageFit.bounds.width / 2) * scale,
+      top: viewportSize.height / 2 - (imageFit.bounds.y + imageFit.bounds.height / 2) * scale,
+    };
+  }, [imageFit, viewportSize]);
+
+  function adjustZoom(delta: number) {
+    setZoom((current) => {
+      const next = Math.min(6, Math.max(1, Math.round((current + delta) * 10) / 10));
+      if (next === 1) setPan({ x: 0, y: 0 });
+      return next;
+    });
+  }
+
+  function beginPan(event: ReactPointerEvent<HTMLDivElement>) {
+    if (zoom <= 1 || event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
+  }
+
+  function movePan(event: ReactPointerEvent<HTMLDivElement>) {
+    const current = drag.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    setPan({ x: current.panX + event.clientX - current.x, y: current.panY + event.clientY - current.y });
+  }
+
+  function endPan(event: ReactPointerEvent<HTMLDivElement>) {
+    if (drag.current?.pointerId === event.pointerId) drag.current = null;
+  }
+
+  function zoomWithWheel(event: ReactWheelEvent<HTMLDivElement>) {
+    event.preventDefault();
+    adjustZoom(event.deltaY < 0 ? 0.2 : -0.2);
+  }
+
+  return <div
+    ref={viewportRef}
+    className={`preview-stage image-viewport ${building ? "building-image-viewport" : ""} ${className}`}
+    onPointerDown={beginPan}
+    onPointerMove={movePan}
+    onPointerUp={endPan}
+    onPointerCancel={endPan}
+    onWheel={zoomWithWheel}
+    onDoubleClick={reset}
+  >
+    <div className="preview-rulers horizontal" />
+    <div className="preview-rulers vertical" />
+    <div className={`image-viewport-canvas ${fittedImageStyle ? "content-fitted" : ""}`} style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
+      <img src={src} alt={alt} draggable={false} style={fittedImageStyle} onLoad={(event) => measureVisibleContent(event.currentTarget)} onError={onError} />
+    </div>
+    <div className="image-viewport-tools" onPointerDown={(event) => event.stopPropagation()}>
+      <button type="button" onClick={() => adjustZoom(-0.25)} disabled={zoom <= 1} aria-label="缩小" title="缩小">−</button>
+      <span>{Math.round(zoom * 100)}%</span>
+      <button type="button" onClick={() => adjustZoom(0.25)} disabled={zoom >= 6} aria-label="放大" title="放大">＋</button>
+      <button type="button" onClick={reset} disabled={zoom === 1 && pan.x === 0 && pan.y === 0}>适应</button>
+    </div>
+  </div>;
+}
+
 function EntitySoundSample({ sample }: { sample: MediaSample }) {
   const originalText = sample.original_text || sample.text;
   const localizedText = sample.localized_text && sample.localized_text !== originalText
     ? sample.localized_text
     : null;
-  const displayName = audioDisplayName(sample.asset?.display_name || sample.name);
   const internalName = audioDisplayName(sample.name);
   return <div className="media-sample">
-    <div className="media-sample-main">
-      <span><strong>{displayName}</strong>{displayName !== internalName && <code>{internalName}</code>}</span>
-      {sample.asset && audioFormats.includes(sample.asset.format)
-        ? <audio controls preload="none" src={api.mediaUrl(sample.asset.id)} />
-        : <em>音频未解析</em>}
-    </div>
-    {(originalText || localizedText) && <div className="media-sample-text">
-      {originalText && <span><b>原文</b>{originalText}</span>}
-      {localizedText && <span><b>中文</b>{localizedText}</span>}
-    </div>}
+    <strong className="media-sample-id" title={sample.asset?.display_name || sample.name}>{internalName}{sample.weight > 1 && <em>×{sample.weight}</em>}</strong>
+    {sample.asset && audioFormats.includes(sample.asset.format)
+      ? <CompactAudioPlayer assetId={sample.asset.id} label={internalName} />
+      : <em className="media-sample-missing">未解析</em>}
+    <span className="media-sample-texts">
+      {originalText && <span className="media-sample-copy"><b>原文</b>{originalText}</span>}
+      {localizedText && <span className="media-sample-copy"><b>中文</b>{localizedText}</span>}
+    </span>
+    {sample.asset && audioFormats.includes(sample.asset.format) && <AudioDownloadAction assetId={sample.asset.id} label={internalName} />}
   </div>;
+}
+
+interface DisplaySoundAssociation {
+  kind: "voice" | "sound";
+  event: string;
+  slots: string[];
+  samples: MediaSample[];
+}
+
+type EntityDetailTab = "sound" | "animation" | "data";
+
+function mergeSoundAssociations(associations: MediaAssociation[]): DisplaySoundAssociation[] {
+  const merged = new Map<string, DisplaySoundAssociation>();
+  for (const association of associations) {
+    if (association.kind === "animation") continue;
+    const key = `${association.kind}:${association.event.toLowerCase()}`;
+    const current = merged.get(key);
+    if (!current) {
+      merged.set(key, {
+        kind: association.kind,
+        event: association.event,
+        slots: [association.slot],
+        samples: [...association.samples],
+      });
+      continue;
+    }
+    if (!current.slots.includes(association.slot)) current.slots.push(association.slot);
+    for (const sample of association.samples) {
+      const identity = sample.asset?.id || sample.name.toLowerCase();
+      const position = current.samples.findIndex((item) => (item.asset?.id || item.name.toLowerCase()) === identity);
+      if (position < 0) current.samples.push(sample);
+      else if ((sample.weight || 1) > (current.samples[position].weight || 1)) current.samples[position] = sample;
+    }
+  }
+  return [...merged.values()];
 }
 
 function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = false, onPopout, scrollKey = "" }: {
@@ -1402,12 +1865,19 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
   const [playing, setPlaying] = useState(false);
   const [frameMode, setFrameMode] = useState<"sequence" | "grid">("sequence");
   const [associationLayout, setAssociationLayout] = useState<LayoutMode>("list");
+  const [detailTab, setDetailTab] = useState<EntityDetailTab>("sound");
   const [activeAnimation, setActiveAnimation] = useState<{ event: string; sample: MediaSample } | null>(null);
   const [animationMetadata, setAnimationMetadata] = useState<AssetMetadata | null>(null);
   const [animationFrame, setAnimationFrame] = useState(0);
   const [animationPlaying, setAnimationPlaying] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
   const frameCount = Math.max(1, entity?.preview.frame_count || 1);
+  const activeAnimationFrames = useMemo(
+    () => animationSourceFrames(activeAnimation?.sample, animationMetadata, facing),
+    [activeAnimation, animationMetadata, facing],
+  );
+  const activeAnimationFrameCount = activeAnimationFrames.length;
+  const activeAnimationSourceFrame = activeAnimationFrames[Math.min(animationFrame, activeAnimationFrameCount - 1)] || 0;
   const detailScroll = useRememberedScroll<HTMLElement>(scrollKey, entity ? entity.components.length + entity.media.length : 0);
 
   useEffect(() => {
@@ -1421,6 +1891,11 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
     setAnimationFrame(0);
     setAnimationPlaying(false);
     setPreviewFailed(false);
+    setDetailTab(entity?.media.some((association) => association.kind !== "animation")
+      ? "sound"
+      : entity?.media.some((association) => association.kind === "animation")
+        ? "animation"
+        : "data");
   }, [entity?.id]);
 
   useEffect(() => {
@@ -1447,34 +1922,40 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
       .then((nextMetadata) => {
         if (cancelled) return;
         setAnimationMetadata(nextMetadata);
-        setAnimationPlaying((nextMetadata.frame_count || 1) > 1);
+        setAnimationPlaying((activeAnimation.sample.animation?.frame_count || nextMetadata.frame_count || 1) > 1);
       })
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [activeAnimation]);
 
   useEffect(() => {
-    const animationFrameCount = animationMetadata?.frame_count || 1;
-    if (!animationPlaying || animationFrameCount < 2) return;
+    if (activeAnimation) setAnimationFrame(0);
+  }, [facing]);
+
+  useEffect(() => {
+    if (!animationPlaying || activeAnimationFrameCount < 2) return;
+    const requestedRate = activeAnimation?.sample.animation?.rate_ms || 140;
+    const interval = Math.min(1000, Math.max(60, requestedRate));
     const timer = window.setInterval(
-      () => setAnimationFrame((current) => (current + 1) % animationFrameCount),
-      140,
+      () => setAnimationFrame((current) => (current + 1) % activeAnimationFrameCount),
+      interval,
     );
     return () => window.clearInterval(timer);
-  }, [animationPlaying, animationMetadata]);
+  }, [animationPlaying, activeAnimationFrameCount, activeAnimation]);
 
   if (loading) return <aside className="detail-panel panel empty-detail"><div className="radar small"><span /></div><strong>正在读取单位详情…</strong></aside>;
   if (!entity) return <aside className="detail-panel panel empty-detail"><div className="empty-detail-icon"><Icon name="unit" size={30} /></div><strong>选择单位</strong></aside>;
   const rules = Object.entries(entity.rules).filter(([key]) => ruleLabels[key]);
-  const soundAssociations = entity.media.filter((association) => association.kind !== "animation");
+  const soundAssociations = mergeSoundAssociations(entity.media);
   const animationAssociations = entity.media.filter((association) => association.kind === "animation");
   const soundCount = soundAssociations.reduce((count, association) => count + association.samples.length, 0);
   const associatedAnimationCount = animationAssociations.reduce((count, association) => count + association.samples.length, 0);
-  const animationCount = associatedAnimationCount + (frameCount > 1 ? 1 : 0);
+  const hasBodySequences = animationAssociations.some((association) => association.slot === "body_sequence");
+  const animationCount = associatedAnimationCount + (frameCount > 1 && !hasBodySequences ? 1 : 0);
   const activeAnimationAsset = activeAnimation?.sample.asset || null;
-  const activeAnimationFrameCount = animationMetadata?.frame_count || 1;
   const entityTags = [
     entityKindLabels[entity.kind],
+    entityUsageLabel(entity.kind, entity.usage),
     entity.voxel ? "VXL 三维模型" : "SHP 帧动画",
     ...entity.sides.map((side) => sideLabels[side] || side),
     ...entity.countries,
@@ -1487,6 +1968,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
       ? [`${entity.preview.voxel_count.toLocaleString("zh-CN")} 体素`]
       : []),
   ];
+  const dataCount = entityTags.length + rules.length + entity.components.length;
   const dependencyGroups = [...new Set(entity.dependencies.map((item) => item.slot))].map(
     (slot) => ({ slot, items: entity.dependencies.filter((item) => item.slot === slot) }),
   );
@@ -1496,21 +1978,23 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
         <div className="entity-preview-column">
           {entity.renderable ? <div className="preview-block entity-preview">
             {activeAnimationAsset?.format === "shp"
-              ? <div className="preview-stage shp entity-effect-stage"><div className="preview-rulers horizontal" /><div className="preview-rulers vertical" /><img key={`${activeAnimationAsset.id}-${animationFrame}-${playerColor}`} src={api.previewUrl(activeAnimationAsset.id, animationFrame, "", 5, playerColor)} alt={`${activeAnimation?.event || "关联动画"} 预览`} /></div>
+              ? <ImageViewport className="shp entity-effect-stage" fitKey={`${activeAnimationAsset.id}:${activeAnimation?.event || "animation"}`} src={api.previewUrl(activeAnimationAsset.id, activeAnimationSourceFrame, "", 5, playerColor)} alt={`${animationEventLabel(activeAnimation?.event || "关联动画")}预览`} building={entity.kind === "building"} />
               : activeAnimationAsset && ["vxl", "hva"].includes(activeAnimationAsset.format)
-                ? <VoxelPreview url={api.assetModelUrl(activeAnimationAsset.id, animationFrame, playerColor)} label={activeAnimation?.event || activeAnimationAsset.display_name} />
+                ? <VoxelPreview url={api.assetModelUrl(activeAnimationAsset.id, activeAnimationSourceFrame, playerColor)} label={animationEventLabel(activeAnimation?.event || activeAnimationAsset.display_name)} />
                 : frameMode === "grid" && frameCount > 1
                   ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing, playerColor, scale: 3 })} />
                   : entity.voxel
                     ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} />
-                    : <div className="preview-stage shp"><div className="preview-rulers horizontal" /><div className="preview-rulers vertical" />{previewFailed ? <div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div> : <img key={previewUrl} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} />}</div>}
+                    : previewFailed
+                      ? <div className="preview-stage shp"><div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div></div>
+                      : <ImageViewport className="shp" fitKey={entity.id} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
             {activeAnimationAsset && activeAnimationFrameCount > 1
-              ? <div className="frame-controls"><button className="play-button" onClick={() => setAnimationPlaying(!animationPlaying)} aria-label={animationPlaying ? "暂停" : "播放"}><Icon name={animationPlaying ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={activeAnimationFrameCount - 1} value={animationFrame} onChange={(event) => setAnimationFrame(Number(event.target.value))} aria-label="关联动画帧" /><span>{String(animationFrame + 1).padStart(2, "0")} <i>/</i> {String(activeAnimationFrameCount).padStart(2, "0")}</span></div>
+              ? <div className="frame-controls"><button className="play-button" onClick={() => setAnimationPlaying(!animationPlaying)} aria-label={animationPlaying ? "暂停" : "播放"}><Icon name={animationPlaying ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={activeAnimationFrameCount - 1} value={Math.min(animationFrame, activeAnimationFrameCount - 1)} onChange={(event) => setAnimationFrame(Number(event.target.value))} aria-label="关联动画帧" /><span>{String(animationFrame + 1).padStart(2, "0")} <i>/</i> {String(activeAnimationFrameCount).padStart(2, "0")} · 源 {activeAnimationSourceFrame + 1}</span></div>
               : !activeAnimationAsset && frameCount > 1 && <div className="frame-controls">
                 {frameMode === "sequence" && <><button className="play-button" onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={frameCount - 1} value={Math.min(frame, frameCount - 1)} onChange={(event) => setFrame(Number(event.target.value))} aria-label="当前动画帧" /><span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(frameCount).padStart(2, "0")}</span></>}
                 <div className="frame-mode-toggle"><button className={frameMode === "sequence" ? "active" : ""} onClick={() => setFrameMode("sequence")} title="顺序播放"><Icon name="play" size={14} /></button><button className={frameMode === "grid" ? "active" : ""} onClick={() => { setPlaying(false); setFrameMode("grid"); }} title="全部帧"><Icon name="grid" size={14} /></button></div>
               </div>}
-            {activeAnimationAsset && <button type="button" className="return-body-action" onClick={() => { setActiveAnimation(null); setPlaying(frameCount > 1); }}>返回主体动作</button>}
+            {activeAnimationAsset && <button type="button" className="return-body-action" onClick={() => { setActiveAnimation(null); setPlaying(frameCount > 1); }}>返回主体</button>}
             <div className="entity-render-options compact-render-options">
               {!entity.voxel && entity.preview.supports_facing && <label><span>朝向</span><select value={facing} onChange={(event) => setFacing(Number(event.target.value))}>{Array.from({ length: 8 }, (_, index) => <option key={index} value={index}>{index * 45}°</option>)}</select></label>}
               {entity.preview.supports_player_color && <label title="选择玩家颜色"><select aria-label="玩家颜色" value={playerColor} onChange={(event) => setPlayerColor(event.target.value)}><option value="">原始色</option>{playerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
@@ -1519,79 +2003,84 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
         </div>
 
         <div className="entity-detail-sections">
-      <div className="detail-title entity-detail-title"><div className="detail-heading-line"><h2 title={entity.display_name}>{entity.display_name}</h2><small>{entity.id} · {entity.internal_name}</small></div><div className="detail-actions"><LayoutToggle layout={associationLayout} onChange={setAssociationLayout} />{onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}</div></div>
+          <div className="detail-title entity-detail-title"><div className="detail-heading-line"><h2 title={entity.display_name}>{entity.display_name}</h2><small>{entity.id} · {entity.internal_name}</small></div><div className="detail-actions">{detailTab !== "data" && <LayoutToggle layout={associationLayout} onChange={setAssociationLayout} />}{onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}</div></div>
+          <div className="entity-detail-tabs" role="tablist" aria-label="单位详细信息">
+            <button type="button" role="tab" id="entity-sound-tab" aria-controls="entity-sound-panel" aria-selected={detailTab === "sound"} className={detailTab === "sound" ? "active" : ""} disabled={soundCount === 0} onClick={() => { setDetailTab("sound"); if (detailScroll.ref.current) detailScroll.ref.current.scrollTop = 0; }}>声音 <em>{soundCount}</em></button>
+            <button type="button" role="tab" id="entity-animation-tab" aria-controls="entity-animation-panel" aria-selected={detailTab === "animation"} className={detailTab === "animation" ? "active" : ""} disabled={animationCount === 0} onClick={() => { setDetailTab("animation"); if (detailScroll.ref.current) detailScroll.ref.current.scrollTop = 0; }}>动画 <em>{animationCount}</em></button>
+            <button type="button" role="tab" id="entity-data-tab" aria-controls="entity-data-panel" aria-selected={detailTab === "data"} className={detailTab === "data" ? "active" : ""} onClick={() => { setDetailTab("data"); if (detailScroll.ref.current) detailScroll.ref.current.scrollTop = 0; }}>数据 <em>{dataCount}</em></button>
+          </div>
 
-      {soundCount > 0 && <details className="entity-section compact-section entity-sounds" open>
-        <summary><span>关联声音</span><em>{soundCount}</em></summary>
-        <div className={`media-association-list ${associationLayout === "grid" ? "media-association-grid" : ""}`}>
-          {soundAssociations.map((association) => <article key={`${association.kind}-${association.slot}-${association.event}`}>
-            <header><strong>{mediaSlotLabels[association.slot] || association.slot}</strong><code>{association.event}</code><em>{association.samples.length}</em></header>
-            <div>{association.samples.map((sample, index) => <EntitySoundSample sample={sample} key={`${association.event}-${sample.name}-${index}`} />)}</div>
-          </article>)}
-        </div>
-      </details>}
-
-      {animationCount > 0 && <details className="entity-section compact-section entity-animations" open>
-        <summary><span>关联动画</span><em>{animationCount}</em></summary>
-        <div className={`animation-association-list ${associationLayout === "grid" ? "animation-association-grid" : ""}`}>
-          {frameCount > 1 && <button type="button" className={!activeAnimation ? "active" : ""} onClick={() => { setActiveAnimation(null); setFrameMode("sequence"); setPlaying(true); }}><span className="animation-thumbnail body-action"><Icon name="unit" size={24} /></span><span><strong>主体动作</strong><small>{frameCount} 帧 · 在主视图播放</small></span><Icon name="play" size={16} /></button>}
-          {animationAssociations.flatMap((association) => association.samples.map((sample, index) => <button type="button" disabled={!sample.asset} className={activeAnimation?.event === association.event && activeAnimation.sample.name === sample.name ? "active" : ""} onClick={() => sample.asset && setActiveAnimation({ event: association.event, sample })} key={`${association.event}-${sample.name}-${index}`}>
-            <span className="animation-thumbnail">{sample.asset && ["shp", "tmp", "pcx"].includes(sample.asset.format) ? <img loading="lazy" src={api.previewUrl(sample.asset.id, 0, "", 2, playerColor)} alt="" /> : <Icon name="image" size={24} />}</span>
-            <span><strong>{mediaSlotLabels[association.slot] || association.slot}</strong><small>{association.event}{sample.asset ? ` · ${sample.name}` : " · 未解析"}</small></span><Icon name="play" size={16} />
-          </button>))}
-        </div>
-      </details>}
-
-      <details className="entity-section compact-section entity-tag-section" open>
-        <summary><span>标签</span><em>{entityTags.length}</em></summary>
-        <div className="entity-tags" aria-label="单位资源摘要">
-          {entityTags.map((tag, index) => <span key={`${tag}-${index}`}>{tag}</span>)}
-        </div>
-      </details>
-
-      {rules.length > 0 && <details className="entity-section compact-section entity-rules">
-        <summary><span>规则属性</span><em>{rules.length}</em></summary>
-        <div className="metadata"><dl>{rules.map(([key, value]) => <div className={`rule-span-${ruleColumnSpan(ruleLabels[key], value)}`} key={key}><dt>{ruleLabels[key]}</dt><dd>{value}</dd></div>)}</dl></div>
-      </details>}
-
-      {dependencyGroups.length > 0 && <div className="entity-dependencies">
-        <h3>战斗依赖</h3>
-        <div className="dependency-groups">
-          {dependencyGroups.map((group) => <details key={group.slot}>
-            <summary><span>{dependencySlotLabels[group.slot]}</span><strong>{group.items[0]?.id}</strong><em>{group.items.length}</em></summary>
-            <div className="dependency-compact">
-              {group.items.map((dependency, index) => <article className={dependency.resolved ? "" : "unresolved"} key={`${dependency.kind}-${dependency.id}-${index}`}>
-                <header><span>{dependencyKindLabels[dependency.kind]}</span><code>{dependency.id}</code>{!dependency.resolved && <em>缺少规则节</em>}</header>
-                {Object.keys(dependency.properties).length > 0 && <div className="property-tags">{Object.entries(dependency.properties).map(([key, value]) => <span key={key} title={value}><b>{dependencyPropertyLabels[key] || key}</b>{value}</span>)}</div>}
+          {detailTab === "sound" && <section className="entity-tab-panel entity-sounds" role="tabpanel" id="entity-sound-panel" aria-labelledby="entity-sound-tab">
+            <div className={`media-association-list ${associationLayout === "grid" ? "media-association-grid" : ""}`}>
+              {soundAssociations.map((association) => <article key={`${association.kind}-${association.event}`}>
+                <header><span className="media-association-slots">{association.slots.map((slot) => <strong key={slot}>{mediaSlotLabels[slot] || slot}</strong>)}</span><code>{association.event}</code><em>{association.samples.length}</em></header>
+                <div>{association.samples.map((sample) => <EntitySoundSample sample={sample} key={`${association.event}-${sample.asset?.id || sample.name}`} />)}</div>
               </article>)}
             </div>
-          </details>)}
-        </div>
-      </div>}
+          </section>}
 
-      <details className="entity-section compact-section entity-components">
-        <summary><span>资源文件</span><em>{entity.components.length}</em></summary>
-        <div className="component-chips resource-file-list">
-          {entity.components.map((component) => component.asset ? <a key={component.role} href={api.contentUrl(component.asset.id)} title={`${component.asset.virtual_path} · ${formatBytes(component.asset.size)}`}>
-            <Icon name={assetIcon(component.asset.format)} size={14} />
-            <strong>{componentRoleLabels[component.role] || component.role}</strong>
-            <span>{component.asset.display_name}</span>
-            <em>{formatBytes(component.asset.size)}</em>
-          </a> : <span className="missing-component" key={component.role} title={component.expected_name}>
-            <Icon name="file" size={14} />
-            <strong>{componentRoleLabels[component.role] || component.role}</strong>
-            <span>{component.expected_name}</span>
-            <em>未找到</em>
-          </span>)}
-        </div>
-      </details>
+          {detailTab === "animation" && <section className="entity-tab-panel entity-animations" role="tabpanel" id="entity-animation-panel" aria-labelledby="entity-animation-tab">
+            <div className={`animation-association-list ${associationLayout === "grid" ? "animation-association-grid" : ""}`}>
+              {frameCount > 1 && !hasBodySequences && <button type="button" className={!activeAnimation ? "active" : ""} onClick={() => { setActiveAnimation(null); setFrameMode("sequence"); setPlaying(true); }}><span className="animation-thumbnail body-action"><Icon name="unit" size={24} /></span><span><strong>全部主体帧</strong><small>{frameCount} 帧 · 顺序预览</small></span><Icon name="play" size={16} /></button>}
+              {animationAssociations.flatMap((association) => association.samples.map((sample, index) => <button type="button" disabled={!sample.asset} className={activeAnimation?.event === association.event && activeAnimation.sample.name === sample.name ? "active" : ""} onClick={() => sample.asset && setActiveAnimation({ event: association.event, sample })} key={`${association.event}-${sample.name}-${index}`}>
+                <span className="animation-thumbnail">{sample.asset && ["shp", "tmp", "pcx"].includes(sample.asset.format) ? <img loading="lazy" src={api.previewUrl(sample.asset.id, sample.animation?.start_frame || 0, "", 2, playerColor)} alt="" /> : <Icon name="image" size={24} />}</span>
+                <span><strong>{animationEventLabel(association.event)}</strong><small>{mediaSlotLabels[association.slot] || association.slot}{sample.animation?.frame_count ? ` · ${sample.animation.frame_count} 帧` : ""}{sample.asset ? "" : " · 未解析"}</small></span><Icon name="play" size={16} />
+              </button>))}
+            </div>
+          </section>}
+
+          {detailTab === "data" && <section className="entity-tab-panel entity-data-panel" role="tabpanel" id="entity-data-panel" aria-labelledby="entity-data-tab">
+            <details className="entity-section compact-section entity-tag-section" open>
+              <summary><span>标签</span><em>{entityTags.length}</em></summary>
+              <div className="entity-tags" aria-label="单位资源摘要">
+                {entityTags.map((tag, index) => <span key={`${tag}-${index}`}>{tag}</span>)}
+              </div>
+            </details>
+
+            {rules.length > 0 && <details className="entity-section compact-section entity-rules" open>
+              <summary><span>规则属性</span><em>{rules.length}</em></summary>
+              <div className="metadata"><dl>{rules.map(([key, value]) => <div className={`rule-span-${ruleColumnSpan(ruleLabels[key], value)}`} key={key}><dt>{ruleLabels[key]}</dt><dd>{value}</dd></div>)}</dl></div>
+            </details>}
+
+            {dependencyGroups.length > 0 && <div className="entity-dependencies">
+              <h3>战斗依赖</h3>
+              <div className="dependency-groups">
+                {dependencyGroups.map((group) => <details key={group.slot}>
+                  <summary><span>{dependencySlotLabels[group.slot]}</span><strong>{group.items[0]?.id}</strong><em>{group.items.length}</em></summary>
+                  <div className="dependency-compact">
+                    {group.items.map((dependency, index) => <article className={dependency.resolved ? "" : "unresolved"} key={`${dependency.kind}-${dependency.id}-${index}`}>
+                      <header><span>{dependencyKindLabels[dependency.kind]}</span><code>{dependency.id}</code>{!dependency.resolved && <em>缺少规则节</em>}</header>
+                      {Object.keys(dependency.properties).length > 0 && <div className="property-tags">{Object.entries(dependency.properties).map(([key, value]) => <span key={key} title={value}><b>{dependencyPropertyLabels[key] || key}</b>{value}</span>)}</div>}
+                    </article>)}
+                  </div>
+                </details>)}
+              </div>
+            </div>}
+
+            <details className="entity-section compact-section entity-components" open>
+              <summary><span>资源文件</span><em>{entity.components.length}</em></summary>
+              <div className="component-chips resource-file-list">
+                {entity.components.map((component) => component.asset ? <a key={component.role} href={api.contentUrl(component.asset.id)} title={`${component.asset.virtual_path} · ${formatBytes(component.asset.size)}`}>
+                  <Icon name={assetIcon(component.asset.format)} size={14} />
+                  <strong>{componentRoleLabels[component.role] || component.role}</strong>
+                  <span>{component.asset.display_name}</span>
+                  <em>{formatBytes(component.asset.size)}</em>
+                </a> : <span className="missing-component" key={component.role} title={component.expected_name}>
+                  <Icon name="file" size={14} />
+                  <strong>{componentRoleLabels[component.role] || component.role}</strong>
+                  <span>{component.expected_name}</span>
+                  <em>未找到</em>
+                </span>)}
+              </div>
+            </details>
+          </section>}
         </div>
       </div>
     </aside>
   );
 }
 
-function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, frame, setFrame, playing, setPlaying, palettes, paletteId, setPaletteId, playerColors, previewUrl, associations, wide = false, onPopout, scrollKey = "" }: {
+function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, frame, setFrame, playing, setPlaying, palettes, paletteId, setPaletteId, playerColors, previewUrl, associations, audioActive, onAudioPlaybackChange, wide = false, onPopout, scrollKey = "" }: {
   asset: Asset | null;
   metadata: AssetMetadata | null;
   textAsset: TextAsset | null;
@@ -1607,6 +2096,8 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   playerColors: PlayerColor[];
   previewUrl: string;
   associations: AssetAssociationPage | null;
+  audioActive?: boolean;
+  onAudioPlaybackChange?: (active: boolean) => void;
   wide?: boolean;
   onPopout?: () => void;
   scrollKey?: string;
@@ -1615,12 +2106,14 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   const [videoRequested, setVideoRequested] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
   const [frameMode, setFrameMode] = useState<"sequence" | "grid">("sequence");
+  const [audioDetailTab, setAudioDetailTab] = useState<"preview" | "associations" | "data">("preview");
   const detailScroll = useRememberedScroll<HTMLElement>(scrollKey, associations?.items.length || 0);
   useEffect(() => {
     setPlayerColor("");
     setVideoRequested(false);
     setVideoFailed(false);
     setFrameMode("sequence");
+    setAudioDetailTab("preview");
   }, [asset?.id]);
   if (!asset) return <aside className="detail-panel panel empty-detail"><div className="empty-detail-icon"><Icon name="image" size={30} /></div><strong>选择资产</strong></aside>;
   const canPreview = imageFormats.includes(asset.format);
@@ -1634,9 +2127,36 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   const canChoosePalette = ["shp", "vxl", "hva", "tmp"].includes(asset.format) && palettes.length > 0;
   const originalTexts = [...new Set((associations?.items || []).map((item) => item.original_text || item.text).filter((item): item is string => Boolean(item)))];
   const localizedTexts = [...new Set((associations?.items || []).map((item) => item.localized_text).filter((item): item is string => Boolean(item)))];
+  const metadataRows: Array<{ label: string; value: string; tone?: string }> = [
+    { label: "文件大小", value: formatBytes(asset.size) },
+  ];
+  if (metadata?.width !== undefined && metadata?.height !== undefined) metadataRows.push({ label: asset.format === "map" ? "地图尺寸" : "画布 / 地块", value: `${metadata.width} × ${metadata.height}${asset.format === "map" ? " 格" : " px"}` });
+  if (metadata?.theater) metadataRows.push({ label: "地图环境", value: metadata.theater });
+  if (metadata?.object_counts) metadataRows.push({ label: "地图对象", value: Object.entries(metadata.object_counts).map(([kind, count]) => `${mapObjectLabels[kind] || kind} ${count}`).join(" · ") });
+  if (metadata?.template_width !== undefined) metadataRows.push({ label: "模板网格", value: `${metadata.template_width} × ${metadata.template_height} · ${metadata.tile_count} 个地块` });
+  if (metadata?.frame_count !== undefined) metadataRows.push({ label: asset.format === "vxl" ? "部件数" : "帧 / 槽位", value: String(metadata.frame_count) });
+  if (activeFrame) metadataRows.push({ label: "当前帧", value: `${activeFrame.width} × ${activeFrame.height} · 压缩 ${activeFrame.compression}` });
+  if (activeLimb) metadataRows.push({ label: "当前部件", value: `${activeLimb.name} · ${activeLimb.size.join("×")} · ${activeLimb.voxel_count.toLocaleString("zh-CN")} 体素` });
+  if (metadata?.voxel_count !== undefined) metadataRows.push({ label: "总体素", value: metadata.voxel_count.toLocaleString("zh-CN") });
+  if (metadata?.section_count !== undefined) metadataRows.push({ label: "节 / 段", value: `${metadata.section_count}${metadata.section_names?.length ? ` · ${metadata.section_names.slice(0, 3).join(", ")}` : ""}` });
+  if (metadata?.label_count !== undefined) metadataRows.push({ label: "CSF 文本", value: `${metadata.label_count} 标签 · ${metadata.string_count} 字符串` });
+  if (metadata?.entry_count !== undefined) metadataRows.push({ label: "配置结构", value: `${metadata.section_count} 节 · ${metadata.entry_count} 项` });
+  if (metadata?.encoding) metadataRows.push({ label: "文本编码", value: metadata.encoding });
+  if (metadata?.duration_seconds !== undefined) metadataRows.push({ label: "音频", value: `${formatDuration(metadata.duration_seconds)} · ${metadata.sample_rate?.toLocaleString("zh-CN")} Hz · ${metadata.bits_per_sample} bit` });
+  if (isAudio && originalTexts.length > 0) metadataRows.push({ label: "原文文本", value: originalTexts.join("\n"), tone: "metadata-text" });
+  if (isAudio && localizedTexts.length > 0) metadataRows.push({ label: "中文文本", value: localizedTexts.join("\n"), tone: "metadata-text" });
+  metadataRows.push({ label: "来源", value: asset.storage_kind === "loose" ? "松散文件" : asset.storage_kind === "bag" ? "音频包" : "MIX 归档" });
+  if (asset.crc !== null) metadataRows.push({ label: "CRC", value: crcLabel(asset.crc), tone: "mono" });
+  metadataRows.push({ label: "识别", value: asset.confidence === "name" ? "名称库匹配" : asset.confidence === "content" ? "内容探测" : asset.confidence === "filename" ? "文件名" : asset.confidence === "index" ? "音频索引" : "未知" });
   return (
     <aside ref={detailScroll.ref} onScroll={detailScroll.remember} className={`detail-panel asset-detail panel ${wide ? "detail-panel-wide" : "detail-panel-narrow"}`}>
-      <div className="detail-title"><div className="detail-heading-line"><span className="format-pill">{formatLabels[asset.format] || asset.format.toUpperCase()}</span><h2 title={assetDisplayName(asset)}>{assetDisplayName(asset)}</h2></div><div className="detail-actions">{onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}<a className="icon-button" href={api.contentUrl(asset.id)} title="导出原始文件" aria-label="导出原始文件"><Icon name="download" /></a></div></div>
+      <div className="detail-title"><div className="detail-heading-line"><span className="format-pill">{formatLabels[asset.format] || asset.format.toUpperCase()}</span><h2 title={assetDisplayName(asset)}>{assetDisplayName(asset)}</h2></div><div className="detail-actions">{onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}{!isAudio && <a className="icon-button" href={api.contentUrl(asset.id)} title="导出原始文件" aria-label="导出原始文件"><Icon name="download" /></a>}</div></div>
+
+      {isAudio && <div className="entity-detail-tabs asset-detail-tabs" role="tablist" aria-label="声音详细信息">
+        <button type="button" role="tab" id="audio-preview-tab" aria-controls="audio-preview-panel" aria-selected={audioDetailTab === "preview"} className={audioDetailTab === "preview" ? "active" : ""} onClick={() => setAudioDetailTab("preview")}>播放</button>
+        <button type="button" role="tab" id="audio-associations-tab" aria-controls="audio-associations-panel" aria-selected={audioDetailTab === "associations"} className={audioDetailTab === "associations" ? "active" : ""} disabled={!associations?.items.length} onClick={() => setAudioDetailTab("associations")}>关联 <em>{associations?.items.length || 0}</em></button>
+        <button type="button" role="tab" id="audio-data-tab" aria-controls="audio-data-panel" aria-selected={audioDetailTab === "data"} className={audioDetailTab === "data" ? "active" : ""} onClick={() => setAudioDetailTab("data")}>数据 <em>{metadataRows.length}</em></button>
+      </div>}
 
       {isModel && <div className="preview-block">
         {frameMode === "grid" && asset.format === "hva" && frameCount > 1
@@ -1652,7 +2172,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
         <div className="preview-block">
           {frameMode === "grid" && asset.format === "shp" && frameCount > 1
             ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.previewUrl(asset.id, index, paletteId, 3, playerColor)} />
-            : <div className={`preview-stage ${asset.format}`}><div className="preview-rulers horizontal" /><div className="preview-rulers vertical" /><img key={previewUrl} src={previewUrl} alt={`${asset.display_name} 预览`} /></div>}
+            : <ImageViewport className={asset.format} fitKey={asset.id} src={previewUrl} alt={`${asset.display_name} 预览`} />}
           {hasFrameControl && <div className="frame-controls">
             {frameMode === "sequence" && <><button className="play-button" disabled={asset.format === "tmp"} onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : assetIcon(asset.format)} size={16} /></button><input type="range" min="0" max={Math.max(0, frameCount - 1)} value={Math.min(frame, frameCount - 1)} onChange={(event) => setFrame(Number(event.target.value))} aria-label={asset.format === "vxl" ? "当前部件" : asset.format === "tmp" ? "当前地块" : "当前帧"} /><span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(frameCount).padStart(2, "0")}</span></>}
             {asset.format === "shp" && <div className="frame-mode-toggle"><button className={frameMode === "sequence" ? "active" : ""} onClick={() => setFrameMode("sequence")} title="顺序播放"><Icon name="play" size={14} /></button><button className={frameMode === "grid" ? "active" : ""} onClick={() => { setPlaying(false); setFrameMode("grid"); }} title="全部帧"><Icon name="grid" size={14} /></button></div>}
@@ -1660,7 +2180,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
         </div>
       )}
 
-      {isAudio && <div className="audio-preview"><div><Icon name="play" size={25} /><span><strong>音频预览</strong><small>{metadata?.audio_codec || (metadata?.audio_format === 17 ? "IMA ADPCM → PCM16" : "PCM 音频")}</small></span></div><audio controls preload="metadata" src={api.mediaUrl(asset.id)}>浏览器不支持音频播放。</audio></div>}
+      {isAudio && audioDetailTab === "preview" && <div className="audio-tab-panel" role="tabpanel" id="audio-preview-panel" aria-labelledby="audio-preview-tab"><div className="audio-preview compact-audio-preview"><CompactAudioPlayer assetId={asset.id} label={assetDisplayName(asset)} active={audioActive} onPlaybackChange={onAudioPlaybackChange} /><span className="audio-preview-meta">{metadata?.duration_seconds !== undefined ? formatDuration(metadata.duration_seconds) : ""}{metadata?.audio_codec ? ` · ${metadata.audio_codec}` : ""}</span><AudioDownloadAction assetId={asset.id} label={assetDisplayName(asset)} /></div></div>}
 
       {asset.format === "video" && <div className="video-preview">
         {videoRequested && !videoFailed
@@ -1675,7 +2195,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
         {textAsset && <small>显示 {textAsset.returned_lines} / {textAsset.line_count} 行{textAsset.truncated ? " · 已截断" : ""}</small>}
       </div>}
 
-      {associations && associations.items.length > 0 && <div className="asset-associations">
+      {associations && associations.items.length > 0 && (!isAudio || audioDetailTab === "associations") && <div className="asset-associations" role={isAudio ? "tabpanel" : undefined} id={isAudio ? "audio-associations-panel" : undefined} aria-labelledby={isAudio ? "audio-associations-tab" : undefined}>
         <h3>关联事件</h3>
         <div>{associations.items.map((item, index) => <article key={`${item.scope}-${item.event}-${item.slot}-${index}`}>
           <span>{mediaSlotLabels[item.slot] || item.slot}</span>
@@ -1693,31 +2213,11 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
         {canChoosePalette && <label><span>配色表</span><select value={paletteId} onChange={(event) => setPaletteId(event.target.value)}><option value="">自动</option>{palettes.map((palette) => <option key={palette.id} value={palette.id}>{palette.display_name}</option>)}</select></label>}
       </div>}
 
-      <div className="metadata">
+      {(!isAudio || audioDetailTab === "data") && <div className="metadata" role={isAudio ? "tabpanel" : undefined} id={isAudio ? "audio-data-panel" : undefined} aria-labelledby={isAudio ? "audio-data-tab" : undefined}>
         <h3>资产信息</h3>
-        <dl>
-          <div><dt>文件大小</dt><dd>{formatBytes(asset.size)}</dd></div>
-          {metadata?.width !== undefined && metadata?.height !== undefined && <div><dt>{asset.format === "map" ? "地图尺寸" : "画布 / 地块"}</dt><dd>{metadata.width} × {metadata.height}{asset.format === "map" ? " 格" : " px"}</dd></div>}
-          {metadata?.theater && <div><dt>地图环境</dt><dd>{metadata.theater}</dd></div>}
-          {metadata?.object_counts && <div><dt>地图对象</dt><dd>{Object.entries(metadata.object_counts).map(([kind, count]) => `${mapObjectLabels[kind] || kind} ${count}`).join(" · ")}</dd></div>}
-          {metadata?.template_width !== undefined && <div><dt>模板网格</dt><dd>{metadata.template_width} × {metadata.template_height} · {metadata.tile_count} 个地块</dd></div>}
-          {metadata?.frame_count !== undefined && <div><dt>{asset.format === "vxl" ? "部件数" : "帧 / 槽位"}</dt><dd>{metadata.frame_count}</dd></div>}
-          {activeFrame && <div><dt>当前帧</dt><dd>{activeFrame.width} × {activeFrame.height} · 压缩 {activeFrame.compression}</dd></div>}
-          {activeLimb && <div><dt>当前部件</dt><dd>{activeLimb.name} · {activeLimb.size.join("×")} · {activeLimb.voxel_count.toLocaleString("zh-CN")} 体素</dd></div>}
-          {metadata?.voxel_count !== undefined && <div><dt>总体素</dt><dd>{metadata.voxel_count.toLocaleString("zh-CN")}</dd></div>}
-          {metadata?.section_count !== undefined && <div><dt>节 / 段</dt><dd>{metadata.section_count}{metadata.section_names?.length ? ` · ${metadata.section_names.slice(0, 3).join(", ")}` : ""}</dd></div>}
-          {metadata?.label_count !== undefined && <div><dt>CSF 文本</dt><dd>{metadata.label_count} 标签 · {metadata.string_count} 字符串</dd></div>}
-          {metadata?.entry_count !== undefined && <div><dt>配置结构</dt><dd>{metadata.section_count} 节 · {metadata.entry_count} 项</dd></div>}
-          {metadata?.encoding && <div><dt>文本编码</dt><dd>{metadata.encoding}</dd></div>}
-          {metadata?.duration_seconds !== undefined && <div><dt>音频</dt><dd>{formatDuration(metadata.duration_seconds)} · {metadata.sample_rate?.toLocaleString("zh-CN")} Hz · {metadata.bits_per_sample} bit</dd></div>}
-          {isAudio && originalTexts.length > 0 && <div><dt>原文文本</dt><dd className="metadata-text">{originalTexts.join("\n")}</dd></div>}
-          {isAudio && localizedTexts.length > 0 && <div><dt>中文文本</dt><dd className="metadata-text">{localizedTexts.join("\n")}</dd></div>}
-          <div><dt>来源</dt><dd>{asset.storage_kind === "loose" ? "松散文件" : asset.storage_kind === "bag" ? "音频包" : "MIX 归档"}</dd></div>
-          {asset.crc !== null && <div><dt>CRC</dt><dd className="mono">{crcLabel(asset.crc)}</dd></div>}
-          <div><dt>识别</dt><dd>{asset.confidence === "name" ? "名称库匹配" : asset.confidence === "content" ? "内容探测" : asset.confidence === "filename" ? "文件名" : asset.confidence === "index" ? "音频索引" : "未知"}</dd></div>
-        </dl>
-      </div>
-      <a className="button export-button" href={api.contentUrl(asset.id)}><Icon name="download" />导出原始资产</a>
+        <dl>{metadataRows.map((row) => <div className={`metadata-span-${ruleColumnSpan(row.label, row.value)}`} key={row.label}><dt>{row.label}</dt><dd className={row.tone || ""}>{row.value}</dd></div>)}</dl>
+      </div>}
+      {!isAudio && <a className="button export-button" href={api.contentUrl(asset.id)}><Icon name="download" />导出原始资产</a>}
     </aside>
   );
 }

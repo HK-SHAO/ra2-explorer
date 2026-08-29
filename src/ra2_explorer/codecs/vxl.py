@@ -9,6 +9,8 @@ from PIL import Image, ImageDraw
 from ra2_explorer.codecs.binary import BinaryReader, checked_product
 from ra2_explorer.codecs.hva import HvaFile
 from ra2_explorer.codecs.pal import Palette, grayscale_palette
+from ra2_explorer.codecs.voxel_normals import voxel_normal
+from ra2_explorer.codecs.vpl import VplFile
 from ra2_explorer.errors import InvalidFormatError
 
 HEADER_SIZE = 802
@@ -160,6 +162,7 @@ class _WorldVoxel:
     palette: Palette
     normal: int
     normals_mode: int
+    normal_vector: tuple[float, float, float]
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +185,7 @@ class VxlScene:
     frame_count: int
     part_count: int
     source_voxel_count: int
+    lighting: str
 
     def as_dict(self) -> dict[str, object]:
         if self.voxels:
@@ -197,12 +201,13 @@ class VxlScene:
             minimum = [0.0, 0.0, 0.0]
             maximum = [0.0, 0.0, 0.0]
         return {
-            "version": 3,
+            "version": 4,
             "frame": self.frame,
             "frame_count": self.frame_count,
             "part_count": self.part_count,
             "voxel_count": self.source_voxel_count,
             "visible_voxel_count": len(self.voxels),
+            "lighting": self.lighting,
             "bounds": {
                 "min": [round(value, 6) for value in minimum],
                 "max": [round(value, 6) for value in maximum],
@@ -230,6 +235,7 @@ def build_vxl_scene(
     palette: Palette | None = None,
     frame: int = 0,
     player_color: str | None = None,
+    vpl: VplFile | None = None,
 ) -> VxlScene:
     world_voxels = _collect_world_voxels(
         parts,
@@ -240,7 +246,7 @@ def build_vxl_scene(
     )
     voxels = []
     for voxel in world_voxels:
-        red, green, blue, _ = voxel.palette.rgba(voxel.color, transparent_zero=False)
+        red, green, blue = _voxel_rgb(voxel, vpl)
         voxels.append(
             VxlSceneVoxel(
                 voxel.x,
@@ -268,6 +274,7 @@ def build_vxl_scene(
         frame_count,
         len(parts),
         sum(part.model.voxel_count for part in parts),
+        "westwood_vpl" if vpl is not None else "lambert",
     )
 
 
@@ -278,6 +285,7 @@ def render_vxl_composite(
     frame: int = 0,
     facing: int = 0,
     player_color: str | None = None,
+    vpl: VplFile | None = None,
     scale: int = 4,
 ) -> Image.Image:
     world_voxels = _collect_world_voxels(
@@ -340,7 +348,7 @@ def render_vxl_composite(
             + padding
             - min_y
         )
-        red, green, blue, _ = voxel.palette.rgba(voxel.color, transparent_zero=False)
+        red, green, blue = _voxel_rgb(voxel, vpl)
         top = _shade((red, green, blue), 1.12)
         left = _shade((red, green, blue), 0.70)
         right = _shade((red, green, blue), 0.88)
@@ -389,7 +397,7 @@ def _collect_world_voxels(
                 raise InvalidFormatError(
                     f"VXL: composite has too many voxels to preview ({MAX_RENDER_VOXELS:,} max)"
                 )
-            transform = _hva_transform(animation, limb, limb_index, frame)
+            transform, hva_transform = _hva_transform(animation, limb, limb_index, frame)
             active_palette = palette or part.model.palette
             if player_color:
                 active_palette = active_palette.with_player_color(
@@ -398,25 +406,33 @@ def _collect_world_voxels(
                     end=part.model.remap_end,
                 )
             for voxel in _surface_voxels(limb.voxels):
-                local_x, local_y, local_z = _apply_transform(
+                world_x, world_y, world_z = _apply_transform(
                     transform,
                     float(voxel.x),
                     float(voxel.y),
                     float(voxel.z),
                     limb,
+                    hva_transform=hva_transform,
                 )
-                world_x = (local_x + limb.min_bounds[0]) * limb.scale
-                world_y = -(local_y + limb.min_bounds[1]) * limb.scale
+                normal_x, normal_y, normal_z = _apply_normal(
+                    transform,
+                    voxel_normal(voxel.normal, limb.normals_mode),
+                )
                 world_voxels.append(
                     _WorldVoxel(
                         world_x * cosine - world_y * sine,
                         world_x * sine + world_y * cosine,
-                        (local_z + limb.min_bounds[2]) * limb.scale,
+                        world_z,
                         limb.scale,
                         voxel.color,
                         active_palette,
                         voxel.normal,
                         limb.normals_mode,
+                        (
+                            normal_x * cosine - normal_y * sine,
+                            normal_x * sine + normal_y * cosine,
+                            normal_z,
+                        ),
                     )
                 )
     return world_voxels
@@ -441,14 +457,16 @@ def _hva_transform(
     limb: VxlLimb,
     limb_index: int,
     frame: int,
-) -> tuple[float, ...] | None:
+) -> tuple[tuple[float, ...] | None, bool]:
     if animation is None or not animation.frame_count or not animation.section_names:
-        return limb.transform
+        return limb.transform, False
     section_lookup = {name.casefold(): index for index, name in enumerate(animation.section_names)}
     section = section_lookup.get(limb.name.casefold())
     if section is None:
-        section = min(limb_index, len(animation.section_names) - 1)
-    return animation.transform(frame % animation.frame_count, section)
+        section = limb.number if 0 <= limb.number < len(animation.section_names) else limb_index
+    if not 0 <= section < len(animation.section_names):
+        return limb.transform, False
+    return animation.transform(frame % animation.frame_count, section), True
 
 
 def _apply_transform(
@@ -457,27 +475,93 @@ def _apply_transform(
     y: float,
     z: float,
     limb: VxlLimb,
+    *,
+    hva_transform: bool,
 ) -> tuple[float, float, float]:
+    x += limb.min_bounds[0]
+    y += limb.min_bounds[1]
+    z += limb.min_bounds[2]
     if transform is None:
-        return x, y, z
+        return x * limb.scale, -y * limb.scale, z * limb.scale
     size_x, size_y, size_z = limb.size
     range_x = limb.max_bounds[0] - limb.min_bounds[0]
     range_y = limb.max_bounds[1] - limb.min_bounds[1]
     range_z = limb.max_bounds[2] - limb.min_bounds[2]
+    # HVA translation is expressed in unscaled voxel coordinates. Westwood's
+    # transform order scales that translation once while constructing the HVA
+    # matrix and once again with the complete limb. The VXL footer matrix is
+    # already pre-scaled, so it only receives the final limb scale.
+    translation_scale = limb.scale if hva_transform else 1.0
     return (
-        transform[0] * x
-        + transform[1] * y
-        + transform[2] * z
-        + transform[3] * range_x / size_x,
-        transform[4] * x
-        + transform[5] * y
-        + transform[6] * z
-        + transform[7] * range_y / size_y,
-        transform[8] * x
-        + transform[9] * y
-        + transform[10] * z
-        + transform[11] * range_z / size_z,
+        (
+            transform[0] * x
+            + transform[1] * y
+            + transform[2] * z
+            + transform[3] * translation_scale * range_x / size_x
+        )
+        * limb.scale,
+        -(
+            transform[4] * x
+            + transform[5] * y
+            + transform[6] * z
+            + transform[7] * translation_scale * range_y / size_y
+        )
+        * limb.scale,
+        (
+            transform[8] * x
+            + transform[9] * y
+            + transform[10] * z
+            + transform[11] * translation_scale * range_z / size_z
+        )
+        * limb.scale,
     )
+
+
+def _apply_normal(
+    transform: tuple[float, ...] | None,
+    normal: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    if transform is None:
+        return normal
+    x, y, z = normal
+    transformed = (
+        transform[0] * x + transform[1] * y + transform[2] * z,
+        transform[4] * x + transform[5] * y + transform[6] * z,
+        transform[8] * x + transform[9] * y + transform[10] * z,
+    )
+    length = math.sqrt(sum(value * value for value in transformed))
+    if length <= 1e-12:
+        return (0.0, 0.0, 1.0)
+    return tuple(value / length for value in transformed)  # type: ignore[return-value]
+
+
+def _voxel_rgb(voxel: _WorldVoxel, vpl: VplFile | None) -> tuple[int, int, int]:
+    color = voxel.color
+    if vpl is not None:
+        color = vpl.color_index(_vpl_light_level(voxel.normal_vector, vpl.section_count), color)
+    red, green, blue, _ = voxel.palette.rgba(color, transparent_zero=False)
+    return red, green, blue
+
+
+def _vpl_light_level(normal: tuple[float, float, float], section_count: int) -> int:
+    # Westwood VPL lighting equation and the RA2 default light direction used by
+    # established voxel renderers. A standard VPL contains 32 lookup sections.
+    light = (0.2013022, -0.9101138, -0.3621709)
+    light_length = math.sqrt(sum(value * value for value in light))
+    light = tuple(value / light_length for value in light)
+    half = (light[0], light[1], light[2] + 1.0)
+    half_length = math.sqrt(sum(value * value for value in half))
+    half = tuple(value / half_length for value in half)
+    diffuse = max(
+        0.0,
+        sum(left * right for left, right in zip(normal, light, strict=True)),
+    )
+    half_dot = sum(left * right for left, right in zip(normal, half, strict=True))
+    specular = max(0.0, half_dot / (3.0 - 2.0 * half_dot))
+    westwood_level = int(16.0 * (diffuse + specular))
+    if section_count == 32:
+        return max(0, min(31, westwood_level))
+    return max(0, min(section_count - 1, round(westwood_level * (section_count - 1) / 31)))
 
 
 @dataclass(frozen=True, slots=True)
