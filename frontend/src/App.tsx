@@ -2689,7 +2689,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   const canChoosePalette = ["shp", "vxl", "hva", "tmp"].includes(asset.format) && palettes.length > 0;
   const originalTexts = [...new Set((associations?.items || []).map((item) => item.original_text || item.text).filter((item): item is string => Boolean(item)))];
   const localizedTexts = [...new Set((associations?.items || []).map((item) => item.localized_text).filter((item): item is string => Boolean(item)))];
-  const metadataRows: Array<{ label: string; value: string; tone?: string }> = [
+  const metadataRows: Array<{ label: string; value: string; tone?: string; span?: 1 | 2 | 3 }> = [
     { label: "文件大小", value: formatBytes(asset.size) },
   ];
   if (metadata?.width !== undefined && metadata?.height !== undefined) metadataRows.push({ label: asset.format === "map" ? "地图尺寸" : "画布 / 地块", value: `${metadata.width} × ${metadata.height}${asset.format === "map" ? " 格" : " px"}` });
@@ -2705,7 +2705,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   if (metadata?.entry_count !== undefined) metadataRows.push({ label: "配置结构", value: `${metadata.section_count} 节 · ${metadata.entry_count} 项` });
   if (metadata?.encoding) metadataRows.push({ label: "文本编码", value: metadata.encoding });
   if (metadata?.duration_seconds !== undefined) metadataRows.push({ label: "音频", value: `${formatDuration(metadata.duration_seconds)} · ${metadata.sample_rate?.toLocaleString("zh-CN")} Hz · ${metadata.bits_per_sample} bit${metadata.audio_codec ? ` · ${metadata.audio_codec}` : ""}` });
-  if (isAudio && originalTexts.length > 0) metadataRows.push({ label: "原文文本", value: originalTexts.join("\n"), tone: "metadata-text" });
+  if (isAudio && originalTexts.length > 0) metadataRows.push({ label: "原文文本", value: originalTexts.join("\n"), tone: "metadata-text", span: 1 });
   if (isAudio && localizedTexts.length > 0) metadataRows.push({ label: "中文文本", value: localizedTexts.join("\n"), tone: "metadata-text" });
   metadataRows.push({ label: "来源", value: asset.storage_kind === "loose" ? "松散文件" : asset.storage_kind === "bag" ? "音频包" : "MIX 归档" });
   if (asset.crc !== null) metadataRows.push({ label: "CRC", value: crcLabel(asset.crc), tone: "mono" });
@@ -2786,7 +2786,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
 
       {(!isAudio || activeAudioDetailTab === "data") && <div className="metadata" role={isAudio ? "tabpanel" : undefined} id={isAudio ? "audio-data-panel" : undefined} aria-labelledby={isAudio ? "audio-data-tab" : undefined}>
         <h3>资产信息</h3>
-        <dl>{metadataRows.map((row) => <div className={`metadata-span-${ruleColumnSpan(row.label, row.value)}`} key={row.label}><dt>{row.label}</dt><dd className={row.tone || ""}>{row.value}</dd></div>)}</dl>
+        <dl>{metadataRows.map((row) => <div className={`metadata-span-${row.span ?? ruleColumnSpan(row.label, row.value)}`} key={row.label}><dt>{row.label}</dt><dd className={row.tone || ""}>{row.value}</dd></div>)}</dl>
       </div>}
       {!isAudio && <a className="button export-button" href={api.contentUrl(asset.id)}><Icon name="download" />导出原始资产</a>}
     </aside>

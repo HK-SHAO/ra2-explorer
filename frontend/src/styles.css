@@ -286,7 +286,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .asset-detail { container-type: inline-size; }
 .asset-detail .metadata dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-left: 1px solid var(--line-soft); }
 .asset-detail .metadata dl > div { min-width: 0; padding: 0 12px; border-right: 1px solid var(--line-soft); }
-.asset-detail .metadata dd.metadata-text { max-width: none; overflow-wrap: anywhere; }
+.asset-detail .metadata dd.metadata-text { min-width: 0; max-width: none; white-space: pre-wrap; overflow-wrap: anywhere; }
 .asset-detail .metadata dl > .metadata-span-1 { grid-column: span 1; }
 .asset-detail .metadata dl > .metadata-span-2 { grid-column: span 2; }
 .asset-detail .metadata dl > .metadata-span-3 { grid-column: span 3; }
