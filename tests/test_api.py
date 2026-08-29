@@ -8,7 +8,7 @@ from PIL import Image
 
 from ra2_explorer.api import create_app
 from ra2_explorer.config import Settings
-from ra2_explorer.semantic import _entity_usage
+from ra2_explorer.semantic import _entity_animation_role, _entity_usage
 from tests.ra2_fixtures import FIXTURE_NAMES, create_fixture_installation
 
 
@@ -245,6 +245,21 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert dependencies[("weapon", "DemoCannon")]["properties"]["damage"] == "75"
     assert dependencies[("projectile", "DemoShell")]["resolved"] is True
     assert dependencies[("warhead", "DemoWarhead")]["resolved"] is True
+    weapon_animation = next(
+        item
+        for item in entity_body["media"]
+        if item["kind"] == "animation" and item["role"] == "weapon"
+    )
+    impact_animation = next(
+        item
+        for item in entity_body["media"]
+        if item["kind"] == "animation" and item["role"] == "impact"
+    )
+    assert weapon_animation["samples"][0]["asset"]["display_name"] == "infantry.shp"
+    assert impact_animation["samples"][0]["asset"]["display_name"] == "infantry.shp"
+    assert len(impact_animation["samples"]) == 1
+    assert entity_body["art"]["primary_fire_flh"] == "180,24,90"
+    assert entity_body["art"]["weapon_1_flh"] == "160,18,80"
     select_voice = next(item for item in entity_body["media"] if item["slot"] == "select")
     assert select_voice["event"] == "FixtureSelect"
     assert select_voice["samples"][0]["text"] == "Ready for the test."
@@ -280,6 +295,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
         if item["kind"] == "animation" and item["event"] == "walk"
     )
     assert walk_animation["slot"] == "body_sequence"
+    assert walk_animation["role"] == "body"
     assert walk_animation["samples"][0]["animation"] == {
         "start_frame": 0,
         "frame_count": 2,
@@ -454,3 +470,13 @@ def test_entity_usage_distinguishes_player_structures_and_scene_objects() -> Non
         "infantry",
         {"owner": "Americans", "cost": "1000", "techlevel": "8", "buildlimit": "1"},
     ) == "hero"
+
+
+def test_entity_animation_fields_follow_art_semantics() -> None:
+    assert _entity_animation_role("buildup") == "construction"
+    assert _entity_animation_role("activeanim") == "operation"
+    assert _entity_animation_role("activeanimtwo") == "operation"
+    assert _entity_animation_role("productionanim") == "operation"
+    assert _entity_animation_role("bibshape") is None
+    assert _entity_animation_role("animactive") is None
+    assert _entity_animation_role("activeanimdamaged") is None

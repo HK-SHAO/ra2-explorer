@@ -65,6 +65,9 @@ _ART_FIELDS = {
     "turret_offset": "turretoffset",
     "primary_fire_flh": "primaryfireflh",
     "secondary_fire_flh": "secondaryfireflh",
+    "elite_primary_fire_flh": "eliteprimaryfireflh",
+    "elite_secondary_fire_flh": "elitesecondaryfireflh",
+    **{f"weapon_{index}_flh": f"weapon{index}flh" for index in range(1, 18)},
     "remapable": "remapable",
     "voxel": "voxel",
     "new_theater": "newtheater",
@@ -252,6 +255,7 @@ class MediaAssociation:
     event: str
     source: str
     samples: tuple[MediaSample, ...]
+    role: str | None = None
 
     def as_dict(
         self, language: GameLanguage = DEFAULT_GAME_LANGUAGE
@@ -261,6 +265,7 @@ class MediaAssociation:
             "slot": self.slot,
             "event": self.event,
             "source": self.source,
+            "role": self.role,
             "samples": [sample.as_dict(language) for sample in self.samples],
         }
 
@@ -1537,30 +1542,49 @@ def _resolve_media(
                     _audio_sample(event, assets, voice_strings),
                 )
                 add(MediaAssociation("sound", dependency.slot, event, dependency.id, samples))
-            for animation in _references(dependency.properties.get("animation")):
+            animations = tuple(dict.fromkeys(_references(dependency.properties.get("animation"))))
+            if animations:
                 add(
                     MediaAssociation(
                         "animation",
                         dependency.slot,
-                        animation,
+                        animations[0],
                         dependency.id,
-                        _animation_samples(animation, art_sections, assets),
+                        tuple(
+                            sample
+                            for animation in animations
+                            for sample in _animation_samples(
+                                animation, art_sections, assets
+                            )
+                        ),
+                        role="weapon",
                     )
                 )
         elif dependency.kind == "warhead":
-            for animation in _references(dependency.properties.get("animation_list")):
+            animations = tuple(
+                dict.fromkeys(_references(dependency.properties.get("animation_list")))
+            )
+            if animations:
                 add(
                     MediaAssociation(
                         "animation",
                         dependency.slot,
-                        animation,
+                        animations[0],
                         dependency.id,
-                        _animation_samples(animation, art_sections, assets),
+                        tuple(
+                            sample
+                            for animation in animations
+                            for sample in _animation_samples(
+                                animation, art_sections, assets
+                            )
+                        ),
+                        role="impact",
                     )
                 )
 
     for field, value in entity_art.items():
-        if not (field.endswith("anim") or field in {"buildup", "bibshape"}):
+        role = _entity_animation_role(field)
+        if role is None:
             continue
         for animation in _references(value):
             add(
@@ -1570,6 +1594,7 @@ def _resolve_media(
                     animation,
                     entity_id,
                     _animation_samples(animation, art_sections, assets),
+                    role=role,
                 )
             )
     sequence_name = entity_art.get("sequence")
@@ -1592,6 +1617,7 @@ def _resolve_media(
                             animation=playback,
                         ),
                     ),
+                    role="body",
                 )
             )
     return tuple(associations)
@@ -1626,7 +1652,27 @@ def _animation_samples(
     image = values.get("image") or reference
     names = (image,) if "." in image else (f"{image}.shp", f"{image}.hva")
     asset = _find_asset(assets, names, ("shp", "hva", "video"))
-    return (MediaSample(image, None, asset, animation=_art_animation_playback(values)),)
+    playback = _art_animation_playback(values)
+    direction_match = re.search(r"-(NE|SE|SW|NW|N|E|S|W)$", reference, re.IGNORECASE)
+    if direction_match:
+        playback = replace(
+            playback or AnimationPlayback(),
+            direction=direction_match.group(1).upper(),
+        )
+    return (MediaSample(image, None, asset, animation=playback),)
+
+
+def _entity_animation_role(field: str) -> str | None:
+    normalized = field.casefold()
+    if normalized == "buildup":
+        return "construction"
+    if normalized.startswith("anim"):
+        return None
+    if normalized.endswith("anim") or re.fullmatch(
+        r"(?:active|idle|production|special)anim(?:two|three|four)", normalized
+    ):
+        return "operation"
+    return None
 
 
 def _art_animation_playback(values: dict[str, str]) -> AnimationPlayback | None:

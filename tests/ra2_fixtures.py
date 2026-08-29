@@ -71,11 +71,13 @@ def create_fixture_installation(target: Path) -> Path:
         b"Projectile=DemoShell\r\n"
         b"Warhead=DemoWarhead\r\n"
         b"Report=DemoCannonFire\r\n"
+        b"Anim=INFANTRY\r\n"
         b"\r\n[DemoShell]\r\n"
         b"Arcing=yes\r\n"
         b"Image=120MM\r\n"
         b"\r\n[DemoWarhead]\r\n"
         b"Verses=100%,80%,60%\r\n"
+        b"AnimList=INFANTRY,INFANTRY\r\n"
         b"Wall=yes\r\n"
     )
     art = (
@@ -84,6 +86,8 @@ def create_fixture_installation(target: Path) -> Path:
         b"Voxel=yes\r\n"
         b"Remapable=yes\r\n"
         b"Cameo=FIXTURE\r\n"
+        b"PrimaryFireFLH=180,24,90\r\n"
+        b"Weapon1FLH=160,18,80\r\n"
         b"\r\n[INFANTRY]\r\n"
         b"Image=INFANTRY\r\n"
         b"Remapable=yes\r\n"
