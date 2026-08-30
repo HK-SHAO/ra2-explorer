@@ -26,6 +26,7 @@ from ra2_explorer import __version__
 from ra2_explorer.api import (
     Services,
     _alpha_composite_centered,
+    _composite_focus_bounds,
     _crop_transparent_preview,
     _default_entity_operation_samples,
     _render_entity_shp_layer,
@@ -37,7 +38,7 @@ from ra2_explorer.config import Settings
 from ra2_explorer.errors import Ra2ExplorerError
 
 PAGES_SNAPSHOT_SCHEMA_VERSION = 1
-PAGES_RENDER_REVISION = 2
+PAGES_RENDER_REVISION = 3
 _SAFE_FILENAME = re.compile(r"^[A-Za-z0-9_.~$-]+$")
 _AUDIO_FORMATS = {"aud", "bag_audio", "wav"}
 _MODEL_FORMATS = {"hva", "vxl"}
@@ -587,18 +588,12 @@ def _export_entity_previews(
                     operation_layers[request.scale] = layers
                 shadow_layers, main_layers = layers
                 if shadow_layers or main_layers:
-                    base_size = image.size
-                    image = _alpha_composite_centered([*shadow_layers, image, *main_layers])
-                    if focus_bounds is not None:
-                        offset_x = (image.width - base_size[0]) // 2
-                        offset_y = (image.height - base_size[1]) // 2
-                        left, top, right, bottom = focus_bounds
-                        focus_bounds = (
-                            left + offset_x,
-                            top + offset_y,
-                            right + offset_x,
-                            bottom + offset_y,
-                        )
+                    image, focus_bounds = _composite_entity_preview_layers(
+                        image,
+                        focus_bounds,
+                        shadow_layers,
+                        main_layers,
+                    )
             if request.thumbnail:
                 image = _crop_transparent_preview(
                     image,
@@ -612,6 +607,25 @@ def _export_entity_previews(
         sorted(grouped.items()),
         export,
         workers=workers,
+    )
+
+
+def _composite_entity_preview_layers(
+    image: Image.Image,
+    focus_bounds: tuple[int, int, int, int] | None,
+    shadow_layers: list[Image.Image],
+    main_layers: list[Image.Image],
+) -> tuple[Image.Image, tuple[int, int, int, int] | None]:
+    base_size = image.size
+    composite = _alpha_composite_centered([*shadow_layers, image, *main_layers])
+    return (
+        composite,
+        _composite_focus_bounds(
+            focus_bounds,
+            base_size,
+            main_layers,
+            composite.size,
+        ),
     )
 
 

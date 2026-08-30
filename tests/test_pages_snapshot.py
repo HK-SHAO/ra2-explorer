@@ -5,6 +5,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from ra2_explorer.errors import Ra2ExplorerError
 from ra2_explorer.pages_snapshot import (
@@ -12,6 +13,7 @@ from ra2_explorer.pages_snapshot import (
     _AnimationVariant,
     _asset_usages,
     _AssetUsage,
+    _composite_entity_preview_layers,
     _directory_stats,
     _prune_reused_exports,
     _safe_filename,
@@ -191,3 +193,20 @@ def test_pages_archive_is_complete_and_atomically_replaceable(tmp_path: Path) ->
         archive_pages_snapshot(snapshot, archive)
     archive_pages_snapshot(snapshot, archive, overwrite=True)
     assert not list(tmp_path.glob(".pages.zip.building-*"))
+
+
+def test_pages_building_preview_focus_includes_every_visible_main_layer() -> None:
+    base = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+    base.paste((255, 255, 255, 255), (40, 40, 60, 60))
+    operation = Image.new("RGBA", (200, 100), (0, 0, 0, 0))
+    operation.paste((255, 0, 0, 255), (150, 40, 190, 60))
+
+    composite, focus = _composite_entity_preview_layers(
+        base,
+        (40, 40, 60, 60),
+        [],
+        [operation],
+    )
+
+    assert composite.size == (200, 100)
+    assert focus == (90, 40, 190, 60)
