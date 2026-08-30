@@ -16,29 +16,29 @@ Pages 不运行 Python、FastAPI 或 SQLite。发布前由本地解析器把真�
 | --- | ---: | ---: |
 | 单位 | 559 | — |
 | 声音 | 3,322 | — |
-| 发布文件 | 30,730 | — |
-| 解包后的 Pages 数据 | 148,210,866 字节 | 141.3 MiB |
-| 固定数据 ZIP | 88,881,603 字节 | 84.8 MiB |
-| ZIP SHA-256 | `c1e8a38263ecaa1c0bf1709bfd351c62c8116ba615666e1338de21d95b833b27` | — |
+| 发布文件 | 29,478 | — |
+| 解包后的 Pages 数据 | 146,254,240 字节 | 139.5 MiB |
+| 固定数据 ZIP | 86,590,616 字节 | 82.6 MiB |
+| ZIP SHA-256 | `f20ec4f5ebf20149210c4e9282954c23b97784fd5021e4be5b82f91503c70784` | — |
 
 解包数据按用途分布如下：
 
 | 目录 | 字节 | 用途 |
 | --- | ---: | --- |
-| `previews` | 45,656,534 | 单位、帧与效果 WebP |
-| `models` | 41,890,536 | 可交互 VXL/HVA 场景 JSON |
+| `previews` | 43,741,632 | 单位、主体动作与建筑图层 WebP |
+| `models` | 41,886,903 | 可交互 VXL/HVA 场景 JSON |
 | `audio` | 24,774,611 | Opus 声音 |
-| `assets` | 17,962,696 | 资产元数据和关联 |
-| `entities` | 13,000,532 | 简体/繁体单位详情 |
-| `catalog` | 4,925,784 | 简体/繁体单位与声音目录 |
+| `assets` | 17,722,853 | 资产元数据和关联 |
+| `entities` | 13,103,172 | 简体/繁体单位详情 |
+| `catalog` | 5,024,896 | 简体/繁体单位与声音目录 |
 
-站点不会启动时下载这 141.3 MiB。JavaScript、CSS、当前语言目录、可见卡片、选中详情和用户实际播放的声音分别延迟请求。一次 Playwright 验收覆盖了单位列表、grid 预览、搜索并打开“战斗要塞”、加载交互模型、进入声音并播放一项、打开设置，实测传输约 0.88 MiB、浏览器解码内容约 5.12 MiB。不同 CDN 压缩、浏览器缓存和所选单位会改变实际数字；完整遍历所有资源的最坏上界仍约为 141.3 MiB。
+站点不会启动时下载这 139.5 MiB。JavaScript、CSS、当前语言目录、可见卡片、选中详情和用户实际播放的声音分别延迟请求。一次 Playwright 验收覆盖了单位列表、grid 预览、搜索并打开“战斗要塞”、加载交互模型、进入声音并播放一项、打开设置，实测传输约 0.88 MiB、浏览器解码内容约 5.12 MiB。不同 CDN 压缩、浏览器缓存和所选单位会改变实际数字；完整遍历所有资源的最坏上界仍约为 139.5 MiB。
 
-GitHub 官方给出的 Pages 限制包括：发布站点最大 1 GB、每月 100 GB 软带宽限制、部署最长 10 分钟。当前站点约占容量上限的 14%；如果每位访客真的完整遍历全部资源，100 GB 约支持 700 次完整传输，而常规按需会话远低于这一流量。[GitHub Pages 限制](https://docs.github.com/en/enterprise-cloud@latest/pages/getting-started-with-github-pages/github-pages-limits)
+GitHub 官方给出的 Pages 限制包括：发布站点最大 1 GB、每月 100 GB 软带宽限制、部署最长 10 分钟。当前站点约占容量上限的 14%；如果每位访客真的完整遍历全部资源，100 GB 约支持 730 次完整传输，而常规按需会话远低于这一流量。[GitHub Pages 限制](https://docs.github.com/en/enterprise-cloud@latest/pages/getting-started-with-github-pages/github-pages-limits)
 
 ## 为什么大数据不进入主分支
 
-主分支只追踪前端、导出器、审计脚本和不足 1 KiB 的 `packaging/pages-data.json`。84.8 MiB ZIP 存放在现有的公开 Hugging Face 发布仓库 `rockstarengine/ra2-explorer-release` 的 `pages-data/pages-data-v1/`，并由提交 `5889a23822f00377d9cdf07550d61c94b1dc172e` 固定。这个仓库的 Space 运行时保持暂停；文件下载不启动容器，也不消耗 CPU Basic 配额。
+主分支只追踪前端、导出器、审计脚本和不足 1 KiB 的 `packaging/pages-data.json`。82.6 MiB ZIP 存放在现有的公开 Hugging Face 发布仓库 `rockstarengine/ra2-explorer-release` 的 `pages-data/pages-data-v1/`，并由提交 `b8875f5ed407c925f25c8fbdeae7039cf6850b22` 固定。这个仓库的 Space 运行时保持暂停；文件下载不启动容器，也不消耗 CPU Basic 配额。
 
 Pages workflow 默认从 `https://hf-mirror.com` 下载，网络失败才回退 `https://huggingface.co`。下载后必须依次通过固定字节数、SHA-256、ZIP 路径安全、文件类型白名单、原始游戏格式禁令、清单计数和隐私扫描，之后才允许解包进站点 artifact。代码版本更新不会重新上传数据；只有解析结果、模型或声音实际变化时才发布新快照并更新锁定清单。
 
