@@ -104,9 +104,21 @@ def build_parser() -> argparse.ArgumentParser:
     semantic_check.add_argument("source_id")
     semantic_check.add_argument("--limit", type=int, default=20)
 
-    package = subcommands.add_parser("package", help="构建可双击运行的 Windows 发行目录")
+    package = subcommands.add_parser(
+        "package",
+        help="构建以本机浏览器为界面的本地 Web 应用",
+    )
     package.add_argument("--output", type=Path, default=Path(".outputs") / "RA2 Explorer")
-    package.add_argument("--game-dir", type=Path)
+    package.add_argument(
+        "--game-dir",
+        type=Path,
+        help="预先索引本机游戏目录但不复制游戏文件",
+    )
+    package.add_argument(
+        "--include-game-data",
+        action="store_true",
+        help="把支持的游戏数据复制进发行目录（会显著增大体积）",
+    )
     package.add_argument("--sync-reference-data", action="store_true")
     package.add_argument("--overwrite", action="store_true")
 
@@ -127,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
             result = build_windows_package(
                 args.output,
                 game_dir=args.game_dir,
+                include_game_data=args.include_game_data,
                 sync_reference_data=args.sync_reference_data,
                 overwrite=args.overwrite,
             )

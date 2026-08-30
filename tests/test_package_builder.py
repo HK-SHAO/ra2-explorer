@@ -40,6 +40,40 @@ def test_distribution_audit_rejects_build_machine_paths(tmp_path: Path) -> None:
         audit_distribution(package, private_paths=(private_root,))
 
 
+def test_distribution_audit_allows_only_linked_path_in_local_index(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "RA2 Explorer.exe").write_bytes(b"launcher")
+    (package / "ra2exp.exe").write_bytes(b"cli")
+    database = package / ".runtime" / "RA2MD-Ext" / "index" / "ra2-explorer.db"
+    database.parent.mkdir(parents=True)
+    game_root = tmp_path / "official-game"
+    game_root.mkdir()
+    import sqlite3
+
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE sources (root_path TEXT NOT NULL)")
+        connection.execute("INSERT INTO sources VALUES (?)", (str(game_root.resolve()),))
+
+    audit_distribution(
+        package,
+        private_paths=(game_root,),
+        linked_game_root=game_root,
+    )
+
+
+def test_package_cli_requires_explicit_flag_to_copy_game_data() -> None:
+    from ra2_explorer.cli import build_parser
+
+    linked = build_parser().parse_args(["package", "--game-dir", "game"])
+    portable = build_parser().parse_args(
+        ["package", "--game-dir", "game", "--include-game-data"]
+    )
+
+    assert linked.include_game_data is False
+    assert portable.include_game_data is True
+
+
 def test_staging_cleanup_retries_windows_file_locks(tmp_path: Path, monkeypatch) -> None:
     staging = tmp_path / "staging"
     staging.mkdir()

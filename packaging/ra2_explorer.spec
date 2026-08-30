@@ -1,8 +1,5 @@
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files
-
-
 project_root = Path(SPECPATH).parent
 frontend_root = project_root / "frontend" / "dist"
 
@@ -13,7 +10,6 @@ a = Analysis(
     datas=[
         (str(frontend_root), "frontend/dist"),
         (str(project_root / "packaging" / "README.txt"), "."),
-        *collect_data_files("opencc"),
     ],
     hiddenimports=[
         "uvicorn.logging",
@@ -22,10 +18,16 @@ a = Analysis(
         "uvicorn.protocols.websockets.auto",
         "uvicorn.lifespan.on",
     ],
-    hookspath=[],
+    hookspath=[str(project_root / "packaging" / "hooks")],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        "PIL.AvifImagePlugin",
+        "PIL.ImageCms",
+        "PIL.ImageMath",
+        "PIL.ImageTk",
+        "PIL.WebPImagePlugin",
+    ],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

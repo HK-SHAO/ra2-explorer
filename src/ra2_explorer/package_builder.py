@@ -10,6 +10,7 @@ import tempfile
 import time
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Literal
 
 from ra2_explorer import __version__
 from ra2_explorer.api import Services
@@ -58,6 +59,7 @@ DENIED_GAME_SUFFIXES = frozenset(
     {".bat", ".cmd", ".com", ".dll", ".exe", ".lnk", ".msi", ".pif", ".scr", ".sys"}
 )
 MARKER_FILE = ".ra2exp-distribution"
+DistributionMode = Literal["generic", "linked", "portable"]
 
 
 def _project_root(start: Path) -> Path | None:
@@ -221,6 +223,18 @@ def _copy_reference_data(source_root: Path, package_root: Path) -> None:
             / "reference"
             / "audio-transcript-manifest.json",
         ),
+        (
+            source_root
+            / ".runtime"
+            / "RA2MD-Ext"
+            / "reference"
+            / "mission-audio-transcript.json",
+            package_root
+            / ".runtime"
+            / "RA2MD-Ext"
+            / "reference"
+            / "mission-audio-transcript.json",
+        ),
     )
     for source, target in candidates:
         if source.is_file():
@@ -236,17 +250,24 @@ def _seal_portable_database(database_path: Path, source_id: str) -> None:
         )
 
 
-def _write_manifest(package_root: Path, source: dict[str, object] | None) -> None:
+def _write_manifest(
+    package_root: Path,
+    source: dict[str, object] | None,
+    *,
+    mode: DistributionMode,
+) -> None:
     marker = {
         "schema": 1,
         "version": __version__,
-        "includes_game_data": source is not None,
+        "mode": mode,
+        "includes_game_data": mode == "portable",
+        "shareable": mode != "linked",
     }
     (package_root / MARKER_FILE).write_text(
         json.dumps(marker, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    if source is not None:
+    if mode == "portable" and source is not None:
         manifest = {
             "schema": 1,
             "source_id": source["id"],
@@ -308,6 +329,7 @@ def audit_distribution(
     package_root: Path,
     *,
     private_paths: Iterable[Path] = (),
+    linked_game_root: Path | None = None,
 ) -> None:
     required = (package_root / "RA2 Explorer.exe", package_root / "ra2exp.exe")
     if not all(path.is_file() for path in required):
@@ -326,14 +348,19 @@ def audit_distribution(
         value = str(private_path.resolve())
         if len(value) >= 4:
             needles.extend((value.encode("utf-8"), value.encode("utf-16-le")))
+    settings = load_settings(working_directory=package_root)
+    allowed_private_files = (
+        {settings.database_path.resolve()} if linked_game_root is not None else set()
+    )
     for file_path in package_root.rglob("*"):
         if not file_path.is_file():
+            continue
+        if file_path.resolve() in allowed_private_files:
             continue
         if any(needle and _contains_bytes(file_path, needle) for needle in needles):
             raise Ra2ExplorerError(f"发行文件包含本机绝对路径：{file_path.name}")
     manifest_path = package_root / PORTABLE_MANIFEST
     if manifest_path.is_file():
-        settings = load_settings(working_directory=package_root)
         with sqlite3.connect(settings.database_path) as connection:
             roots = {str(row[0]) for row in connection.execute("SELECT root_path FROM sources")}
         expected = str((package_root / ".runtime" / "RA2MD").resolve())
@@ -343,16 +370,34 @@ def audit_distribution(
             settings.database_path,
             str(json.loads(manifest_path.read_text(encoding="utf-8"))["source_id"]),
         )
+    elif linked_game_root is not None:
+        with sqlite3.connect(settings.database_path) as connection:
+            roots = {str(row[0]) for row in connection.execute("SELECT root_path FROM sources")}
+        if roots != {str(linked_game_root.resolve())}:
+            raise Ra2ExplorerError("本地 Web 应用没有正确关联指定游戏目录")
+
+
+def _directory_stats(root: Path) -> tuple[int, int]:
+    count = 0
+    total_bytes = 0
+    for path in root.rglob("*"):
+        if path.is_file():
+            count += 1
+            total_bytes += path.stat().st_size
+    return count, total_bytes
 
 
 def build_windows_package(
     output: Path,
     *,
     game_dir: Path | None = None,
+    include_game_data: bool = False,
     sync_reference_data: bool = False,
     overwrite: bool = False,
 ) -> dict[str, object]:
     source_root = application_root()
+    if include_game_data and game_dir is None:
+        raise Ra2ExplorerError("--include-game-data 必须与 --game-dir 一起使用")
     game_root: Path | None = None
     if game_dir is not None:
         try:
@@ -374,25 +419,42 @@ def build_windows_package(
             if project_root is None:
                 raise Ra2ExplorerError("请从 RA2 Explorer 源码目录运行发行构建")
             package_root = _build_from_source(project_root, staging)
+        mode: DistributionMode = "generic"
         source: dict[str, object] | None = None
         copied_files = 0
         copied_bytes = 0
-        if game_root is not None:
-            copied_files, copied_bytes = copy_game_data(
-                game_root,
-                package_root / ".runtime" / "RA2MD",
-            )
-            _copy_reference_data(source_root, package_root)
+        source_files = 0
+        source_bytes = 0
+        _copy_reference_data(source_root, package_root)
+        settings = None
+        if sync_reference_data:
             settings = load_settings(working_directory=package_root)
-            if sync_reference_data:
-                sync_known_names(settings.known_names_path)
-                sync_audio_transcript(settings.audio_transcript_path)
+            sync_known_names(settings.known_names_path)
+            sync_audio_transcript(settings.audio_transcript_path)
+        if game_root is not None:
+            mode = "portable" if include_game_data else "linked"
+            indexed_root = game_root
+            if include_game_data:
+                copied_files, copied_bytes = copy_game_data(
+                    game_root,
+                    package_root / ".runtime" / "RA2MD",
+                )
+                source_files = copied_files
+                source_bytes = copied_bytes
+                indexed_root = package_root / ".runtime" / "RA2MD"
+            else:
+                source_files, source_bytes = _directory_stats_for_game(game_root)
+                if source_files == 0:
+                    raise Ra2ExplorerError("指定目录中没有可识别的 RA2/YR 资产文件")
+            if settings is None:
+                settings = load_settings(working_directory=package_root)
             source = Services(settings).library.import_source(
-                package_root / ".runtime" / "RA2MD",
+                indexed_root,
                 "红色警戒 2 与尤里的复仇",
             )
-            _seal_portable_database(settings.database_path, str(source["id"]))
-        _write_manifest(package_root, source)
+            if include_game_data:
+                _seal_portable_database(settings.database_path, str(source["id"]))
+        _write_manifest(package_root, source, mode=mode)
         audit_distribution(
             package_root,
             private_paths=(
@@ -402,15 +464,23 @@ def build_windows_package(
                 Path(sys.prefix),
                 *((game_root,) if game_root else ()),
             ),
+            linked_game_root=game_root if mode == "linked" else None,
         )
         _publish_package(package_root, destination)
         package_root = None
+        distribution_files, distribution_bytes = _directory_stats(destination)
         return {
             "output": str(destination),
             "version": __version__,
-            "includes_game_data": game_root is not None,
+            "mode": mode,
+            "shareable": mode != "linked",
+            "includes_game_data": mode == "portable",
             "copied_files": copied_files,
             "copied_bytes": copied_bytes,
+            "source_files": source_files,
+            "source_bytes": source_bytes,
+            "distribution_files": distribution_files,
+            "distribution_bytes": distribution_bytes,
             "asset_count": source["asset_count"] if source else 0,
         }
     finally:
@@ -418,6 +488,15 @@ def build_windows_package(
             _remove_staging(package_root)
         if staging.exists():
             _remove_staging(staging)
+
+
+def _directory_stats_for_game(game_root: Path) -> tuple[int, int]:
+    count = 0
+    total_bytes = 0
+    for source, _relative in iter_game_data(game_root):
+        count += 1
+        total_bytes += source.stat().st_size
+    return count, total_bytes
 
 
 __all__ = [
