@@ -1,8 +1,25 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 from scripts.publish_hf_release import build_manifest, space_sync_plan
+
+
+def test_hf_release_script_can_run_from_file_path() -> None:
+    root = Path(__file__).resolve().parents[1]
+    process = subprocess.run(
+        [sys.executable, "scripts/publish_hf_release.py", "--help"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert process.returncode == 0
+    assert "--resource-pack" in process.stdout
 
 
 def test_hf_release_manifest_pins_archive_size_and_digest(tmp_path) -> None:

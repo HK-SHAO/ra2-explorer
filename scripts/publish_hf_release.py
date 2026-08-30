@@ -15,7 +15,11 @@ from ra2_explorer.updates import (
     UPDATE_ASSET_NAME,
     UPDATE_REPOSITORY,
 )
-from scripts.prepare_hf_space import audit_space_bundle
+
+if __package__:
+    from scripts.prepare_hf_space import audit_space_bundle
+else:
+    from prepare_hf_space import audit_space_bundle
 
 _VERSION_PATTERN = re.compile(r"^v?(\d+\.\d+\.\d+)$")
 _SPACE_MANAGED_ROOT_FILES = frozenset(
