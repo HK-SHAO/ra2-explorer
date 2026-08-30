@@ -126,6 +126,20 @@ scripts\build_windows.cmd --game-dir ".runtime\RA2MD"
 scripts\build_windows.cmd --game-dir ".runtime\RA2MD" --include-game-data
 ```
 
-带 `v*` 的 Git tag 会触发 `.github\workflows\release.yml`，运行测试、隐私扫描、参考数据同步、Windows 构建和 CLI smoke test，然后只发布不含游戏素材的 ZIP。手动运行 workflow 只生成可下载的 Actions artifact，不创建 Release。
+带 `v*` 的 Git tag 会触发 `.github\workflows\release.yml`，运行测试、隐私扫描、参考数据同步、Windows 构建和 CLI smoke test；随后创建 GitHub Release，并把同一 ZIP、版本清单和 Docker Space 运行文件原子同步到 Hugging Face。手动运行 workflow 只生成可下载的 Actions artifact，不创建 Release。
+
+首次部署 Space 前，维护者需要先上传一份通过白名单校验的派生资源包。凭据只从 `.secrets\local.env` 或进程环境读取，不得写入命令参数、日志或仓库：
+
+```bat
+.venv\Scripts\python.exe scripts\publish_hf_release.py --resource-pack ".runtime\RA2MD-Ext\packages\PACKAGE.ra2pack"
+```
+
+单独检查 Space 构建上下文时运行：
+
+```bat
+.venv\Scripts\python.exe scripts\prepare_hf_space.py --overwrite
+```
+
+输出位于被 Git 忽略的 `.outputs\huggingface-space`，只包含 Docker 配置、MIT 许可证、应用 wheel、编译后的前端和公开更新通道，不包含项目源码树、测试、开发文档或资源包副本。部署和恢复流程见 [Hugging Face 部署说明](HUGGINGFACE.md)。
 
 更完整的模块、格式、缓存和 UI 边界见 [架构说明](ARCHITECTURE.md)，发行模式与体积预算见 [发行说明](DISTRIBUTION.md)。

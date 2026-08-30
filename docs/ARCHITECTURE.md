@@ -1,4 +1,4 @@
-# RA2 Explorer v0.7 架构
+# RA2 Explorer v0.8 架构
 
 ## 运行模型
 
@@ -21,7 +21,7 @@ SQLite 索引 ── 语义层（RULES / ART / CSF / 组件关联）── CLI
               React 浏览器界面
 ```
 
-Python 服务是唯一的数据访问入口。CLI 和 HTTP API 都调用 `SourceLibrary`、`AssetReader` 与格式层，不维护第二套解析逻辑。前端生产构建由同一服务提供，因此运行时不需要 Node，也不加载外部 CDN。
+Python 服务是唯一的数据访问入口。CLI 和 HTTP API 都调用 `SourceLibrary`、`AssetReader` 与格式层，不维护第二套解析逻辑。前端生产构建由同一服务提供，因此运行时不需要 Node，也不加载外部 CDN。本地模式读取用户的官方安装并监听回环地址；Hugging Face 托管模式从派生资源包预置同一索引和产物，只开放查询接口并监听容器端口。
 
 ## 数据边界
 
@@ -112,7 +112,7 @@ RA2/TS 的文件名标识是对大写文件名执行带特殊尾部填充的 CRC
 
 声音转录通过 `ra2exp sync-audio-text` 显式同步到派生工作区；服务启动时将社区 XLSX 与本地 `mission-audio-transcript.json` 补充表按音频文件名合并，补充表优先且可同时提供原文与中文。官方 EVAMD/任务地图提供播放事件关联但没有字幕，因此任务对白的校对结果单独留在 `RA2MD-Ext`，不改写游戏安装。浏览请求不会隐式联网。
 
-OpenAPI 页面在 `/api/docs`。生产端口固定为 `46120`，可通过 `pythonw.exe` 无窗口运行并登记为当前用户登录自启。服务拒绝非本机 Host，CLI 也拒绝监听非回环地址。应用不会默认调用系统 URL 打开器，避免错误的浏览器/RemoteApp 关联产生外部弹窗。当前不包含认证，因此不得通过反向代理暴露到局域网或公网。
+本地模式的 OpenAPI 页面在 `/api/docs`。生产端口固定为 `46120`，可通过 `pythonw.exe` 无窗口运行并登记为当前用户登录自启；本地 CLI 拒绝监听非回环地址。应用不会默认调用系统 URL 打开器，避免错误的浏览器/RemoteApp 关联产生外部弹窗。只有显式设置 `RA2_EXPLORER_HOSTED=1` 的容器模式允许监听 `0.0.0.0`，同时关闭 OpenAPI、目录发现、来源增删/重扫、资源包导入/导出和参考数据同步等写操作。该模式由 Hugging Face 的 HTTPS 入口负责外部访问，不用于把本地可写服务直接暴露到公网。
 
 ## 本地 Web 应用发行边界
 
