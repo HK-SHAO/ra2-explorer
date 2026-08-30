@@ -376,7 +376,9 @@ export interface MediaPage {
 export interface EntityListOptions {
   query?: string;
   kind?: EntityKind | "";
+  kinds?: EntityKind[];
   usage?: EntityUsage | "";
+  usages?: EntityUsage[];
   side?: string;
   renderable?: "" | "true" | "false";
   language?: GameLanguage;
@@ -506,7 +508,9 @@ export const api = {
     const params = new URLSearchParams({ source_id: sourceId, limit: "1000" });
     if (options.query?.trim()) params.set("q", options.query.trim());
     if (options.kind) params.set("kind", options.kind);
+    if (options.kinds?.length) params.set("kinds", options.kinds.join(","));
     if (options.usage) params.set("usage", options.usage);
+    if (options.usages?.length) params.set("usages", options.usages.join(","));
     if (options.side) params.set("side", options.side);
     if (options.renderable) params.set("renderable", options.renderable);
     params.set("language", options.language ?? "zh-CN");

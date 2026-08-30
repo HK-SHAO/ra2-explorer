@@ -324,22 +324,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         source_id: str,
         q: str | None = Query(default=None, max_length=200),
         kind: str | None = Query(default=None),
+        kinds: str | None = Query(default=None, max_length=128),
         usage: str | None = Query(default=None, max_length=32),
+        usages: str | None = Query(default=None, max_length=128),
         side: str | None = Query(default=None, max_length=64),
         renderable: bool | None = Query(default=None),
         language: GameLanguage = DEFAULT_GAME_LANGUAGE,
         limit: int = Query(default=100, ge=1, le=1_000),
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, object]:
+        selected_kinds = tuple(dict.fromkeys(
+            value.strip() for value in (kinds or "").split(",") if value.strip()
+        ))
+        selected_usages = tuple(dict.fromkeys(
+            value.strip() for value in (usages or "").split(",") if value.strip()
+        ))
         if kind is not None and kind not in ENTITY_KINDS:
             raise HTTPException(status_code=422, detail="未知单位类型")
+        if any(value not in ENTITY_KINDS for value in selected_kinds):
+            raise HTTPException(status_code=422, detail="未知单位类型")
         if usage is not None and usage not in ENTITY_USAGES:
+            raise HTTPException(status_code=422, detail="未知单位分类")
+        if any(value not in ENTITY_USAGES for value in selected_usages):
             raise HTTPException(status_code=422, detail="未知单位分类")
         return services.semantic.list_entities(
             source_id,
             query=q,
             kind=kind,
+            kinds=selected_kinds,
             usage=usage,
+            usages=selected_usages,
             side=side,
             renderable=renderable,
             language=language,

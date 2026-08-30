@@ -29,6 +29,7 @@ from ra2_explorer.localization import (
     DEFAULT_GAME_LANGUAGE,
     GameLanguage,
     localize_game_text,
+    localized_fuzzy_search_match,
     localized_search_match,
 )
 from ra2_explorer.storage import Database
@@ -770,7 +771,9 @@ class SemanticLibrary:
         *,
         query: str | None = None,
         kind: str | None = None,
+        kinds: tuple[str, ...] = (),
         usage: str | None = None,
+        usages: tuple[str, ...] = (),
         side: str | None = None,
         renderable: bool | None = None,
         language: GameLanguage = DEFAULT_GAME_LANGUAGE,
@@ -782,16 +785,26 @@ class SemanticLibrary:
         if renderable is not None:
             entities = [entity for entity in entities if entity.renderable is renderable]
         counts = Counter(entity.kind for entity in entities)
-        if kind:
+        if kinds:
+            selected_kinds = set(kinds)
+            entities = [entity for entity in entities if entity.kind in selected_kinds]
+        elif kind:
             entities = [entity for entity in entities if entity.kind == kind]
         if query:
             entities = [
                 entity
                 for entity in entities
                 if localized_search_match(query, _entity_search_text(entity))
+                or any(
+                    localized_fuzzy_search_match(query, value)
+                    for value in _entity_fuzzy_search_values(entity)
+                )
             ]
         usage_counts = Counter(entity.usage for entity in entities)
-        if usage:
+        if usages:
+            selected_usages = set(usages)
+            entities = [entity for entity in entities if entity.usage in selected_usages]
+        elif usage:
             entities = [entity for entity in entities if entity.usage == usage]
         country_counts = Counter(country for entity in entities for country in entity.countries)
         side_counts = Counter(entity_side for entity in entities for entity_side in entity.sides)
@@ -2935,6 +2948,16 @@ def _entity_search_text(entity: GameEntity) -> str:
             ),
         )
     ).casefold()
+
+
+def _entity_fuzzy_search_values(entity: GameEntity) -> tuple[str, ...]:
+    return (
+        entity.id,
+        entity.display_name,
+        entity.internal_name,
+        entity.ui_name or "",
+        entity.image,
+    )
 
 
 def _media_search_text(item: dict[str, object]) -> str:

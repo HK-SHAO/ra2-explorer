@@ -218,15 +218,38 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert [item["id"] for item in buildable_infantry.json()["items"]] == [
         "DemoInfantry"
     ]
+    multi_category = client.get(
+        "/api/entities",
+        params={
+            "source_id": source["id"],
+            "kinds": "vehicle,infantry",
+            "usages": "buildable,scenario",
+        },
+    )
+    assert {item["id"] for item in multi_category.json()["items"]} == {
+        "DemoVehicle",
+        "DemoInfantry",
+    }
     assert client.get(
         "/api/entities",
         params={"source_id": source["id"], "usage": "invalid"},
+    ).status_code == 422
+    assert client.get(
+        "/api/entities",
+        params={"source_id": source["id"], "kinds": "vehicle,invalid"},
     ).status_code == 422
     simplified_name_search = client.get(
         "/api/entities",
         params={"source_id": source["id"], "q": "测试步兵"},
     )
     assert [item["id"] for item in simplified_name_search.json()["items"]] == [
+        "DemoInfantry"
+    ]
+    fuzzy_name_search = client.get(
+        "/api/entities",
+        params={"source_id": source["id"], "q": "测试兵"},
+    )
+    assert [item["id"] for item in fuzzy_name_search.json()["items"]] == [
         "DemoInfantry"
     ]
     traditional_name_search = client.get(

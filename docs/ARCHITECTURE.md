@@ -100,7 +100,7 @@ RA2/TS 的文件名标识是对大写文件名执行带特殊尾部填充的 CRC
 - `GET /api/assets/{id}/video.mp4`：按需转换并播放 VQA/BIK；
 - `GET /api/assets/{id}/associations`：读取声音、动画和单位的反向语义关系，并返回未绑定事件的直接音频转录；
 - `GET /api/assets/{id}/model.json`：读取 VXL 或同名 VXL/HVA 的 v4 浏览器三维场景，可选择 HVA 帧并返回 VPL 光照后的颜色；
-- `GET /api/entities`：按来源、名称、类型、阵营和可预览状态检索规则实体，并返回与查询一致的 facets；
+- `GET /api/entities`：按来源、名称、单个或多个类型/用途、阵营和可预览状态检索规则实体，并返回与查询一致的 facets；名称除简繁等价的精确子串外，还支持只作用于单位身份字段的有界顺序模糊匹配，例如“航母”可命中“航空母舰”，不会跨规则长文本拼接误命中；
 - `GET /api/media`：按语音/音效、游戏事件、阵营、说明或文件名分页检索语义媒体，并返回事件 facets；
 - `GET /api/entities/{source}/{entity}`：读取规则、ART 参数和实际组件来源，`language` 可选择 `zh-CN` 或 `zh-TW`；
 - `GET /api/entities/{source}/{entity}/preview.png`：按 `frame`、`facing`、`player_color` 渲染 VXL 多部件或 SHP 单位预览；SHP 建筑可附带 effect 资产、主帧、配对阴影帧和调色板类型，在原始画布坐标中生成稳定组合帧；

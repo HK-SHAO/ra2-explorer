@@ -77,7 +77,46 @@ function otherLanguage(language: GameLanguage): GameLanguage {
 }
 
 function searchText(value: unknown) {
-  return JSON.stringify(value).toLocaleLowerCase();
+  return JSON.stringify(value)?.toLocaleLowerCase() || "";
+}
+
+function normalizeSearchText(value: string) {
+  return [...value.toLocaleLowerCase()].filter((character) => /[\p{L}\p{N}]/u.test(character)).join("");
+}
+
+function allowsFuzzyMatch(value: string) {
+  return value.length >= (/\p{Script=Han}/u.test(value) ? 2 : 4);
+}
+
+function boundedSubsequence(needle: string, haystack: string) {
+  let first = haystack.indexOf(needle[0]);
+  while (first >= 0) {
+    let cursor = first;
+    let matched = true;
+    for (const character of [...needle].slice(1)) {
+      cursor = haystack.indexOf(character, cursor + 1);
+      if (cursor < 0) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched && cursor - first + 1 <= Math.max(needle.length * 2, needle.length + 2)) return true;
+    first = haystack.indexOf(needle[0], first + 1);
+  }
+  return false;
+}
+
+function fuzzyEntityMatch(query: string, item: EntityPage["items"][number] | undefined) {
+  const needle = normalizeSearchText(query);
+  if (!item || !allowsFuzzyMatch(needle)) return false;
+  return [item.id, item.display_name, item.internal_name, item.ui_name || "", item.image].some((value) => {
+    const haystack = normalizeSearchText(value);
+    return haystack.length <= Math.max(64, needle.length * 8) && boundedSubsequence(needle, haystack);
+  });
+}
+
+function commaValues(params: URLSearchParams, key: string) {
+  return new Set((params.get(key) || "").split(",").map((value) => value.trim()).filter(Boolean));
 }
 
 function countBy<T>(items: T[], values: (item: T) => string[]) {
@@ -108,18 +147,25 @@ async function filterEntities(params: URLSearchParams): Promise<EntityPage> {
   if (renderable) items = items.filter((item) => item.renderable === (renderable === "true"));
   const kindCounts = countBy(items, (item) => [item.kind]);
   const kind = params.get("kind");
-  if (kind) items = items.filter((item) => item.kind === kind);
+  const kinds = commaValues(params, "kinds");
+  if (kinds.size) items = items.filter((item) => kinds.has(item.kind));
+  else if (kind) items = items.filter((item) => item.kind === kind);
   const query = params.get("q")?.trim().toLocaleLowerCase();
   if (query) {
     const alternate = await entityCatalog(otherLanguage(language));
     const alternateById = new Map(alternate.items.map((item) => [item.id, item]));
     items = items.filter((item) => (
-      searchText(item).includes(query) || searchText(alternateById.get(item.id)).includes(query)
+      searchText(item).includes(query)
+      || searchText(alternateById.get(item.id)).includes(query)
+      || fuzzyEntityMatch(query, item)
+      || fuzzyEntityMatch(query, alternateById.get(item.id))
     ));
   }
   const usageCounts = countBy(items, (item) => [item.usage]);
   const usage = params.get("usage");
-  if (usage) items = items.filter((item) => item.usage === usage);
+  const usages = commaValues(params, "usages");
+  if (usages.size) items = items.filter((item) => usages.has(item.usage));
+  else if (usage) items = items.filter((item) => item.usage === usage);
   const countryCounts = countBy(items, (item) => item.countries);
   const sideCounts = countBy(items, (item) => item.sides);
   const side = params.get("side")?.toLocaleLowerCase();
