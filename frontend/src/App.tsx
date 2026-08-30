@@ -1994,8 +1994,14 @@ function EntityCardPreview({ entity, sourceId, previewAngle }: { entity: EntityS
   const previewRef = useRef<HTMLSpanElement>(null);
   const finishRef = useRef<(() => void) | null>(null);
   const [requested, setRequested] = useState(false);
+  const staticFacing = entity.body_format === "shp" && entity.kind === "infantry"
+    ? entityFacingForPreviewAngle(entity.body_format, previewAngle)
+    : 0;
+  const previewFacing = isStaticSnapshot
+    ? staticFacing
+    : entityFacingForPreviewAngle(entity.body_format, previewAngle);
   const url = entity.renderable
-    ? api.entityPreviewUrl(sourceId, entity.id, { facing: isStaticSnapshot && entity.body_format === "vxl" ? 0 : entityFacingForPreviewAngle(entity.body_format, previewAngle), scale: 2, thumbnail: true })
+    ? api.entityPreviewUrl(sourceId, entity.id, { facing: previewFacing, scale: 2, thumbnail: true })
     : "";
 
   useEffect(() => {
@@ -2748,7 +2754,9 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   const defaultPreviewAngleRef = useRef(defaultPreviewAngle);
   defaultPreviewAngleRef.current = defaultPreviewAngle;
   const facing = shpFacingForPreviewAngle(previewAngle);
-  const renderFacing = entityFacingForPreviewAngle(entity?.preview.format || null, previewAngle);
+  const renderFacing = entity?.preview.supports_facing
+    ? entityFacingForPreviewAngle(entity.preview.format, previewAngle)
+    : 0;
   const [playerColor, setPlayerColor] = useState("");
   const [playing, setPlaying] = useState(false);
   const [frameMode, setFrameMode] = useState<"sequence" | "grid">("sequence");
