@@ -1,0 +1,7 @@
+.git
+.gitattributes
+releases
+*.zip
+*.tmp
+**/__pycache__
+**/*.pyc
