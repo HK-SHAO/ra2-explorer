@@ -443,6 +443,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .settings-dialog { width: min(980px, 100%); height: min(820px, calc(100vh - 40px)); max-height: calc(100vh - 40px); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: 0; overflow: hidden; }
 .settings-header { padding: 16px 18px; border-bottom: 1px solid var(--line); }
 .settings-header h2 { margin: 0; }
+.settings-header > div:nth-child(2) { min-width: 0; display: flex; align-items: baseline; gap: 10px; }
+.settings-header > div:nth-child(2) small { overflow: hidden; color: #858b95; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .settings-layout { min-height: 0; display: grid; grid-template-columns: 154px minmax(0, 1fr); }
 .settings-nav { min-height: 0; display: flex; flex-direction: column; gap: 4px; padding: 14px 10px; overflow-y: auto; border-right: 1px solid var(--line); background: #15171b; }
 .settings-nav button { min-height: 38px; padding: 0 11px; border: 1px solid transparent; border-radius: 3px; color: #989da6; background: transparent; font-size: 13px; text-align: left; cursor: pointer; }

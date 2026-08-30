@@ -1157,6 +1157,20 @@ class SemanticLibrary:
             raise InvalidFormatError("单位 SHP 没有可渲染帧")
         visible_frames = self._entity_shp_frames(entity, body, sprite)
         if not visible_frames:
+            # A few retail buildings, notably NATBNK, intentionally keep an empty
+            # base SHP and draw their complete appearance through ArtType operation
+            # layers.  Preserve the source canvas so the API can composite those
+            # layers instead of incorrectly reporting a missing body.
+            if entity.kind == "building":
+                return (
+                    entity,
+                    Image.new(
+                        "RGBA",
+                        (max(1, sprite.width * scale), max(1, sprite.height * scale)),
+                        (0, 0, 0, 0),
+                    ),
+                    None,
+                )
             raise InvalidFormatError("单位 SHP 的所有帧均为空")
         active_palette = palette
         if player_color:

@@ -41,6 +41,8 @@ import {
   Stats,
   TextAsset,
   UpdateInfo,
+  isStaticSnapshot,
+  staticPopoutUrl,
 } from "./api";
 
 let voxelViewerModulePromise: Promise<typeof import("./VoxelViewer")> | null = null;
@@ -1067,7 +1069,7 @@ function ExplorerApp() {
         .then(setDiscovery)
         .catch(() => setDiscovery({ candidates: [], checked_locations: [], official_sources: [] }));
     }
-    if (automaticUpdateCheck && !updateInfo && !updateChecking) void checkLatestUpdate();
+    if (!isStaticSnapshot && automaticUpdateCheck && !updateInfo && !updateChecking) void checkLatestUpdate();
   }
 
   useEffect(() => {
@@ -1114,7 +1116,7 @@ function ExplorerApp() {
   }, []);
 
   useEffect(() => {
-    if (storedAutomaticUpdateCheck()) void checkLatestUpdate();
+    if (!isStaticSnapshot && storedAutomaticUpdateCheck()) void checkLatestUpdate();
   }, []);
 
   useEffect(() => {
@@ -1477,7 +1479,7 @@ function ExplorerApp() {
   }
 
   if (loading) {
-    return <div className="boot"><div className="radar"><span /></div><p>正在接入本地资料库…</p></div>;
+    return <div className="boot"><div className="radar"><span /></div><p>正在载入资料库…</p></div>;
   }
 
   return (
@@ -1621,7 +1623,7 @@ function ExplorerApp() {
             onAudioPlaybackChange={(active, assetId) => setPlayingMediaId((current) => active ? assetId : current === assetId ? "" : current)}
             wide={detailPlacement === "bottom"}
             scrollKey={`asset:${sourceId}:${selectedId}`}
-            onPopout={() => window.open(`/?detail=asset&asset_id=${encodeURIComponent(selectedId)}`, `ra2exp-asset-${selectedId}`, "popup=yes,width=1100,height=780")}
+            onPopout={() => window.open(staticPopoutUrl(new URLSearchParams({ detail: "asset", asset_id: selectedId })), `ra2exp-asset-${selectedId}`, "popup=yes,width=1100,height=780")}
           />
           </> : <>
             <EntityListPanel
@@ -1653,7 +1655,7 @@ function ExplorerApp() {
               defaultPreviewAngle={previewAngle}
               wide={detailPlacement === "bottom"}
               scrollKey={`entity:${sourceId}:${selectedEntityId}`}
-              onPopout={() => window.open(`/?detail=entity&source_id=${encodeURIComponent(sourceId)}&entity_id=${encodeURIComponent(selectedEntityId)}`, `ra2exp-entity-${selectedEntityId}`, "popup=yes,width=1100,height=780")}
+              onPopout={() => window.open(staticPopoutUrl(new URLSearchParams({ detail: "entity", source_id: sourceId, entity_id: selectedEntityId })), `ra2exp-entity-${selectedEntityId}`, "popup=yes,width=1100,height=780")}
             />
           </>}
         </main>
@@ -1987,7 +1989,7 @@ function EntityCardPreview({ entity, sourceId, previewAngle }: { entity: EntityS
   const finishRef = useRef<(() => void) | null>(null);
   const [requested, setRequested] = useState(false);
   const url = entity.renderable
-    ? api.entityPreviewUrl(sourceId, entity.id, { facing: entityFacingForPreviewAngle(entity.body_format, previewAngle), scale: 2, thumbnail: true })
+    ? api.entityPreviewUrl(sourceId, entity.id, { facing: isStaticSnapshot && entity.body_format === "vxl" ? 0 : entityFacingForPreviewAngle(entity.body_format, previewAngle), scale: 2, thumbnail: true })
     : "";
 
   useEffect(() => {
@@ -2298,7 +2300,7 @@ function CompactAudioPlayer({ assetId, label, active, onPlaybackChange }: {
 }
 
 function AudioDownloadAction({ assetId, label }: { assetId: string; label: string }) {
-  return <a className="audio-download-action" href={api.contentUrl(assetId)} download title={`下载 ${label}`} aria-label={`下载 ${label}`}><Icon name="download" size={15} /></a>;
+  return <a className="audio-download-action" href={api.contentUrl(assetId)} download={isStaticSnapshot ? `${label}.ogg` : true} title={`下载 ${label}`} aria-label={`下载 ${label}`}><Icon name="download" size={15} /></a>;
 }
 
 function StablePreviewImage({ src, alt, style, className, draggable = false, onBeforeReveal, onLoad, onError }: {
@@ -3072,9 +3074,12 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
     })
     : "";
   const effectBodyPreviewUrl = effectBodyAsset?.format === "shp"
-    ? api.previewUrl(effectBodyAsset.id, effectBodySourceFrame, "", 5, playerColor)
+    ? api.previewUrl(effectBodyAsset.id, effectBodySourceFrame, "", 5, playerColor, {
+      palette: effectBodySample?.palette || undefined,
+    })
     : "";
-  const buildingOperationPreviewUrl = entity.kind === "building"
+  const buildingOperationPreviewUrl = !isStaticSnapshot
+    && entity.kind === "building"
     && activeAnimation?.role === "operation"
     && activeAnimationAsset?.format === "shp"
     ? api.entityPreviewUrl(sourceId, entity.id, {
@@ -3219,7 +3224,12 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
             <details className="entity-section compact-section entity-components" open>
               <summary><span>资源文件</span><em>{entity.components.length}</em></summary>
               <div className="component-chips resource-file-list">
-                {entity.components.map((component) => component.asset ? <a key={component.role} href={api.contentUrl(component.asset.id)} title={`${component.asset.virtual_path} · ${formatBytes(component.asset.size)}`}>
+                {entity.components.map((component) => component.asset ? isStaticSnapshot ? <span key={component.role} title={`${component.asset.virtual_path} · ${formatBytes(component.asset.size)}`}>
+                  <Icon name={assetIcon(component.asset.format)} size={14} />
+                  <strong>{componentRoleLabels[component.role] || component.role}</strong>
+                  <span>{component.asset.display_name}</span>
+                  <em>{formatBytes(component.asset.size)}</em>
+                </span> : <a key={component.role} href={api.contentUrl(component.asset.id)} title={`${component.asset.virtual_path} · ${formatBytes(component.asset.size)}`}>
                   <Icon name={assetIcon(component.asset.format)} size={14} />
                   <strong>{componentRoleLabels[component.role] || component.role}</strong>
                   <span>{component.asset.display_name}</span>
@@ -3546,14 +3556,14 @@ function SettingsDialog({
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
       <section className="dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-        <div className="dialog-header settings-header"><div className="dialog-icon"><Icon name="settings" /></div><div><h2 id="settings-title">设置</h2></div><button type="button" onClick={onClose} disabled={busy} aria-label="关闭"><Icon name="close" /></button></div>
+        <div className="dialog-header settings-header"><div className="dialog-icon"><Icon name="settings" /></div><div><h2 id="settings-title">设置</h2>{isStaticSnapshot && <small>精简网页版 · v{currentVersion || "—"}</small>}</div><button type="button" onClick={onClose} disabled={busy} aria-label="关闭"><Icon name="close" /></button></div>
         <div className="settings-layout">
           <nav className="settings-nav" aria-label="设置分区">
             <button type="button" onClick={() => scrollToSection("settings-display")}>显示</button>
-            <button type="button" onClick={() => scrollToSection("settings-formats")}>载入类型</button>
+            {!isStaticSnapshot && <button type="button" onClick={() => scrollToSection("settings-formats")}>载入类型</button>}
             {!hosted && <button type="button" onClick={() => scrollToSection("settings-sources")}>游戏目录</button>}
             {!hosted && <button type="button" onClick={() => scrollToSection("settings-packs")}>资源包</button>}
-            <button type="button" onClick={() => scrollToSection("settings-updates")}>应用更新</button>
+            {!isStaticSnapshot && <button type="button" onClick={() => scrollToSection("settings-updates")}>应用更新</button>}
           </nav>
           <div className="settings-content">
             <section className="settings-section" id="settings-display">
@@ -3583,7 +3593,7 @@ function SettingsDialog({
               </div>
             </section>
 
-            <section className="settings-section" id="settings-formats">
+            {!isStaticSnapshot && <section className="settings-section" id="settings-formats">
               <header><h3>载入类型</h3><span>{enabled.length} / {formats.length}</span></header>
               <div className="format-settings-actions">
                 <button type="button" onClick={() => onChange(available.filter((item) => defaultVisibleFormats.includes(item)))}>常用素材</button>
@@ -3597,7 +3607,7 @@ function SettingsDialog({
                   <em>{item.count.toLocaleString("zh-CN")}</em>
                 </label>)}
               </div> : <div className="settings-empty">导入游戏目录或资源包后即可选择载入类型。</div>}
-            </section>
+            </section>}
 
             {!hosted && <section className="settings-section" id="settings-sources">
               <header><h3>游戏目录</h3><span>{sources.length}</span></header>
@@ -3641,7 +3651,7 @@ function SettingsDialog({
               </div> : <div className="settings-empty">尚未在本机导出派生资源包。</div>}
             </section>}
 
-            <section className="settings-section" id="settings-updates">
+            {!isStaticSnapshot && <section className="settings-section" id="settings-updates">
               <header><h3>应用更新</h3><span>当前 {currentVersion || updateInfo?.current_version || "—"}</span></header>
               <label className="settings-toggle"><input type="checkbox" checked={automaticUpdateCheck} onChange={(event) => onAutomaticUpdateCheckChange(event.target.checked)} /><span><strong>应用启动时检查更新</strong><small>优先使用 Hugging Face 镜像；不会自动下载或安装。</small></span></label>
               <div className="update-actions">
@@ -3655,7 +3665,7 @@ function SettingsDialog({
                 {updateInfo.asset && <span>{updateInfo.provider === "huggingface" ? "Hugging Face 镜像" : "GitHub 备用源"} · {formatBytes(updateInfo.asset.size)}{updateInfo.asset.digest ? ` · ${updateInfo.asset.digest}` : ""}</span>}
                 {updateInfo.notes && <p>{updateInfo.notes}</p>}
               </div>}
-            </section>
+            </section>}
           </div>
         </div>
         <div className="dialog-actions settings-footer"><button type="button" className="button primary" disabled={busy} onClick={onClose}>完成</button></div>

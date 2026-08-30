@@ -1,3 +1,15 @@
+import {
+  isStaticSnapshot,
+  staticAssetModelUrl,
+  staticAssetPreviewUrl,
+  staticAudioUrl,
+  staticEntityModelUrl,
+  staticEntityPreviewUrl,
+  staticSnapshotRequest,
+} from "./staticSnapshot";
+
+export { isStaticSnapshot, staticPopoutUrl } from "./staticSnapshot";
+
 export type SourceState = "new" | "scanning" | "ready" | "ready_with_errors" | "failed";
 
 export interface Source {
@@ -51,6 +63,7 @@ export interface AppInfo {
   version: string;
   pid: number;
   mode: "local" | "hosted";
+  edition?: "full" | "pages";
 }
 
 export interface ShpFrame {
@@ -424,6 +437,7 @@ export interface ReferenceStatus {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  if (isStaticSnapshot) return await staticSnapshotRequest<T>(path, init);
   const response = await fetch(path, init);
   if (!response.ok) {
     let message = `请求失败（${response.status}）`;
@@ -552,14 +566,19 @@ export const api = {
   referenceStatus: () => request<ReferenceStatus>("/api/reference-data"),
   syncNames: () =>
     request<ReferenceStatus>("/api/reference-data/names/sync", { method: "POST" }),
-  contentUrl: (assetId: string) => `/api/assets/${assetId}/content`,
-  mediaUrl: (assetId: string) => `/api/assets/${assetId}/media`,
+  contentUrl: (assetId: string) => isStaticSnapshot
+    ? staticAudioUrl(assetId)
+    : `/api/assets/${assetId}/content`,
+  mediaUrl: (assetId: string) => isStaticSnapshot
+    ? staticAudioUrl(assetId)
+    : `/api/assets/${assetId}/media`,
   videoUrl: (assetId: string) => `/api/assets/${assetId}/video.mp4`,
   entityPreviewUrl: (
     sourceId: string,
     entityId: string,
     options: EntityPreviewOptions = {},
   ) => {
+    if (isStaticSnapshot) return staticEntityPreviewUrl(entityId, options);
     const params = new URLSearchParams({
       frame: String(options.frame ?? 0),
       facing: String(options.facing ?? 0),
@@ -580,6 +599,7 @@ export const api = {
     entityId: string,
     options: EntityPreviewOptions = {},
   ) => {
+    if (isStaticSnapshot) return staticEntityModelUrl(entityId, options.frame ?? 0);
     const params = new URLSearchParams({ frame: String(options.frame ?? 0), v: "5" });
     if (options.playerColor) params.set("player_color", options.playerColor);
     if (options.paletteId) params.set("palette_id", options.paletteId);
@@ -587,6 +607,7 @@ export const api = {
     return `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}/model.json?${params}`;
   },
   assetModelUrl: (assetId: string, frame = 0, playerColor = "", paletteId = "") => {
+    if (isStaticSnapshot) return staticAssetModelUrl(assetId, frame);
     const params = new URLSearchParams({ frame: String(frame), v: "5" });
     if (playerColor) params.set("player_color", playerColor);
     if (paletteId) params.set("palette_id", paletteId);
@@ -600,6 +621,7 @@ export const api = {
     playerColor = "",
     options: { palette?: "unit" | "animation"; shadowFrame?: number } = {},
   ) => {
+    if (isStaticSnapshot) return staticAssetPreviewUrl(assetId, frame, options.palette, options.shadowFrame);
     const params = new URLSearchParams({ frame: String(frame), scale: String(scale) });
     if (paletteId) params.set("palette_id", paletteId);
     if (playerColor) params.set("player_color", playerColor);
