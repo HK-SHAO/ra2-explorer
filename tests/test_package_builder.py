@@ -91,7 +91,25 @@ def test_staging_cleanup_retries_windows_file_locks(tmp_path: Path, monkeypatch)
     monkeypatch.setattr(package_builder.shutil, "rmtree", remove_with_one_lock)
     monkeypatch.setattr(package_builder.time, "sleep", lambda _seconds: None)
 
-    package_builder._remove_staging(staging)
+    removed = package_builder._remove_staging(staging)
 
+    assert removed is True
     assert attempts == 2
     assert not staging.exists()
+
+
+def test_staging_cleanup_does_not_mask_a_completed_distribution(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    def always_locked(_path: Path) -> None:
+        raise PermissionError("held by indexing service")
+
+    monkeypatch.setattr(package_builder.shutil, "rmtree", always_locked)
+    monkeypatch.setattr(package_builder.time, "sleep", lambda _seconds: None)
+
+    assert package_builder._remove_staging(staging) is False
+    assert staging.exists()

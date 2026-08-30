@@ -47,7 +47,14 @@ jobs:
           .venv\Scripts\python.exe scripts\privacy_scan.py --mode tracked
           .venv\Scripts\python.exe scripts\privacy_scan.py --mode history
       - name: Build local web application
-        run: scripts\build_windows.cmd
+        run: |
+          scripts\build_windows.cmd > release-build.log 2>&1
+          if not errorlevel 1 exit /b 0
+          type release-build.log
+          set LAST_ERROR=Release build failed without output
+          for /f "usebackq delims=" %%L in ("release-build.log") do set LAST_ERROR=%%L
+          echo ::error title=RA2 Explorer release build::%LAST_ERROR%
+          exit /b 1
       - name: Smoke test packaged CLI
         run: .outputs\RA2-Explorer-Web\ra2exp.exe --help
       - name: Create archive

@@ -295,22 +295,24 @@ def _publish_package(package_root: Path, destination: Path) -> None:
         raise
 
 
-def _remove_staging(path: Path) -> None:
+def _remove_staging(path: Path) -> bool:
     if not path.exists():
-        return
+        return True
     gc.collect()
     last_error: OSError | None = None
     for attempt in range(6):
         try:
             shutil.rmtree(path)
-            return
+            return True
         except FileNotFoundError:
-            return
+            return True
         except OSError as error:
             last_error = error
             time.sleep(0.15 * (attempt + 1))
-    if last_error is not None:
-        raise Ra2ExplorerError("发行目录已生成，但临时构建目录清理失败") from last_error
+    # The published distribution has already passed its audit and is complete.
+    # Antivirus/indexing locks on disposable staging files must not turn that
+    # successful build into a failure; a later workspace cleanup can retry.
+    return last_error is None
 
 
 def _contains_bytes(path: Path, needle: bytes) -> bool:
