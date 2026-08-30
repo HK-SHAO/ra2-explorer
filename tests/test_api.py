@@ -7,7 +7,13 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from ra2_explorer.api import _default_entity_operation_samples, create_app
+from ra2_explorer.api import (
+    _alpha_composite_centered,
+    _composite_focus_bounds,
+    _crop_transparent_preview,
+    _default_entity_operation_samples,
+    create_app,
+)
 from ra2_explorer.config import Settings
 from ra2_explorer.semantic import (
     GameEntity,
@@ -1007,6 +1013,28 @@ def test_default_building_layers_follow_operation_associations() -> None:
             excluded_asset_id="selected",
         )
     ] == ["FIRST"]
+
+
+def test_layered_building_thumbnail_uses_the_complete_visible_subject() -> None:
+    body = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+    body.paste((255, 0, 0, 255), (4, 55, 20, 72))
+    operation = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+    operation.paste((0, 255, 0, 255), (24, 8, 88, 62))
+    composite = _alpha_composite_centered([body, operation])
+
+    focus = _composite_focus_bounds(
+        (4, 55, 20, 72),
+        body.size,
+        [operation],
+        composite.size,
+    )
+    thumbnail = _crop_transparent_preview(composite, focus_bounds=focus)
+    visible = thumbnail.getchannel("A").getbbox()
+
+    assert focus == (4, 8, 88, 72)
+    assert visible is not None
+    assert abs(visible[0] - (thumbnail.width - visible[2])) <= 1
+    assert abs(visible[1] - (thumbnail.height - visible[3])) <= 1
 
 
 def test_effective_entity_countries_follow_house_restrictions() -> None:

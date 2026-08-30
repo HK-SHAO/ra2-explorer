@@ -2799,7 +2799,7 @@ function combineFrameFits(...fits: Array<ImageFrameFit | null>): ImageFrameFit |
     return { bounds: translate(fit.bounds), focusBounds: translate(fit.focusBounds) };
   });
   const bounds = unionImageBounds(translated.map((fit) => fit.bounds));
-  const focusBounds = translated[0]?.focusBounds || null;
+  const focusBounds = unionImageBounds(translated.map((fit) => fit.focusBounds));
   return bounds && focusBounds ? { width, height, bounds, focusBounds } : null;
 }
 

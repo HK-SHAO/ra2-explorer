@@ -424,7 +424,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if body is None:
             raise HTTPException(status_code=409, detail="该单位没有可渲染的主体资产")
         player_color = _validated_player_color(player_color)
-        renderer_version = "shp-layers-v4" if body["format"] == "shp" else "vpl-body-v3"
+        renderer_version = "shp-layers-v5" if body["format"] == "shp" else "vpl-body-v3"
         artifact_path = _source_artifact_path(
             services,
             "previews",
@@ -520,16 +520,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if shadow_layers or main_layers:
             base_size = image.size
             image = _alpha_composite_centered([*shadow_layers, image, *main_layers])
-            if focus_bounds is not None:
-                offset_x = (image.width - base_size[0]) // 2
-                offset_y = (image.height - base_size[1]) // 2
-                left, top, right, bottom = focus_bounds
-                focus_bounds = (
-                    left + offset_x,
-                    top + offset_y,
-                    right + offset_x,
-                    bottom + offset_y,
-                )
+            focus_bounds = _composite_focus_bounds(
+                focus_bounds,
+                base_size,
+                main_layers,
+                image.size,
+            )
         if thumbnail:
             image = _crop_transparent_preview(
                 image,
@@ -1239,6 +1235,44 @@ def _alpha_composite_centered(layers: list[Image.Image]) -> Image.Image:
             ((width - layer.width) // 2, (height - layer.height) // 2),
         )
     return output
+
+
+def _composite_focus_bounds(
+    base_focus: tuple[int, int, int, int] | None,
+    base_size: tuple[int, int],
+    main_layers: list[Image.Image],
+    output_size: tuple[int, int],
+) -> tuple[int, int, int, int] | None:
+    candidates: list[tuple[int, int, int, int]] = []
+
+    def translate(
+        bounds: tuple[int, int, int, int],
+        layer_size: tuple[int, int],
+    ) -> tuple[int, int, int, int]:
+        offset_x = (output_size[0] - layer_size[0]) // 2
+        offset_y = (output_size[1] - layer_size[1]) // 2
+        left, top, right, bottom = bounds
+        return (
+            left + offset_x,
+            top + offset_y,
+            right + offset_x,
+            bottom + offset_y,
+        )
+
+    if base_focus is not None:
+        candidates.append(translate(base_focus, base_size))
+    for layer in main_layers:
+        bounds = layer.getchannel("A").getbbox()
+        if bounds is not None:
+            candidates.append(translate(bounds, layer.size))
+    if not candidates:
+        return None
+    return (
+        min(bounds[0] for bounds in candidates),
+        min(bounds[1] for bounds in candidates),
+        max(bounds[2] for bounds in candidates),
+        max(bounds[3] for bounds in candidates),
+    )
 
 
 def _json_bytes(data: dict[str, object]) -> bytes:
