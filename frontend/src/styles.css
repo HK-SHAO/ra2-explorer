@@ -402,12 +402,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .entity-detail-tabs em { min-width: 20px; padding: 2px 5px; border-radius: 10px; color: #90959e; background: #24272d; font-size: 11px; font-style: normal; }
 .entity-tab-panel { min-width: 0; margin-top: 10px; }
 .entity-tab-panel > .entity-section:first-child { margin-top: 0; }
-.animation-kind-tabs { width: calc(100% - 18px); display: grid; grid-template-columns: repeat(var(--animation-tab-count, 2), minmax(0, 1fr)); gap: 3px; margin: 0 9px 8px; padding: 3px; border: 1px solid var(--line-soft); border-radius: 3px; background: #15171b; }
-.animation-kind-tabs button { min-width: 0; height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 10px; border: 1px solid transparent; border-radius: 2px; color: #858a94; background: transparent; font-size: 12px; cursor: pointer; }
-.animation-kind-tabs button:hover:not(:disabled) { color: #d4d6da; background: #202329; }
-.animation-kind-tabs button.active { border-color: #713733; color: #f0f1f2; background: #281b1d; }
-.animation-kind-tabs button:disabled { opacity: .35; cursor: default; }
-.animation-kind-tabs em { min-width: 19px; padding: 1px 5px; border-radius: 10px; color: #969ba4; background: #292c32; font-size: 11px; font-style: normal; text-align: center; }
+.animation-kind-groups { display: grid; gap: 9px; padding: 0 9px 9px; }
+.animation-kind-group { min-width: 0; overflow: hidden; border: 1px solid #2c3036; border-radius: 3px; background: #15171b; }
+.animation-kind-group > header { min-height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 9px; border-bottom: 1px solid #292d33; box-shadow: inset 2px 0 #5a3533; background: #191b20; }
+.animation-kind-group > header strong { color: #d1d4d8; font-size: 13px; font-weight: 600; }
+.animation-kind-group > header em { min-width: 20px; margin-left: auto; padding: 2px 6px; border-radius: 10px; color: #969ba4; background: #292c32; font-size: 11px; font-style: normal; text-align: center; }
+.animation-kind-group > .animation-association-list { padding: 7px; }
 .entity-composite-stage { position: relative; min-width: 0; min-height: 180px; overflow: hidden; }
 .entity-composite-stage > .preview-stage, .entity-composite-stage > .voxel-viewer { width: 100%; height: 100%; min-height: inherit; }
 .entity-preview-controls { position: absolute; z-index: 5; left: 50%; bottom: 10px; width: min(calc(100% - 20px), 620px); display: flex; align-items: stretch; justify-content: center; gap: 6px; transform: translateX(-50%); }
