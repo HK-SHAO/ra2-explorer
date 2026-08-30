@@ -50,8 +50,8 @@ jobs:
       - name: Build static application
         working-directory: frontend
         run: |
-          npm ci
-          npm run build:pages
+          call npm ci
+          call npm run build:pages
       - name: Assemble and verify site
         run: |
           if not exist frontend\dist\index.html exit /b 1

@@ -72,6 +72,8 @@ npm run preview:pages -- --host 127.0.0.1 --port 46131 --strictPort
 
 `.github\workflows\pages.yml` 在 `master` 的 Pages 前端、数据锁或部署脚本发生变化时运行，也支持手动触发。它使用官方 `configure-pages@v5`、`upload-pages-artifact@v4` 和 `deploy-pages@v4`；上传前会同时确认静态入口、前端 bundle 和数据清单存在，避免只发布数据目录。部署 job 具有 `pages: write` 与 `id-token: write`，并使用 `github-pages` environment。[GitHub 自定义 Pages workflow](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
 
+该工作流的 `run` shell 是 `cmd`。Runner 会把多行命令写入临时批处理，因此调用 `npm.cmd` 必须使用 `call npm ...` 返回父批处理；否则第一条 npm 命令成功后，后续构建命令不会执行。
+
 如果仓库从未启用 Pages，需要维护者只做一次：Settings → Pages → Build and deployment → Source 选择 GitHub Actions。此后每次前端稳定提交都会自动部署，数据快照仍保持固定，直到明确发布下一版。
 
 ## 已实施的流量优化
