@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from ra2_explorer.api import create_app
+from ra2_explorer.api import _default_entity_operation_samples, create_app
 from ra2_explorer.config import Settings
 from ra2_explorer.semantic import (
     GameEntity,
@@ -870,6 +870,80 @@ def test_entity_animation_fields_follow_art_semantics() -> None:
     assert _entity_animation_role("bibshape") is None
     assert _entity_animation_role("animactive") is None
     assert _entity_animation_role("activeanimdamaged") is None
+
+
+def test_default_building_layers_follow_operation_associations() -> None:
+    def asset(asset_id: str, asset_format: str = "shp") -> dict[str, object]:
+        return {
+            "id": asset_id,
+            "display_name": f"{asset_id}.{asset_format}",
+            "format": asset_format,
+            "virtual_path": f"fixture::{asset_id}.{asset_format}",
+            "size": 128,
+            "storage_kind": "mix",
+        }
+
+    first = MediaSample("FIRST", None, asset("first"))
+    selected = MediaSample("SELECTED", None, asset("selected"))
+    ignored = MediaSample("IGNORED", None, asset("ignored"))
+    entity = GameEntity(
+        id="DemoBuilding",
+        kind="building",
+        usage="buildable",
+        display_name="Demo Building",
+        internal_name="Demo Building",
+        ui_name=None,
+        ui_name_resolved=True,
+        image="DEMOBUILDING",
+        voxel=False,
+        countries=(),
+        sides=(),
+        affiliation=None,
+        rules={},
+        art={},
+        components=(),
+        dependencies=(),
+        media=(
+            MediaAssociation(
+                "animation",
+                "activeanim",
+                "FIRST",
+                "DemoBuilding",
+                (first, selected),
+                role="operation",
+                selection="first",
+                selected_sample="SELECTED",
+            ),
+            MediaAssociation(
+                "animation",
+                "activeanimtwo",
+                "FIRST",
+                "DemoBuilding",
+                (first,),
+                role="operation",
+            ),
+            MediaAssociation(
+                "animation",
+                "buildup",
+                "IGNORED",
+                "DemoBuilding",
+                (ignored,),
+                role="construction",
+            ),
+        ),
+    )
+
+    assert [sample.name for sample in _default_entity_operation_samples(entity)] == [
+        "SELECTED",
+        "FIRST",
+    ]
+    assert [
+        sample.name
+        for sample in _default_entity_operation_samples(
+            entity,
+            excluded_asset_id="selected",
+        )
+    ] == ["FIRST"]
 
 
 def test_effective_entity_countries_follow_house_restrictions() -> None:

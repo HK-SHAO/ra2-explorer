@@ -52,7 +52,13 @@ from ra2_explorer.reference_data import (
     reference_status,
     sync_known_names,
 )
-from ra2_explorer.semantic import ENTITY_KINDS, ENTITY_USAGES, SemanticLibrary
+from ra2_explorer.semantic import (
+    ENTITY_KINDS,
+    ENTITY_USAGES,
+    GameEntity,
+    MediaSample,
+    SemanticLibrary,
+)
 from ra2_explorer.storage import Database
 from ra2_explorer.video import VideoTranscoder
 
@@ -309,7 +315,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail="该单位没有可渲染的主体资产")
         palette = _select_palette(services, body, palette_id)
         player_color = _validated_player_color(player_color)
-        renderer_version = "shp-focus-v2" if body["format"] == "shp" else "vpl-body-v3"
+        renderer_version = "shp-layers-v3" if body["format"] == "shp" else "vpl-body-v3"
         artifact_path = _source_artifact_path(
             services,
             "previews",
@@ -344,6 +350,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             player_color=player_color,
             scale=scale,
         )
+        default_effect_samples = (
+            _default_entity_operation_samples(
+                semantic_entity,
+                excluded_asset_id=effect_asset_id,
+            )
+            if body["format"] == "shp"
+            else ()
+        )
+        shadow_layers: list[Image.Image] = []
+        main_layers: list[Image.Image] = []
+        for sample in default_effect_samples:
+            rendered_layer = _render_entity_shp_layer(
+                services,
+                sample,
+                player_color=player_color,
+                scale=scale,
+            )
+            if rendered_layer is None:
+                continue
+            shadow_layer, main_layer = rendered_layer
+            if shadow_layer is not None:
+                shadow_layers.append(shadow_layer)
+            main_layers.append(main_layer)
         if effect_asset_id:
             if body["format"] != "shp":
                 raise HTTPException(
@@ -373,14 +402,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     player_color
                 )
             effect_main = effect_sprite.render(effect_frame, effect_palette, scale=scale)
-            layers = []
             if effect_shadow_frame is not None:
-                layers.append(
+                shadow_layers.append(
                     effect_sprite.render_shadow(effect_shadow_frame, scale=scale)
                 )
-            layers.extend((image, effect_main))
+            main_layers.append(effect_main)
+        if shadow_layers or main_layers:
             base_size = image.size
-            image = _alpha_composite_centered(layers)
+            image = _alpha_composite_centered([*shadow_layers, image, *main_layers])
             if focus_bounds is not None:
                 offset_x = (image.width - base_size[0]) // 2
                 offset_y = (image.height - base_size[1]) // 2
@@ -885,6 +914,82 @@ def _crop_transparent_preview(
             math.ceil(center_y + half_height + padding),
         )
     )
+
+
+def _default_entity_operation_samples(
+    entity: GameEntity,
+    *,
+    excluded_asset_id: str | None = None,
+) -> tuple[MediaSample, ...]:
+    samples: list[MediaSample] = []
+    seen_assets: set[str] = set()
+    for association in entity.media:
+        if association.kind != "animation" or association.role != "operation":
+            continue
+        configured = next(
+            (
+                sample
+                for sample in association.samples
+                if sample.name == association.selected_sample
+                and sample.asset
+                and sample.asset.get("format") == "shp"
+            ),
+            None,
+        )
+        sample = configured or next(
+            (
+                candidate
+                for candidate in association.samples
+                if candidate.asset and candidate.asset.get("format") == "shp"
+            ),
+            None,
+        )
+        if sample is None or sample.asset is None or sample.asset.get("format") != "shp":
+            continue
+        asset_id = str(sample.asset["id"])
+        if asset_id == excluded_asset_id or asset_id in seen_assets:
+            continue
+        seen_assets.add(asset_id)
+        samples.append(sample)
+    return tuple(samples)
+
+
+def _render_entity_shp_layer(
+    services: Services,
+    sample: MediaSample,
+    *,
+    player_color: str | None,
+    scale: int,
+) -> tuple[Image.Image | None, Image.Image] | None:
+    asset = sample.asset
+    if asset is None or asset.get("format") != "shp":
+        return None
+    try:
+        _, data = services.reader.read(str(asset["id"]))
+        sprite = parse_shp(data)
+        source_frame = sample.animation.start_frame if sample.animation else 0
+        if source_frame >= len(sprite.frames):
+            return None
+        palette_kind: Literal["unit", "animation"] | None = (
+            sample.palette if sample.palette in {"unit", "animation"} else None
+        )
+        palette = _select_palette(services, asset, None, palette_kind)
+        if player_color:
+            palette = (palette or grayscale_palette()).with_player_color(player_color)
+        main = sprite.render(source_frame, palette, scale=scale)
+        shadow_frame = (
+            sprite.paired_shadow_frame(source_frame)
+            if sample.animation and sample.animation.shadow
+            else None
+        )
+        shadow = (
+            sprite.render_shadow(shadow_frame, scale=scale)
+            if shadow_frame is not None
+            else None
+        )
+        return shadow, main
+    except (OSError, Ra2ExplorerError, ValueError):
+        return None
 
 
 def _shp_frame_metadata(sprite: ShpFile) -> list[dict[str, object]]:

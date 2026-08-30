@@ -2611,6 +2611,8 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, defaultPre
   const operationAnimationAssociations = animationAssociations.filter(
     (association) => animationAssociationTab(entityKind, association) === "operation",
   );
+  const defaultOperationSamples = defaultBuildingOperationSamples(operationAnimationAssociations, facing);
+  const defaultOperationAssetKey = defaultOperationSamples.map((sample) => sample.asset?.id).join(":");
   const weaponAnimationAssociations = animationAssociations.filter(
     (association) => animationAssociationTab(entityKind, association) === "weapon",
   );
@@ -2664,6 +2666,23 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, defaultPre
     bodyFrameIndices,
     entityKind === "building" ? undefined : [],
   );
+  const defaultOperationFrameFits = defaultOperationSamples.map((sample) => {
+    const metadata = sample.asset ? operationMetadata[sample.asset.id] : null;
+    const frames = animationSourceFrames(sample, metadata, facing);
+    const shadows = sample.animation?.shadow && metadata?.frame_count
+      ? frames
+        .map((sourceFrame) => sourceFrame + Math.floor(metadata.frame_count! / 2))
+        .filter((sourceFrame) => sourceFrame < metadata.frame_count!)
+      : [];
+    return sequenceFrameFit(metadata, frames, shadows);
+  });
+  const operationMetadataReady = defaultOperationSamples.every(
+    (sample) => Boolean(sample.asset && operationMetadata[sample.asset.id]),
+  );
+  const entityPresentationFrameFit = defaultOperationSamples.length > 0 && !operationMetadataReady
+    ? null
+    : combineFrameFits(entityBodyFrameFit, ...defaultOperationFrameFits);
+  const buildingOperationFrameFit = combineFrameFits(entityPresentationFrameFit, activeAnimationFrameFit);
   const activeAnimationFrameCount = activeAnimation
     ? Math.max(activeAnimationFrames.length, effectBodyFrames.length, 1)
     : activeAnimationFrames.length;
@@ -2733,6 +2752,26 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, defaultPre
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [entity?.id]);
+
+  useEffect(() => {
+    setOperationMetadata({});
+    const assets = defaultOperationSamples
+      .map((sample) => sample.asset)
+      .filter((asset): asset is NonNullable<typeof asset> => Boolean(asset));
+    if (assets.length === 0) return;
+    let cancelled = false;
+    Promise.all(assets.map(async (asset) => {
+      try {
+        return [asset.id, await api.metadata(asset.id)] as const;
+      } catch {
+        return null;
+      }
+    })).then((entries) => {
+      if (cancelled) return;
+      setOperationMetadata(Object.fromEntries(entries.filter((entry) => entry !== null)));
+    });
+    return () => { cancelled = true; };
+  }, [entity?.id, defaultOperationAssetKey]);
 
   useEffect(() => {
     setAnimationMetadata(null);
@@ -2924,7 +2963,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, defaultPre
               : activeAnimationReplacesBody && activeAnimationAsset && ["vxl", "hva"].includes(activeAnimationAsset.format)
                 ? <VoxelPreview url={api.assetModelUrl(activeAnimationAsset.id, activeAnimationSourceFrame, playerColor)} label={animationEventLabel(activeAnimation?.event || activeAnimationAsset.display_name)} viewKey={`asset:${activeAnimationAsset.id}`} previewAngle={previewAngle} onPreviewAngleChange={setPreviewAngle} />
                 : buildingOperationPreviewUrl
-                  ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${entity.id}:operation:${activeAnimationAsset?.id || "effect"}`} fitContent={false} src={buildingOperationPreviewUrl} alt={`${activeAnimationTitle}组合预览`} building />
+                  ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${entity.id}:operation:${activeAnimationAsset?.id || "effect"}`} frameFit={buildingOperationFrameFit} src={buildingOperationPreviewUrl} alt={`${activeAnimationTitle}组合预览`} building />
                   : !activeAnimationAsset && frameMode === "grid" && hasRawBodyAnimation
                     ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing: renderFacing, playerColor, scale: 3 })} />
                     : <div className="entity-composite-stage">
@@ -2934,7 +2973,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, defaultPre
                         ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} viewKey={`entity:${sourceId}:${entity.id}`} previewAngle={previewAngle} onPreviewAngleChange={setPreviewAngle} />
                         : previewFailed
                           ? <div className="preview-stage shp"><div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div></div>
-                          : <ImageViewport className="shp entity-composite-body" fitKey={entity.id} frameFit={entityBodyFrameFit} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
+                          : <ImageViewport className="shp entity-composite-body" fitKey={entity.id} frameFit={entityPresentationFrameFit} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
                     {activeAnimationAsset?.format === "shp" && <span className={`entity-effect-overlay ${activeAnimation?.role === "operation" ? "attached" : ""} ${effectFrameVisible ? "visible" : "hidden"}`} style={{ "--effect-x": `${effectAnchor.x}%`, "--effect-y": `${effectAnchor.y}%` } as CSSProperties} aria-hidden="true">
                       <StablePreviewImage src={activeAnimationPreviewUrl} alt="" />
                     </span>}
