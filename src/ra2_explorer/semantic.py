@@ -712,7 +712,6 @@ class SemanticLibrary:
         with self._lock:
             cached = self._cache.get(source_id)
             if cached and cached[0] == token:
-                self._store_catalog_snapshot(source, cached[1])
                 return cached[1]
             self._parsed_cache.clear()
             self._shp_frame_cache.clear()
