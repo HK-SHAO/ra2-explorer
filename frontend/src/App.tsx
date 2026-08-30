@@ -488,6 +488,26 @@ type EntitySort = "cameo" | "faction" | "name_asc" | "name_desc" | "cost_asc" | 
 type PreviewAngle = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 const DEFAULT_PREVIEW_ANGLE: PreviewAngle = 1;
+
+function staticBuildDescription(currentVersion: string) {
+  const tag = import.meta.env.VITE_RA2EXP_BUILD_TAG?.trim();
+  const commit = import.meta.env.VITE_RA2EXP_BUILD_COMMIT?.trim();
+  const timestamp = import.meta.env.VITE_RA2EXP_BUILD_TIME?.trim();
+  const revision = tag
+    ? `稳定版 ${tag}`
+    : commit
+      ? `预览版 ${commit.slice(0, 8)}`
+      : `本地版 v${currentVersion || "—"}`;
+  if (!timestamp) return revision;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return revision;
+  const updated = new Intl.DateTimeFormat("zh-CN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    hour12: false,
+  }).format(date);
+  return `${revision} · 更新于 ${updated}`;
+}
 const previewAngleOptions: Array<{ value: PreviewAngle; label: string }> = [
   { value: 0, label: "正面" },
   { value: 1, label: "右前侧（推荐）" },
@@ -3688,7 +3708,7 @@ function SettingsDialog({
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
       <section className="dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-        <div className="dialog-header settings-header"><div className="dialog-icon"><Icon name="settings" /></div><div><h2 id="settings-title">设置</h2>{isStaticSnapshot && <small>精简网页版 · v{currentVersion || "—"}</small>}</div><button type="button" onClick={onClose} disabled={busy} aria-label="关闭"><Icon name="close" /></button></div>
+        <div className="dialog-header settings-header"><div className="dialog-icon"><Icon name="settings" /></div><div><h2 id="settings-title">设置</h2>{isStaticSnapshot && <small title={staticBuildDescription(currentVersion)}>精简网页版 · {staticBuildDescription(currentVersion)}</small>}</div><button type="button" onClick={onClose} disabled={busy} aria-label="关闭"><Icon name="close" /></button></div>
         <div className="settings-layout">
           <nav className="settings-nav" aria-label="设置分区">
             <button type="button" onClick={() => scrollToSection("settings-display")}>显示</button>
