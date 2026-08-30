@@ -11,9 +11,12 @@ from ra2_explorer.api import create_app
 from ra2_explorer.config import Settings
 from ra2_explorer.semantic import (
     GameEntity,
+    MediaAssociation,
+    MediaSample,
     _art_animation_playback,
     _AssetIndex,
     _build_eva_events,
+    _build_media_items,
     _effective_entity_countries,
     _entity_animation_role,
     _entity_usage,
@@ -549,6 +552,63 @@ def test_eva_events_read_russian_field_and_resolve_unit_names() -> None:
         assert event.samples[0].original_text == "Yuri Boomer"
         assert event.samples[0].localized_text == "雷鸣攻击潜舰"
         assert event.samples[0].text_label == "Name:Boomer"
+
+
+def test_eva_media_groups_separate_missions_and_nonverbal_prompts() -> None:
+    def asset(name: str) -> dict[str, object]:
+        return {
+            "id": name.casefold(),
+            "display_name": f"{name}.WAV",
+            "format": "wav",
+            "virtual_path": f"langmd.mix::{name}.WAV",
+            "size": 1024,
+            "storage_kind": "mix",
+        }
+
+    mission_asset = asset("XA1EV01")
+    prompt_asset = asset("SPSYREAD")
+    dummy_asset = asset("DUMMY")
+    events = (
+        MediaAssociation(
+            "voice",
+            "eva_allied",
+            "mis_xa1_evabriefing01",
+            "eva",
+            (MediaSample("XA1EV01", None, mission_asset),),
+        ),
+        MediaAssociation(
+            "voice",
+            "eva_yuri",
+            "eva_psychicrevealready",
+            "eva",
+            (MediaSample("SPSYREAD", None, prompt_asset),),
+        ),
+        MediaAssociation(
+            "voice",
+            "eva_yuri",
+            "eva_psychicdominatoractivated",
+            "eva",
+            (MediaSample("DUMMY", None, dummy_asset),),
+        ),
+    )
+
+    items = {
+        item["asset"]["display_name"]: item
+        for item in _build_media_items(
+            [mission_asset, prompt_asset, dummy_asset],
+            (),
+            {},
+            events,
+            {},
+        )
+    }
+
+    assert items["XA1EV01.WAV"]["kind"] == "voice"
+    assert items["XA1EV01.WAV"]["groups"] == ["mission_voice"]
+    assert items["SPSYREAD.WAV"]["kind"] == "sound"
+    assert items["SPSYREAD.WAV"]["groups"] == ["notification_sound"]
+    assert items["SPSYREAD.WAV"]["description"] == "心灵揭示就绪提示音"
+    assert "eva_voice" not in items["DUMMY.WAV"]["groups"]
 
 
 def test_unassociated_voice_keeps_catalog_transcript_in_asset_data(

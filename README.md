@@ -10,7 +10,7 @@ RA2 Explorer 是一个本地优先的《命令与征服：红色警戒 2》资�
 - 预览 PAL、RA2/TS SHP、TMP、PCX 和地图对象布局，并用 Three.js/WebGL 交互查看 VXL/HVA 三维组合与时间轴；
 - 读取 CSF/INI/MAP 文本，解码 AUD 与 AUDIO.IDX/BAG，并把 Westwood/IMA ADPCM 转为浏览器可播放 WAV；
 - 叠加 RULES/ART/SOUND/EVA/CSF 建立单位目录，关联常规及 `Weapon1…WeaponN` 武器、弹体、弹头、毁坏武器、碎片、动画、语音、音效和本地化台词；弹头 `AnimList` / `SplashList` 会按武器 `Damage` 选择实际候选，不再把整个列表误作连续动画；
-- 合并官方中文 CSF 与可同步的 CnCNet 英文音频转录，正确读取 EVAMD 的 `Allied`/`Russian`/`Yuri` 映射，并按单位事件同时展示原文和中文文本；
+- 合并官方中文 CSF 与可同步的 CnCNet 英文音频转录，正确读取 EVAMD 的 `Allied`/`Russian`/`Yuri` 映射，并按单位事件同时展示原文和中文文本；EVAMD 中的战役/合作任务对白与真正的 EVA 播报分开归类；
 - 组合车辆主体、炮塔、炮管 VXL/HVA，按真实部件变换、TS/RA2 法线与 Westwood VPL 亮度表渲染，并用鼠标旋转、缩放和平移；
 - 按需把 VQA/BIK 转为浏览器可播放 MP4，转换结果跨进程复用；
 - 自动发现项目内 `.runtime\RA2MD`、Steam App 2229850、EA App/Origin 与兼容旧版安装；

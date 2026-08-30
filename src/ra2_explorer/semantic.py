@@ -234,6 +234,9 @@ _EVA_UNIT_STATIC_TEXT = {
     "forceshieldyuri": ("Yuri Force Shield", "尤里力场护盾"),
     "paratrooper": ("Paratroopers", "伞兵"),
 }
+_MEDIA_EVENT_DESCRIPTIONS = {
+    "eva_psychicrevealready": "心灵揭示就绪提示音",
+}
 _NULL_IMAGES = {"", "none", "null", "<none>"}
 
 
@@ -1445,10 +1448,19 @@ def _build_media_items(
 
     for association in eva_events:
         for sample in association.samples:
+            if sample.name.rsplit(".", 1)[0].casefold() == "dummy":
+                continue
+            event_name = association.event.casefold()
+            if event_name.startswith(("mis_", "coop_")):
+                kind, group = "voice", "mission_voice"
+            elif sample.text is None:
+                kind, group = "sound", "notification_sound"
+            else:
+                kind, group = "voice", "eva_voice"
             add_sample(
                 sample,
-                kind="voice",
-                group="eva_voice",
+                kind=kind,
+                group=group,
                 event=association.event,
                 slot=association.slot,
             )
@@ -1550,7 +1562,9 @@ def _build_media_items(
         elif description is None and "eva_voice" in groups and events:
             description = f"EVA 播报 · {events[0]}"
         elif description is None and events:
-            description = events[0]
+            description = _MEDIA_EVENT_DESCRIPTIONS.get(
+                events[0].casefold(), events[0]
+            )
         items.append(
             {
                 "asset": _asset_summary(state["asset"]),

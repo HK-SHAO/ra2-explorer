@@ -394,6 +394,7 @@ const mediaGroupLabels: Record<string, string> = {
   combat_sound: "战斗音效",
   unit_sound: "单位动作",
   ambient_sound: "环境音效",
+  notification_sound: "提示音效",
   other_sound: "其他音效",
   unclassified: "未关联音频",
 };
