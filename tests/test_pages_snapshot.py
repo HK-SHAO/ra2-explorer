@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from ra2_explorer.pages_snapshot import (
     _prune_reused_exports,
     _safe_filename,
     _snapshot_identity,
+    archive_pages_snapshot,
 )
 
 
@@ -170,3 +172,22 @@ def test_directory_stats_can_exclude_self_describing_manifest(tmp_path) -> None:
         "bytes": 2,
         "categories": {"catalog": {"files": 1, "bytes": 2}},
     }
+
+
+def test_pages_archive_is_complete_and_atomically_replaceable(tmp_path: Path) -> None:
+    snapshot = tmp_path / "snapshot"
+    (snapshot / "catalog").mkdir(parents=True)
+    (snapshot / "manifest.json").write_text('{"schema_version":1}', encoding="utf-8")
+    (snapshot / "catalog" / "entities.json").write_text("[]", encoding="utf-8")
+    archive = tmp_path / "pages.zip"
+
+    result = archive_pages_snapshot(snapshot, archive)
+
+    assert result["files"] == 2
+    assert result["bytes"] == archive.stat().st_size
+    with zipfile.ZipFile(archive) as bundle:
+        assert bundle.namelist() == ["catalog/entities.json", "manifest.json"]
+    with pytest.raises(Ra2ExplorerError):
+        archive_pages_snapshot(snapshot, archive)
+    archive_pages_snapshot(snapshot, archive, overwrite=True)
+    assert not list(tmp_path.glob(".pages.zip.building-*"))

@@ -50,6 +50,8 @@ Pages workflow 默认从 `https://hf-mirror.com` 下载，网络失败才回退 
 .venv\Scripts\ra2exp.exe pages export SOURCE_ID --audio-bitrate 24k --workers 4 --overwrite
 ```
 
+该命令会原子替换快照目录并自动生成 `.runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip`。渲染算法升级时必须递增快照的 render revision，使新快照 ID 不再复用旧版 WebP；压缩过程每 2,000 个文件输出一次进度，避免长时间没有反馈。
+
 审计最终 ZIP：
 
 ```bat

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import uuid
+import zipfile
 from collections import Counter
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -36,7 +37,7 @@ from ra2_explorer.config import Settings
 from ra2_explorer.errors import Ra2ExplorerError
 
 PAGES_SNAPSHOT_SCHEMA_VERSION = 1
-PAGES_RENDER_REVISION = 1
+PAGES_RENDER_REVISION = 2
 _SAFE_FILENAME = re.compile(r"^[A-Za-z0-9_.~$-]+$")
 _AUDIO_FORMATS = {"aud", "bag_audio", "wav"}
 _MODEL_FORMATS = {"hva", "vxl"}
@@ -804,11 +805,58 @@ def _directory_stats(
     return {"files": total_files, "bytes": total_bytes, "categories": categories}
 
 
+def archive_pages_snapshot(
+    snapshot_root: Path,
+    archive: Path,
+    *,
+    overwrite: bool = False,
+) -> dict[str, object]:
+    root = snapshot_root.resolve()
+    destination = archive.resolve()
+    if not root.is_dir() or not (root / "manifest.json").is_file():
+        raise Ra2ExplorerError(f"静态快照目录无效：{root}")
+    if destination == root or destination.is_relative_to(root):
+        raise Ra2ExplorerError("发布 ZIP 不能位于静态快照目录内部")
+    if destination.exists() and not overwrite:
+        raise Ra2ExplorerError(f"发布 ZIP 已经存在：{destination}；如需替换请添加 --overwrite")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.parent / f".{destination.name}.building-{uuid.uuid4().hex[:8]}"
+    files = sorted(path for path in root.rglob("*") if path.is_file())
+    print(f"[pages] 压缩发布 ZIP：{len(files):,} 个文件", file=sys.stderr, flush=True)
+    try:
+        with zipfile.ZipFile(
+            temporary,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=6,
+            allowZip64=True,
+            strict_timestamps=False,
+        ) as bundle:
+            for index, path in enumerate(files, start=1):
+                bundle.write(path, path.relative_to(root).as_posix())
+                if index == len(files) or index % 2_000 == 0:
+                    print(
+                        f"[pages] 压缩发布 ZIP：{index:,}/{len(files):,}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+        os.replace(temporary, destination)
+    except OSError as error:
+        temporary.unlink(missing_ok=True)
+        raise Ra2ExplorerError(f"发布 ZIP 生成失败：{type(error).__name__}") from error
+    return {
+        "path": str(destination),
+        "files": len(files),
+        "bytes": destination.stat().st_size,
+    }
+
+
 def build_pages_snapshot(
     settings: Settings,
     source_id: str,
     *,
     output: Path | None = None,
+    archive: Path | None = None,
     ffmpeg: Path | None = None,
     audio_bitrate: str = "24k",
     workers: int = 4,
@@ -997,6 +1045,12 @@ def build_pages_snapshot(
             file=sys.stderr,
             flush=True,
         )
+        if archive is not None:
+            result["archive"] = archive_pages_snapshot(
+                resolved,
+                archive,
+                overwrite=overwrite,
+            )
         return result
     except BaseException:
         if staging.exists():
@@ -1006,4 +1060,4 @@ def build_pages_snapshot(
         client.close()
 
 
-__all__ = ["build_pages_snapshot"]
+__all__ = ["archive_pages_snapshot", "build_pages_snapshot"]

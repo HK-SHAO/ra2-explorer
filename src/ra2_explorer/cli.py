@@ -135,6 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
     pages_export = pages_commands.add_parser("export", help="导出精简静态资源快照")
     pages_export.add_argument("source_id")
     pages_export.add_argument("--output", type=Path)
+    pages_export.add_argument("--archive", type=Path)
     pages_export.add_argument("--ffmpeg", type=Path)
     pages_export.add_argument("--audio-bitrate", default="24k")
     pages_export.add_argument("--workers", type=int, default=4)
@@ -186,11 +187,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "pages":
         from ra2_explorer.pages_snapshot import build_pages_snapshot
 
+        archive = args.archive
+        if archive is None:
+            archive_parent = args.output.parent if args.output else settings.derived_root / "pages"
+            archive = archive_parent / "RA2-Explorer-Pages-Data.zip"
         try:
             result = build_pages_snapshot(
                 settings,
                 args.source_id,
                 output=args.output,
+                archive=archive,
                 ffmpeg=args.ffmpeg,
                 audio_bitrate=args.audio_bitrate,
                 workers=args.workers,

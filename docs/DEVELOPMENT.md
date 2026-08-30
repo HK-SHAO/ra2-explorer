@@ -152,6 +152,8 @@ scripts\build_windows.cmd --game-dir ".runtime\RA2MD" --include-game-data
 .venv\Scripts\python.exe scripts\publish_pages_snapshot.py ".runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip"
 ```
 
+`pages export` 会先原子替换快照目录，再自动生成同目录下的 `RA2-Explorer-Pages-Data.zip`；渲染修订变化时会切换快照 ID，避免复用旧版缩略图。可用 `--archive` 指定其他 ZIP 路径。
+
 最后一条命令把通过审计的数据上传到固定 HF 发布目录，并把不可变 revision、字节数和 SHA-256 写入 `packaging\pages-data.json`。普通 UI 或性能修复不重新发布数据，只运行静态前端构建：
 
 ```bat
