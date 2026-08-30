@@ -294,6 +294,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .detail-panel-wide .metadata dl > div { min-width: 0; padding: 0 12px; border-right: 1px solid var(--line-soft); }
 .detail-panel-wide .metadata dd { overflow-wrap: anywhere; }
 .sound-metadata { margin-top: 14px; }
+.sound-metadata-direct { margin-top: 8px; }
 .sound-metadata-tags { margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; list-style: none; }
 .sound-metadata-tags li { min-height: 27px; max-width: 100%; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid #373a42; border-radius: 14px; color: #b9bdc4; background: #17191e; font-size: 12px; }
 .sound-metadata-tags li span { color: #747a84; }

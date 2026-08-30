@@ -10,7 +10,10 @@ from PIL import Image
 from ra2_explorer.api import create_app
 from ra2_explorer.config import Settings
 from ra2_explorer.semantic import (
+    GameEntity,
     _art_animation_playback,
+    _AssetIndex,
+    _build_eva_events,
     _effective_entity_countries,
     _entity_animation_role,
     _entity_usage,
@@ -504,6 +507,48 @@ def test_art_animation_playback_uses_inclusive_bounds_and_shadow() -> None:
     assert playback.loop_end == 19
     assert playback.rate_ms == 450
     assert playback.shadow is True
+
+
+def test_eva_events_read_russian_field_and_resolve_unit_names() -> None:
+    boomer = GameEntity(
+        id="BSUB",
+        kind="vehicle",
+        usage="buildable",
+        display_name="雷鸣攻击潜舰",
+        internal_name="Yuri Boomer",
+        ui_name="Name:Boomer",
+        ui_name_resolved=True,
+        image="BSUB",
+        voxel=True,
+        countries=("YuriCountry",),
+        sides=("ThirdSide",),
+        affiliation=None,
+        rules={},
+        art={},
+        components=(),
+        dependencies=(),
+        media=(),
+    )
+
+    events = _build_eva_events(
+        {
+            "unit_eva_boomer": {
+                "allied": "CEVAU39",
+                "russian": "CSOFU39",
+            }
+        },
+        _AssetIndex({}, {}),
+        {},
+        (boomer,),
+    )
+
+    assert [event.slot for event in events] == ["eva_allied", "eva_soviet"]
+    assert {event.samples[0].name for event in events} == {"CEVAU39", "CSOFU39"}
+    for event in events:
+        assert event.samples[0].text == "雷鸣攻击潜舰"
+        assert event.samples[0].original_text == "Yuri Boomer"
+        assert event.samples[0].localized_text == "雷鸣攻击潜舰"
+        assert event.samples[0].text_label == "Name:Boomer"
 
 
 def test_unassociated_voice_keeps_catalog_transcript_in_asset_data(

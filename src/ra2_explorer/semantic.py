@@ -169,6 +169,71 @@ _SIDE_DISPLAY_NAMES = {
     "nod": "苏军",
     "thirdside": "尤里",
 }
+_EVA_UNIT_ENTITY_IDS = {
+    "barracksyuri": "YABRCK",
+    "batlabyuri": "YATECH",
+    "battlebunker": "NABNKR",
+    "battlefortress": "BFRT",
+    "bioreactor": "YAPOWR",
+    "bioriactor": "YAPOWR",
+    "blackeagle": "BEAG",
+    "boomer": "BSUB",
+    "boris": "BORIS",
+    "brute": "BRUTE",
+    "chaos": "CAOS",
+    "chaosdrone": "CAOS",
+    "clonevat": "NACLON",
+    "cloningvat": "NACLON",
+    "demotruck": "DTRUCK",
+    "floatdisc": "DISK",
+    "gatcannon": "YAGGUN",
+    "gattank": "YTNK",
+    "geneticmut": "YAGNTC",
+    "grandcannon": "GTGCAN",
+    "grinder": "YAGRND",
+    "guardiangi": "GGI",
+    "hoveryuri": "YHVR",
+    "industrialplant": "NAINDP",
+    "initiate": "INIT",
+    "lasercosmo": "LUNR",
+    "lasher": "LTNK",
+    "magnetron": "TELE",
+    "mastermind": "MIND",
+    "mcvyuri": "PCV",
+    "psychicdomin": "YAPPPT",
+    "psychicsensor": "NAPSIS",
+    "psychsensor": "NAPSIS",
+    "psychictower": "YAPSYT",
+    "psychtower": "YAPSYT",
+    "robotcontrol": "GAROBO",
+    "robottank": "ROBO",
+    "siegechopper": "SCHP",
+    "slave": "SLAV",
+    "slaveminer": "SMIN",
+    "sniper": "SNIPE",
+    "spyplane": "SPYP",
+    "subpen": "YAYARD",
+    "tankbunk": "NATBNK",
+    "tankdestroyer": "TNKD",
+    "techhospital": "CATHOSP",
+    "techmachshop": "CAMACH",
+    "techsecretlab": "CASLAB",
+    "terrorist": "TERROR",
+    "teslatank": "TTNK",
+    "virus": "VIRUS",
+    "wallyuri": "GAFWLL",
+    "yuriclone": "YURI",
+    "yurieng": "YENGINEER",
+    "yuriprime": "YURIPR",
+    "yuriwar": "YAWEAP",
+}
+_EVA_UNIT_STATIC_TEXT = {
+    "forceshieldall": ("Allied Force Shield", "盟军力场护盾"),
+    "forceshieldsov": ("Soviet Force Shield", "苏军力场护盾"),
+    "forceshieldyur": ("Yuri Force Shield", "尤里力场护盾"),
+    "forceshieldyuri": ("Yuri Force Shield", "尤里力场护盾"),
+    "paratrooper": ("Paratroopers", "伞兵"),
+}
 _NULL_IMAGES = {"", "none", "null", "<none>"}
 
 
@@ -1077,7 +1142,6 @@ class SemanticLibrary:
             self.voice_transcripts,
         )
         audio_events = _build_audio_events(sounds, asset_index, voice_strings)
-        eva_events = _build_eva_events(eva, asset_index, voice_strings)
         country_definitions = _build_country_definitions(rules, strings)
         country_lookup = {
             country["id"].casefold(): country for country in country_definitions
@@ -1165,6 +1229,12 @@ class SemanticLibrary:
                     )
                 )
         entities.sort(key=lambda entity: (entity.display_name.casefold(), entity.id.casefold()))
+        eva_events = _build_eva_events(
+            eva,
+            asset_index,
+            voice_strings,
+            tuple(entities),
+        )
         inputs = {
             "rules": tuple(_input_summary(asset) for asset in rules_assets),
             "art": tuple(_input_summary(asset) for asset in art_assets),
@@ -1661,25 +1731,74 @@ def _build_eva_events(
     sections: dict[str, dict[str, str]],
     assets: _AssetIndex,
     voice_strings: dict[str, VoiceText],
+    entities: tuple[GameEntity, ...] = (),
 ) -> tuple[MediaAssociation, ...]:
     associations = []
+    entities_by_id = {entity.id.casefold(): entity for entity in entities}
     for event, values in sections.items():
-        fallback_text = values.get("text")
-        for faction in ("allied", "soviet", "yuri"):
-            for sample_name in _tokens(values.get(faction)):
+        fallback_voice_text = _eva_event_voice_text(event, values, entities_by_id)
+        for faction, fields in (
+            ("allied", ("allied",)),
+            ("soviet", ("soviet", "russian")),
+            ("yuri", ("yuri",)),
+        ):
+            sample_names = tuple(
+                dict.fromkeys(
+                    sample_name
+                    for field in fields
+                    for sample_name in _tokens(values.get(field))
+                )
+            )
+            for sample_name in sample_names:
                 sample = _audio_sample(sample_name, assets, voice_strings)
-                if sample.text is None and fallback_text:
-                    sample = MediaSample(
-                        sample.name,
-                        fallback_text,
-                        sample.asset,
-                        fallback_text,
-                        None,
+                if sample.text is None and fallback_voice_text is not None:
+                    sample = replace(
+                        sample,
+                        text=fallback_voice_text.text,
+                        original_text=fallback_voice_text.original_text,
+                        localized_text=fallback_voice_text.localized_text,
+                        text_label=fallback_voice_text.label,
                     )
                 associations.append(
                     MediaAssociation("voice", f"eva_{faction}", event, "eva", (sample,))
                 )
     return tuple(associations)
+
+
+def _eva_event_voice_text(
+    event: str,
+    values: dict[str, str],
+    entities_by_id: dict[str, GameEntity],
+) -> VoiceText | None:
+    configured = values.get("text")
+    if configured:
+        return VoiceText(f"EVA:{event}", configured, configured, None)
+
+    match = re.match(r"unit_(?:eva|sofia)_(.+)$", event, re.IGNORECASE)
+    if match is None:
+        return None
+    unit_key = match.group(1).casefold()
+    static_text = _EVA_UNIT_STATIC_TEXT.get(unit_key)
+    if static_text is not None:
+        original_text, localized_text = static_text
+        return VoiceText(
+            f"EVA:{event}",
+            localized_text,
+            original_text,
+            localized_text,
+        )
+    entity_id = _EVA_UNIT_ENTITY_IDS.get(unit_key)
+    entity = entities_by_id.get((entity_id or "").casefold())
+    if entity is None:
+        return None
+    localized_text = entity.display_name if entity.ui_name_resolved else None
+    original_text = entity.internal_name or entity.id
+    return VoiceText(
+        entity.ui_name or f"EVA:{event}",
+        localized_text or original_text,
+        original_text,
+        localized_text,
+    )
 
 
 def _body_sequence_preview_frame(

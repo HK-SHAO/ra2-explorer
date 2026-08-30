@@ -288,6 +288,9 @@ const mediaSlotLabels: Record<string, string> = {
   barrel_hva: "炮管动作",
   body_sequence: "主体动作",
   sound_event: "声音事件",
+  eva_allied: "盟军",
+  eva_soviet: "苏军",
+  eva_yuri: "尤里",
   buildup: "建造",
   activeanim: "运转",
   activeanimtwo: "辅助运转",
@@ -2847,7 +2850,11 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   const isText = ["ini", "map", "text", "csf"].includes(asset.format);
   const isAudio = audioFormats.includes(asset.format);
   const isModel = ["vxl", "hva"].includes(asset.format);
-  const activeAudioDetailTab = audioDetailTab === "associations" && associations !== null && associations.items.length === 0
+  const audioRelationshipItems = isAudio
+    ? (associations?.items || []).filter((item) => item.entity !== null)
+    : [];
+  const hasAudioRelationshipTabs = isAudio && audioRelationshipItems.length > 0;
+  const activeAudioDetailTab = audioDetailTab === "associations" && !hasAudioRelationshipTabs
     ? "data"
     : audioDetailTab;
   const frameCount = metadata?.frame_count || 1;
@@ -2883,7 +2890,22 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   if (!isAudio) metadataRows.push({ label: "来源", value: asset.storage_kind === "loose" ? "松散文件" : asset.storage_kind === "bag" ? "音频包" : "MIX 归档" });
   if (!isAudio && asset.crc !== null) metadataRows.push({ label: "CRC", value: crcLabel(asset.crc), tone: "mono" });
   if (!isAudio) metadataRows.push({ label: "识别", value: asset.confidence === "name" ? "名称库匹配" : asset.confidence === "content" ? "内容探测" : asset.confidence === "filename" ? "文件名" : asset.confidence === "index" ? "音频索引" : "未知" });
-  const audioMetadataTags = isAudio ? [
+  const audioContextItems = isAudio
+    ? (associations?.items || []).filter((item) => item.entity === null)
+    : [];
+  const audioEventTags = [...new Map(
+    audioContextItems
+      .filter((item) => item.event.trim())
+      .map((item) => [item.event.trim().toLocaleLowerCase(), item.event.trim()]),
+  ).values()].map((event) => ({ label: "事件 ID", value: event, mono: true }));
+  const audioVersionTags = [...new Set(
+    audioContextItems
+      .filter((item) => item.slot.startsWith("eva_"))
+      .map((item) => mediaSlotLabel(item.slot)),
+  )].map((version) => ({ label: "适用", value: version }));
+  const audioMetadataTags: Array<{ label: string; value: string; mono?: boolean }> = isAudio ? [
+    ...audioEventTags,
+    ...audioVersionTags,
     { label: "大小", value: formatBytes(asset.size) },
     ...(metadata?.duration_seconds !== undefined ? [{ label: "时长", value: formatDuration(metadata.duration_seconds) }] : []),
     ...(metadata?.sample_rate !== undefined ? [{ label: "采样率", value: `${metadata.sample_rate.toLocaleString("zh-CN")} Hz` }] : []),
@@ -2913,8 +2935,8 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
         </div>
       </div>
 
-      {isAudio && <div className="entity-detail-tabs asset-detail-tabs" role="tablist" aria-label="声音详细信息">
-        <button type="button" role="tab" id="audio-associations-tab" aria-controls="audio-associations-panel" aria-selected={activeAudioDetailTab === "associations"} className={activeAudioDetailTab === "associations" ? "active" : ""} disabled={associations !== null && associations.items.length === 0} onClick={() => selectAudioDetailTab("associations")}>关联 <em>{associations?.items.length || 0}</em></button>
+      {hasAudioRelationshipTabs && <div className="entity-detail-tabs asset-detail-tabs" role="tablist" aria-label="声音详细信息">
+        <button type="button" role="tab" id="audio-associations-tab" aria-controls="audio-associations-panel" aria-selected={activeAudioDetailTab === "associations"} className={activeAudioDetailTab === "associations" ? "active" : ""} onClick={() => selectAudioDetailTab("associations")}>关联 <em>{audioRelationshipItems.length}</em></button>
         <button type="button" role="tab" id="audio-data-tab" aria-controls="audio-data-panel" aria-selected={activeAudioDetailTab === "data"} className={activeAudioDetailTab === "data" ? "active" : ""} onClick={() => selectAudioDetailTab("data")}>数据 <em>{audioDataCount}</em></button>
       </div>}
 
@@ -2953,9 +2975,9 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
         {textAsset && <small>显示 {textAsset.returned_lines} / {textAsset.line_count} 行{textAsset.truncated ? " · 已截断" : ""}</small>}
       </div>}
 
-      {associations && associations.items.length > 0 && (!isAudio || activeAudioDetailTab === "associations") && <div className="asset-associations" role={isAudio ? "tabpanel" : undefined} id={isAudio ? "audio-associations-panel" : undefined} aria-labelledby={isAudio ? "audio-associations-tab" : undefined}>
+      {associations && (isAudio ? audioRelationshipItems : associations.items).length > 0 && (!isAudio || activeAudioDetailTab === "associations") && <div className="asset-associations" role={isAudio ? "tabpanel" : undefined} id={isAudio ? "audio-associations-panel" : undefined} aria-labelledby={isAudio ? "audio-associations-tab" : undefined}>
         <h3>关联事件</h3>
-        <div>{associations.items.map((item, index) => <article key={`${item.scope}-${item.event}-${item.slot}-${index}`}>
+        <div>{(isAudio ? audioRelationshipItems : associations.items).map((item, index) => <article key={`${item.scope}-${item.event}-${item.slot}-${index}`}>
           <span>{mediaSlotLabel(item.slot)}</span>
           <strong>{item.entity?.display_name || item.event}</strong>
           {item.entity && <code>{item.event}</code>}
@@ -2971,9 +2993,9 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
         {canChoosePalette && <label><span>配色表</span><select value={paletteId} onChange={(event) => setPaletteId(event.target.value)}><option value="">自动</option>{palettes.map((palette) => <option key={palette.id} value={palette.id}>{palette.display_name}</option>)}</select></label>}
       </div>}
 
-      {isAudio && activeAudioDetailTab === "data" && <div className="metadata sound-metadata" role="tabpanel" id="audio-data-panel" aria-labelledby="audio-data-tab">
-        <h3>资产信息</h3>
-        <ul className="sound-metadata-tags" aria-label="音频元信息">{audioMetadataTags.map((tag) => <li key={tag.label} title={`${tag.label}：${tag.value}`}><span>{tag.label}</span><strong className={tag.mono ? "mono" : ""}>{tag.value}</strong></li>)}</ul>
+      {isAudio && activeAudioDetailTab === "data" && <div className={`metadata sound-metadata ${hasAudioRelationshipTabs ? "" : "sound-metadata-direct"}`} role={hasAudioRelationshipTabs ? "tabpanel" : undefined} id={hasAudioRelationshipTabs ? "audio-data-panel" : undefined} aria-labelledby={hasAudioRelationshipTabs ? "audio-data-tab" : undefined}>
+        {hasAudioRelationshipTabs && <h3>资产信息</h3>}
+        <ul className="sound-metadata-tags" aria-label="音频元信息">{audioMetadataTags.map((tag) => <li key={`${tag.label}-${tag.value}`} title={`${tag.label}：${tag.value}`}><span>{tag.label}</span><strong className={tag.mono ? "mono" : ""}>{tag.value}</strong></li>)}</ul>
         {audioTextRows.length > 0 && <dl className="sound-transcript-list">{audioTextRows.map((row) => <div className={canUseCompactTextTag(row.value) ? "sound-transcript-tag" : "sound-transcript-block"} key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl>}
       </div>}
       {!isAudio && <div className="metadata">
