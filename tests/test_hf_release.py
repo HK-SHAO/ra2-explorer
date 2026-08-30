@@ -24,6 +24,7 @@ def test_hf_release_script_can_run_from_file_path() -> None:
 
     assert process.returncode == 0
     assert "--resource-pack" in process.stdout
+    assert "--space-bundle" in process.stdout
 
 
 def test_hf_release_manifest_pins_archive_size_and_digest(tmp_path) -> None:

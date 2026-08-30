@@ -198,6 +198,35 @@ def publish_resource_pack(pack_path: Path) -> None:
     print("Hugging Face derived resource synchronization completed")
 
 
+def publish_space_bundle(space_bundle: Path) -> None:
+    _load_local_release_environment(Path.cwd() / ".secrets" / "local.env")
+    token = os.environ.get("HF_TOKEN_RELEASE", "").strip()
+    repository = os.environ.get("HF_SPACE_RELEASE_REPO", "").strip()
+    if not token or not repository:
+        raise RuntimeError("HF release credentials are not configured")
+
+    from huggingface_hub import CommitOperationAdd, CommitOperationDelete, HfApi
+
+    api = HfApi(endpoint=OFFICIAL_HF_ENDPOINT, token=token)
+    additions, deletions = space_sync_plan(
+        space_bundle,
+        api.list_repo_files(repo_id=repository, repo_type="space"),
+    )
+    api.create_commit(
+        repo_id=repository,
+        repo_type="space",
+        operations=[
+            *(
+                CommitOperationAdd(path_in_repo=path, path_or_fileobj=local_path)
+                for path, local_path in additions
+            ),
+            *(CommitOperationDelete(path_in_repo=path) for path in deletions),
+        ],
+        commit_message="Deploy RA2 Explorer Space runtime",
+    )
+    print("Hugging Face Space runtime synchronization completed")
+
+
 def build_resource_part_manifest(
     pack_path: Path,
     parts_root: Path,
@@ -308,8 +337,10 @@ def main() -> int:
     if args.resource_pack is not None:
         publish_resource_pack(args.resource_pack.resolve())
     if args.archive is None:
-        if args.resource_pack is None:
-            parser.error("archive or --resource-pack is required")
+        if args.space_bundle is not None:
+            publish_space_bundle(args.space_bundle.resolve())
+        elif args.resource_pack is None:
+            parser.error("archive, --resource-pack or --space-bundle is required")
         return 0
     if not args.version:
         parser.error("--version is required with archive")

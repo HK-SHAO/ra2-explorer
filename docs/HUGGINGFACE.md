@@ -34,6 +34,12 @@ Space 仓库需要预先配置为公开仓库，并在 GitHub Actions 中保存 
 
 脚本只接受 `contains_game_files=false` 的 RA2 Explorer 资源包，并校验安全路径、条目上限、允许扩展名、语义快照、产物数量和字节数。通过后生成 4 MiB 内容寻址分片并小批提交；重复运行会跳过已存在的分片，最后才原子更新总 SHA-256 和激活清单。小分片直接走已验证可达的 Hub Git API，避免部分国内链路无法连接 LFS/Xet 对象存储时整包卡住，也不必在中断后重传整个约 178 MiB 文件。官方上传接口说明见 [Upload files to the Hub](https://huggingface.co/docs/huggingface_hub/en/guides/upload)。
 
+首次资源上传完成后，可以不创建应用 Release，单独激活或修复已经审计的 Space 运行文件：
+
+```bat
+.venv\Scripts\python.exe scripts\publish_hf_release.py --space-bundle ".outputs\huggingface-space"
+```
+
 正常版本发布只需推送 `vX.Y.Z` tag。GitHub workflow 会：
 
 1. 重跑全部测试、Ruff 与隐私扫描；
