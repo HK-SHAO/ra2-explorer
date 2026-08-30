@@ -50,6 +50,8 @@ Space 仓库需要预先配置为公开仓库，并在 GitHub Actions 中保存 
 
 同步计划不会删除 `.gitattributes`、`resources/` 或旧版 `releases/`。若资源分片或总 SHA-256 尚未存在，发布会明确失败，避免把无法启动的 Docker 配置推到 Space。
 
+正常 CI 使用 Hugging Face 的大文件存储上传 Windows ZIP。若维护者本机只能访问 Hub Git API、不能连接 LFS/Xet 上传域，可对不超过 64 MiB 的发行 ZIP 显式增加 `--force-regular-archive`；该回退会把 ZIP 作为普通 Git blob 提交，只用于受限网络的一次性恢复，不作为默认工作流。
+
 ## 恢复与更新
 
 - 应用 BUG、性能和 UI 更新：发布新 tag；用户可以在设置中自行检查并选择下载，本地 `.runtime` 保留。

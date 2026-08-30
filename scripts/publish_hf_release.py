@@ -73,6 +73,7 @@ def publish_release(
     *,
     notes: str = "",
     space_bundle: Path | None = None,
+    force_regular_archive: bool = False,
 ) -> None:
     _load_local_release_environment(Path.cwd() / ".secrets" / "local.env")
     token = os.environ.get("HF_TOKEN_RELEASE", "").strip()
@@ -86,14 +87,18 @@ def publish_release(
     normalized = str(manifest["version"])
     encoded = (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
+    _prepare_hf_environment()
     from huggingface_hub import CommitOperationAdd, CommitOperationDelete, HfApi
 
     api = HfApi(endpoint=OFFICIAL_HF_ENDPOINT, token=token)
+    archive_operation = CommitOperationAdd(
+        path_in_repo=f"releases/v{normalized}/{UPDATE_ASSET_NAME}",
+        path_or_fileobj=archive,
+    )
+    if force_regular_archive:
+        _force_regular_upload(archive_operation)
     operations = [
-        CommitOperationAdd(
-            path_in_repo=f"releases/v{normalized}/{UPDATE_ASSET_NAME}",
-            path_or_fileobj=archive,
-        ),
+        archive_operation,
         CommitOperationAdd(
             path_in_repo=f"releases/v{normalized}/manifest.json",
             path_or_fileobj=io.BytesIO(encoded),
@@ -139,8 +144,7 @@ def publish_resource_pack(pack_path: Path) -> None:
     ).encode("utf-8")
     checksum = f"{manifest['archive']['sha256']}  default.ra2pack\n".encode()
 
-    os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
-    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+    _prepare_hf_environment(disable_xet=True)
     from huggingface_hub import CommitOperationAdd, CommitOperationDelete, HfApi
 
     api = HfApi(endpoint=OFFICIAL_HF_ENDPOINT, token=token)
@@ -205,6 +209,7 @@ def publish_space_bundle(space_bundle: Path) -> None:
     if not token or not repository:
         raise RuntimeError("HF release credentials are not configured")
 
+    _prepare_hf_environment()
     from huggingface_hub import CommitOperationAdd, CommitOperationDelete, HfApi
 
     api = HfApi(endpoint=OFFICIAL_HF_ENDPOINT, token=token)
@@ -277,6 +282,22 @@ def build_resource_part_manifest(
     )
 
 
+def _force_regular_upload(operation: object) -> None:
+    upload_info = getattr(operation, "upload_info", None)
+    size = int(getattr(upload_info, "size", 0))
+    if size <= 0 or size > 64 * 1024 * 1024:
+        raise ValueError("regular upload fallback only supports files up to 64 MiB")
+    operation._upload_mode = "regular"  # type: ignore[attr-defined]
+    operation._should_ignore = False  # type: ignore[attr-defined]
+    operation._remote_oid = None  # type: ignore[attr-defined]
+
+
+def _prepare_hf_environment(*, disable_xet: bool = False) -> None:
+    os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
+    if disable_xet:
+        os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+
+
 def space_sync_plan(
     bundle: Path,
     remote_files: list[str],
@@ -333,6 +354,7 @@ def main() -> int:
     parser.add_argument("--notes-file", type=Path)
     parser.add_argument("--space-bundle", type=Path)
     parser.add_argument("--resource-pack", type=Path)
+    parser.add_argument("--force-regular-archive", action="store_true")
     args = parser.parse_args()
     if args.resource_pack is not None:
         publish_resource_pack(args.resource_pack.resolve())
@@ -352,6 +374,7 @@ def main() -> int:
         args.version,
         notes=notes,
         space_bundle=args.space_bundle.resolve() if args.space_bundle else None,
+        force_regular_archive=args.force_regular_archive,
     )
     return 0
 

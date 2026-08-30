@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from scripts.publish_hf_release import (
+    _force_regular_upload,
     build_manifest,
     build_resource_part_manifest,
     space_sync_plan,
@@ -25,6 +26,24 @@ def test_hf_release_script_can_run_from_file_path() -> None:
     assert process.returncode == 0
     assert "--resource-pack" in process.stdout
     assert "--space-bundle" in process.stdout
+    assert "--force-regular-archive" in process.stdout
+
+
+def test_regular_upload_fallback_is_explicitly_bounded(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("HF_HUB_ENABLE_HF_TRANSFER", raising=False)
+    from huggingface_hub import CommitOperationAdd
+
+    archive = tmp_path / "release.zip"
+    archive.write_bytes(b"release")
+    operation = CommitOperationAdd(
+        path_in_repo="releases/release.zip",
+        path_or_fileobj=archive,
+    )
+
+    _force_regular_upload(operation)
+
+    assert operation._upload_mode == "regular"
+    assert operation._should_ignore is False
 
 
 def test_hf_release_manifest_pins_archive_size_and_digest(tmp_path) -> None:
