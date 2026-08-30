@@ -18,6 +18,8 @@ from ra2_explorer.background import (
 )
 from ra2_explorer.config import DEFAULT_HOST, DEFAULT_PORT, load_settings
 from ra2_explorer.discovery import discover_installations
+from ra2_explorer.errors import Ra2ExplorerError
+from ra2_explorer.package_builder import build_windows_package
 from ra2_explorer.reference_data import sync_audio_transcript, sync_known_names
 from ra2_explorer.semantic import ENTITY_KINDS
 from ra2_explorer.validation import VALIDATED_FORMATS, validate_source
@@ -100,6 +102,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     semantic_check.add_argument("source_id")
     semantic_check.add_argument("--limit", type=int, default=20)
+
+    package = subcommands.add_parser("package", help="构建可双击运行的 Windows 发行目录")
+    package.add_argument("--output", type=Path, default=Path(".outputs") / "RA2 Explorer")
+    package.add_argument("--game-dir", type=Path)
+    package.add_argument("--sync-reference-data", action="store_true")
+    package.add_argument("--overwrite", action="store_true")
     return parser
 
 
@@ -109,6 +117,20 @@ def main(argv: list[str] | None = None) -> int:
             if hasattr(stream, "reconfigure"):
                 stream.reconfigure(encoding="utf-8")
     args = build_parser().parse_args(argv)
+    if args.command == "package":
+        try:
+            result = build_windows_package(
+                args.output,
+                game_dir=args.game_dir,
+                sync_reference_data=args.sync_reference_data,
+                overwrite=args.overwrite,
+            )
+        except Ra2ExplorerError as error:
+            print(str(error), file=sys.stderr)
+            return 1
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
     settings = load_settings()
     services = Services(settings)
 

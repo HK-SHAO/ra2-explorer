@@ -23,6 +23,9 @@ dev = [
   "pytest>=8.4,<10",
   "ruff>=0.12,<1",
 ]
+release = [
+  "pyinstaller>=6.15,<7",
+]
 
 [project.scripts]
 ra2exp = "ra2_explorer.cli:main"
