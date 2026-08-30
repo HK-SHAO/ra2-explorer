@@ -261,7 +261,7 @@ def _write_manifest(
         "version": __version__,
         "mode": mode,
         "includes_game_data": mode == "portable",
-        "shareable": mode != "linked",
+        "machine_bound": mode == "linked",
     }
     (package_root / MARKER_FILE).write_text(
         json.dumps(marker, ensure_ascii=False, indent=2) + "\n",
@@ -473,7 +473,7 @@ def build_windows_package(
             "output": str(destination),
             "version": __version__,
             "mode": mode,
-            "shareable": mode != "linked",
+            "machine_bound": mode == "linked",
             "includes_game_data": mode == "portable",
             "copied_files": copied_files,
             "copied_bytes": copied_bytes,

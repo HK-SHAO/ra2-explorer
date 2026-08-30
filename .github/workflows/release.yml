@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-local-web-app:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: cmd
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install build dependencies
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python.exe -m pip install .[dev,release]
+          cd frontend
+          npm ci
+      - name: Prepare pinned reference data
+        run: |
+          .venv\Scripts\ra2exp.exe sync-names
+          .venv\Scripts\ra2exp.exe sync-audio-text
+      - name: Validate source and privacy
+        run: |
+          .venv\Scripts\python.exe -m pytest
+          .venv\Scripts\python.exe -m ruff check src tests packaging\hooks
+          .venv\Scripts\python.exe scripts\privacy_scan.py --mode tracked
+          .venv\Scripts\python.exe scripts\privacy_scan.py --mode history
+      - name: Build local web application
+        run: scripts\build_windows.cmd
+      - name: Smoke test packaged CLI
+        run: .outputs\RA2-Explorer-Web\ra2exp.exe --help
+      - name: Create archive
+        run: tar -a -c -f .outputs\RA2-Explorer-Web-x64.zip -C .outputs RA2-Explorer-Web
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RA2-Explorer-Web-x64
+          path: .outputs\RA2-Explorer-Web-x64.zip
+          if-no-files-found: error
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create %GITHUB_REF_NAME% .outputs\RA2-Explorer-Web-x64.zip --verify-tag --generate-notes --title %GITHUB_REF_NAME%

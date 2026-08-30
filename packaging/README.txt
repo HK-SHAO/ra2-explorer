@@ -8,7 +8,7 @@ Edge 或 Chrome 打开界面。首次使用时，选择你合法安装的《红�
 
 命令行工具为 “ra2exp.exe”。在同一台电脑上预先索引本机游戏目录、但不复制游戏文件：
 
-  ra2exp.exe package --game-dir "D:\Games\RA2" --sync-reference-data --output "D:\RA2 Explorer Portable"
+  ra2exp.exe package --game-dir "D:\Games\RA2" --sync-reference-data --output "D:\RA2 Explorer Local"
 
 这个 linked 构建只适用于游戏仍位于原路径的当前电脑，不应分享。确实需要可移动的完整目录时，
 额外加入 --include-game-data；此模式明确排除游戏 EXE、DLL 和脚本，但体积会接近原始游戏数据。
