@@ -13,6 +13,8 @@ RA2 Explorer 是一个在本机浏览器中运行的《命令与征服：红色�
 
 当前发行包面向 Windows x64。它不包含游戏文件；你需要先通过合法渠道安装游戏。安装目录识别与导入说明见 [游戏文件指南](docs/GAME_FILES.md)。
 
+应用可由用户主动检查 GitHub Release 更新，不会静默下载或覆盖程序；更新策略见 [应用更新说明](docs/UPDATES.md)。
+
 ## 可以浏览什么
 
 - 载具、航空器、步兵和建筑，以及其主体、炮塔、炮管、动作、武器效果、残骸与建造/运行图层；
@@ -59,7 +61,7 @@ ra2exp.exe package --game-dir "D:\Games\RA2" --output "D:\RA2 Explorer Local"
 
 ## 开发
 
-源码搭建、测试、后台服务、CLI 与发布命令已移至 [开发指南](docs/DEVELOPMENT.md)；实现边界见 [架构说明](docs/ARCHITECTURE.md)。
+源码搭建、测试、后台服务、CLI 与发布命令已移至 [开发指南](docs/DEVELOPMENT.md)；实现边界见 [架构说明](docs/ARCHITECTURE.md)，当前官方安装实际参与解析的输入见 [实际解析输入](docs/GAME_SOURCE_INPUTS.md)。
 
 ## 许可证
 

@@ -68,6 +68,7 @@ from ra2_explorer.semantic import (
     SemanticLibrary,
 )
 from ra2_explorer.storage import Database
+from ra2_explorer.updates import check_for_updates
 from ra2_explorer.video import VideoTranscoder
 
 INSPECTABLE_FORMATS = {
@@ -165,6 +166,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "version": __version__,
             "pid": os.getpid(),
         }
+
+    @app.get("/api/updates/latest")
+    async def latest_update() -> dict[str, object]:
+        try:
+            return await run_in_threadpool(check_for_updates)
+        except Ra2ExplorerError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
 
     @app.get("/api/sources")
     def sources() -> list[dict[str, object]]:

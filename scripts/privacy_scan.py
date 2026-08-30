@@ -20,8 +20,10 @@ SAFE_SECRET_VALUES = {
     "none",
     "null",
     "placeholder",
+    "read",
     "test",
     "true",
+    "write",
 }
 IGNORED_PATHS = (
     ".git/*",

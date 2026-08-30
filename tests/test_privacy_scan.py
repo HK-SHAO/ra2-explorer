@@ -22,7 +22,10 @@ def test_scan_reports_a_secret_without_echoing_it() -> None:
 
 
 def test_scan_allows_placeholders_and_github_noreply_addresses() -> None:
-    content = b"API_KEY=${API_KEY}\nauthor=123+name@users.noreply.github.com\n"
+    content = (
+        b"API_KEY=${API_KEY}\nauthor=123+name@users.noreply.github.com\n"
+        b"id-token: write\n"
+    )
 
     assert privacy_scan.scan_text("config.example", content) == []
 

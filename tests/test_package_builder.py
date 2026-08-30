@@ -9,6 +9,14 @@ from ra2_explorer.errors import Ra2ExplorerError
 from ra2_explorer.package_builder import audit_distribution, copy_game_data
 
 
+def _minimal_distribution(package: Path) -> None:
+    package.mkdir()
+    (package / "RA2 Explorer.exe").write_bytes(b"launcher")
+    (package / "ra2exp.exe").write_bytes(b"cli")
+    (package / "README.txt").write_text("user guide", encoding="utf-8")
+    (package / "LICENSE").write_text("MIT", encoding="utf-8")
+
+
 def test_copy_game_data_keeps_assets_and_excludes_executables(tmp_path: Path) -> None:
     source = tmp_path / "game"
     target = tmp_path / "portable"
@@ -30,11 +38,11 @@ def test_copy_game_data_keeps_assets_and_excludes_executables(tmp_path: Path) ->
 
 def test_distribution_audit_rejects_build_machine_paths(tmp_path: Path) -> None:
     package = tmp_path / "package"
-    package.mkdir()
-    (package / "RA2 Explorer.exe").write_bytes(b"launcher")
-    (package / "ra2exp.exe").write_bytes(b"cli")
+    _minimal_distribution(package)
     private_root = tmp_path / "private-workspace"
-    (package / "leak.txt").write_text(str(private_root.resolve()), encoding="utf-8")
+    internal = package / "_internal"
+    internal.mkdir()
+    (internal / "leak.txt").write_text(str(private_root.resolve()), encoding="utf-8")
 
     with pytest.raises(Ra2ExplorerError, match="本机绝对路径"):
         audit_distribution(package, private_paths=(private_root,))
@@ -44,20 +52,18 @@ def test_distribution_audit_ignores_upstream_paths_in_native_dependencies(
     tmp_path: Path,
 ) -> None:
     package = tmp_path / "package"
-    package.mkdir()
-    (package / "RA2 Explorer.exe").write_bytes(b"launcher")
-    (package / "ra2exp.exe").write_bytes(b"cli")
+    _minimal_distribution(package)
     public_ci_root = tmp_path / "runner-home"
-    (package / "third-party.pyd").write_bytes(str(public_ci_root.resolve()).encode())
+    internal = package / "_internal"
+    internal.mkdir()
+    (internal / "third-party.pyd").write_bytes(str(public_ci_root.resolve()).encode())
 
     audit_distribution(package, private_paths=(public_ci_root,))
 
 
 def test_distribution_audit_allows_only_linked_path_in_local_index(tmp_path: Path) -> None:
     package = tmp_path / "package"
-    package.mkdir()
-    (package / "RA2 Explorer.exe").write_bytes(b"launcher")
-    (package / "ra2exp.exe").write_bytes(b"cli")
+    _minimal_distribution(package)
     database = package / ".runtime" / "RA2MD-Ext" / "index" / "ra2-explorer.db"
     database.parent.mkdir(parents=True)
     game_root = tmp_path / "official-game"
@@ -73,6 +79,17 @@ def test_distribution_audit_allows_only_linked_path_in_local_index(tmp_path: Pat
         private_paths=(game_root,),
         linked_game_root=game_root,
     )
+
+
+def test_distribution_audit_rejects_project_development_files(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    _minimal_distribution(package)
+    source = package / "src" / "ra2_explorer"
+    source.mkdir(parents=True)
+    (source / "api.py").write_text("print('development')", encoding="utf-8")
+
+    with pytest.raises(Ra2ExplorerError, match="非运行文件|开发文件"):
+        audit_distribution(package)
 
 
 def test_package_cli_requires_explicit_flag_to_copy_game_data() -> None:

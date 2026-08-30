@@ -8,6 +8,8 @@ RA2 Explorer 作为本地 Web 应用发布，不使用 GitHub Pages，也不采�
 
 本机另可导出 `.ra2pack` 来备份已生成的索引、关联、预览和转码媒体。该目录位于被 Git 与发行构建排除的 `.runtime\RA2MD-Ext\packages`，不会进入公共下载；详见 [派生资源包说明](RESOURCE_PACKS.md)。
 
+发行目录审计只允许两个启动程序、`_internal` 运行依赖、编译后的前端、MIT `LICENSE`、简短 `README.txt`、运行标记和可选 `.runtime`。源码、项目文档、测试、构建脚本、Git 元数据、Node 依赖、source map 与 Python/TypeScript 源文件都会使构建失败。更新发布与用户确认流程见 [应用更新说明](UPDATES.md)。
+
 ## 三种构建模式
 
 | 模式 | 命令 | 游戏数据 | 适用范围 | 用途 |

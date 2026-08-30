@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   windows-local-web-app:
@@ -64,6 +66,10 @@ jobs:
         run: .outputs\RA2-Explorer-Web\ra2exp.exe --help
       - name: Create archive
         run: tar -a -c -f .outputs\RA2-Explorer-Web-x64.zip -C .outputs RA2-Explorer-Web
+      - name: Attest release archive
+        uses: actions/attest@v4
+        with:
+          subject-path: .outputs/RA2-Explorer-Web-x64.zip
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
         with:

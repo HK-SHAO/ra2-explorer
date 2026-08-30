@@ -59,6 +59,49 @@ DENIED_GAME_SUFFIXES = frozenset(
     {".bat", ".cmd", ".com", ".dll", ".exe", ".lnk", ".msi", ".pif", ".scr", ".sys"}
 )
 VENDORED_NATIVE_SUFFIXES = frozenset({".dll", ".pyd"})
+DENIED_DEVELOPMENT_DIRECTORIES = frozenset(
+    {
+        ".agents",
+        ".git",
+        ".github",
+        ".pytest_cache",
+        ".ruff_cache",
+        "docs",
+        "node_modules",
+        "packaging",
+        "scripts",
+        "src",
+        "tests",
+    }
+)
+DENIED_SOURCE_SUFFIXES = frozenset(
+    {
+        ".lock",
+        ".map",
+        ".md",
+        ".py",
+        ".pyc",
+        ".pyo",
+        ".spec",
+        ".toml",
+        ".ts",
+        ".tsx",
+        ".yaml",
+        ".yml",
+    }
+)
+ALLOWED_DISTRIBUTION_ROOT_ENTRIES = frozenset(
+    {
+        ".ra2exp-distribution",
+        ".runtime",
+        "_internal",
+        "LICENSE",
+        "portable-manifest.json",
+        "RA2 Explorer.exe",
+        "ra2exp.exe",
+        "README.txt",
+    }
+)
 MARKER_FILE = ".ra2exp-distribution"
 DistributionMode = Literal["generic", "linked", "portable"]
 
@@ -334,9 +377,23 @@ def audit_distribution(
     private_paths: Iterable[Path] = (),
     linked_game_root: Path | None = None,
 ) -> None:
-    required = (package_root / "RA2 Explorer.exe", package_root / "ra2exp.exe")
+    required = (
+        package_root / "RA2 Explorer.exe",
+        package_root / "ra2exp.exe",
+        package_root / "README.txt",
+        package_root / "LICENSE",
+    )
     if not all(path.is_file() for path in required):
-        raise Ra2ExplorerError("发行目录缺少 Windows 启动程序")
+        raise Ra2ExplorerError("发行目录缺少启动程序、许可证或用户说明")
+    unexpected_root_entries = sorted(
+        path.name
+        for path in package_root.iterdir()
+        if path.name not in ALLOWED_DISTRIBUTION_ROOT_ENTRIES
+    )
+    if unexpected_root_entries:
+        raise Ra2ExplorerError(
+            f"发行目录包含非运行文件：{', '.join(unexpected_root_entries[:8])}"
+        )
     game_root = package_root / ".runtime" / "RA2MD"
     if game_root.is_dir():
         denied = [
@@ -358,6 +415,16 @@ def audit_distribution(
     for file_path in package_root.rglob("*"):
         if not file_path.is_file():
             continue
+        relative = file_path.relative_to(package_root)
+        in_game_data = len(relative.parts) >= 2 and relative.parts[:2] == (
+            ".runtime",
+            "RA2MD",
+        )
+        if any(
+            part.casefold() in DENIED_DEVELOPMENT_DIRECTORIES
+            for part in relative.parts[:-1]
+        ) or (not in_game_data and file_path.suffix.casefold() in DENIED_SOURCE_SUFFIXES):
+            raise Ra2ExplorerError(f"发行目录包含开发文件：{relative.as_posix()}")
         if file_path.resolve() in allowed_private_files:
             continue
         # Native dependencies can retain paths from their upstream public CI
