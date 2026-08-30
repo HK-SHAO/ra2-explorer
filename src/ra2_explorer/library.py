@@ -449,7 +449,7 @@ class AssetReader:
             )
         else:
             data = self._read_storage(asset, source)
-        return asset, self._store(cache_path, data)
+        return asset, data
 
     def materialize(self, asset_id: str) -> tuple[dict[str, object], Path]:
         asset, data = self.read(asset_id)
@@ -535,11 +535,5 @@ class AssetReader:
             identity=(asset["id"], asset["display_name"]),
             extension=extension,
         )
-
-    def _store(self, path: Path | None, data: bytes) -> bytes:
-        if path is not None and self.derived is not None:
-            self.derived.write_bytes(path, data)
-        return data
-
 
 __all__ = ["AssetReader", "NameResolver", "SourceLibrary"]

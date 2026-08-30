@@ -474,7 +474,8 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
         if path.is_file() and path.name != "manifest.json"
     }
     assert settings.derived_root.joinpath("manifest.json").is_file()
-    assert artifact_kinds >= {"audio", "extracted", "metadata", "models", "previews"}
+    assert artifact_kinds >= {"audio", "metadata", "models", "previews"}
+    assert "extracted" not in artifact_kinds
 
     removed = client.delete(f"/api/sources/{source['id']}")
     assert removed.status_code == 200

@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import uuid
 from contextlib import suppress
 from pathlib import Path
@@ -12,7 +13,9 @@ from typing import Any
 from ra2_explorer.errors import Ra2ExplorerError
 
 DERIVED_SCHEMA_VERSION = 1
-_KINDS = {"audio", "extracted", "metadata", "models", "previews", "video"}
+ARTIFACT_KINDS = frozenset(
+    {"audio", "extracted", "metadata", "models", "previews", "video"}
+)
 _UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -47,7 +50,7 @@ class DerivedStore:
         identity: tuple[object, ...],
         extension: str,
     ) -> Path:
-        if kind not in _KINDS:
+        if kind not in ARTIFACT_KINDS:
             raise Ra2ExplorerError("未知派生产物类型")
         safe_source = _safe_part(source_id)
         safe_revision = _safe_part(revision)
@@ -112,11 +115,70 @@ class DerivedStore:
                 raise
             temporary.unlink(missing_ok=True)
 
+    def stats(self) -> dict[str, object]:
+        kinds = {
+            kind: {"files": 0, "bytes": 0}
+            for kind in sorted(ARTIFACT_KINDS)
+        }
+        total_files = 0
+        total_bytes = 0
+        for path in self.artifacts_root.rglob("*"):
+            if not path.is_file():
+                continue
+            size = path.stat().st_size
+            total_files += 1
+            total_bytes += size
+            relative = path.relative_to(self.artifacts_root)
+            if len(relative.parts) >= 4 and relative.parts[2] in kinds:
+                entry = kinds[relative.parts[2]]
+                entry["files"] += 1
+                entry["bytes"] += size
+        return {
+            "root": str(self.root),
+            "files": total_files,
+            "bytes": total_bytes,
+            "kinds": kinds,
+        }
+
+    def prune(self, kinds: tuple[str, ...] = ("extracted",)) -> dict[str, object]:
+        requested = tuple(dict.fromkeys(kinds))
+        invalid = set(requested) - ARTIFACT_KINDS
+        if invalid:
+            raise Ra2ExplorerError(f"未知派生产物类型：{', '.join(sorted(invalid))}")
+        removed_files = 0
+        removed_bytes = 0
+        targets = [
+            path
+            for path in self.artifacts_root.glob("*/*/*")
+            if path.is_dir() and path.name in requested
+        ]
+        for target in targets:
+            self._validate_artifact_directory(target)
+            for path in target.rglob("*"):
+                if path.is_file():
+                    removed_files += 1
+                    removed_bytes += path.stat().st_size
+            shutil.rmtree(target)
+        return {
+            "kinds": list(requested),
+            "removed_files": removed_files,
+            "removed_bytes": removed_bytes,
+            "remaining": self.stats(),
+        }
+
     def _validate_target(self, path: Path) -> None:
         try:
             path.resolve().relative_to(self.artifacts_root)
         except ValueError as error:
             raise Ra2ExplorerError("派生产物只能写入 RA2MD-Ext") from error
+
+    def _validate_artifact_directory(self, path: Path) -> None:
+        try:
+            relative = path.resolve().relative_to(self.artifacts_root)
+        except ValueError as error:
+            raise Ra2ExplorerError("派生产物只能从 RA2MD-Ext 清理") from error
+        if len(relative.parts) != 3 or relative.parts[2] not in ARTIFACT_KINDS:
+            raise Ra2ExplorerError("拒绝清理非派生产物目录")
 
     @staticmethod
     def _atomic_write(path: Path, data: bytes) -> None:
@@ -149,4 +211,4 @@ def _safe_part(value: object) -> str:
     return (cleaned or "default")[:96]
 
 
-__all__ = ["DERIVED_SCHEMA_VERSION", "DerivedStore"]
+__all__ = ["ARTIFACT_KINDS", "DERIVED_SCHEMA_VERSION", "DerivedStore"]

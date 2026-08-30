@@ -9,7 +9,8 @@ from ra2_explorer.api import create_app
 from ra2_explorer.codecs.mix import MixHashType, build_mix
 from ra2_explorer.codecs.wav import parse_wav
 from ra2_explorer.config import Settings
-from ra2_explorer.library import SourceLibrary
+from ra2_explorer.derived import DerivedStore
+from ra2_explorer.library import AssetReader, SourceLibrary
 from ra2_explorer.storage import Database
 
 
@@ -75,6 +76,11 @@ def test_audio_bag_entries_are_indexed_and_streamed_as_wav(tmp_path: Path) -> No
     assert exported.headers["content-type"] == "audio/wav"
     assert exported.content.startswith(b"RIFF")
     assert list(settings.derived_root.rglob("*.bag")) == []
+    assert list(settings.derived_root.rglob("*.bagseg")) == []
+
+    AssetReader(database, DerivedStore(settings.derived_root)).materialize(
+        str(ima_asset["id"])
+    )
     bag_segments = list(settings.derived_root.rglob("*.bagseg"))
     assert bag_segments
     assert max(path.stat().st_size for path in bag_segments) <= max(len(pcm), len(ima))

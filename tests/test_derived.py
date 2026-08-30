@@ -66,3 +66,32 @@ def test_artifact_path_compacts_long_cache_identity(tmp_path: Path) -> None:
 
     assert len(path.stem) <= 48
     assert path != different
+
+
+def test_stats_and_prune_remove_only_selected_rebuildable_kind(tmp_path: Path) -> None:
+    store = DerivedStore(tmp_path / "RA2MD-Ext")
+    extracted = store.artifact_path(
+        "extracted",
+        source_id="source",
+        revision="revision",
+        identity=("raw",),
+        extension="bin",
+    )
+    preview = store.artifact_path(
+        "previews",
+        source_id="source",
+        revision="revision",
+        identity=("preview",),
+        extension="png",
+    )
+    store.write_bytes(extracted, b"raw asset")
+    store.write_bytes(preview, b"preview")
+
+    before = store.stats()
+    result = store.prune()
+
+    assert before["bytes"] == 16
+    assert result["removed_files"] == 1
+    assert result["removed_bytes"] == 9
+    assert not extracted.exists()
+    assert preview.read_bytes() == b"preview"

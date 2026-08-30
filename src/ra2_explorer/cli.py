@@ -17,6 +17,7 @@ from ra2_explorer.background import (
     uninstall_autostart,
 )
 from ra2_explorer.config import DEFAULT_HOST, DEFAULT_PORT, load_settings
+from ra2_explorer.derived import ARTIFACT_KINDS
 from ra2_explorer.discovery import discover_installations
 from ra2_explorer.errors import Ra2ExplorerError
 from ra2_explorer.package_builder import build_windows_package
@@ -108,6 +109,10 @@ def build_parser() -> argparse.ArgumentParser:
     package.add_argument("--game-dir", type=Path)
     package.add_argument("--sync-reference-data", action="store_true")
     package.add_argument("--overwrite", action="store_true")
+
+    cache = subcommands.add_parser("cache", help="统计或清理可再生成的本地缓存")
+    cache.add_argument("action", choices=("stats", "prune"))
+    cache.add_argument("--kind", action="append", choices=sorted(ARTIFACT_KINDS))
     return parser
 
 
@@ -220,7 +225,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         extracted_bytes = 0
         for asset in page["items"]:
-            _, data = services.reader.read(str(asset["id"]))
+            _, path = services.reader.materialize(str(asset["id"]))
+            data = path.read_bytes()
             extracted_bytes += len(data)
         print(
             json.dumps(
@@ -235,6 +241,15 @@ def main(argv: list[str] | None = None) -> int:
                 indent=2,
             )
         )
+        return 0
+
+    if args.command == "cache":
+        result = (
+            services.derived.stats()
+            if args.action == "stats"
+            else services.derived.prune(tuple(args.kind or ("extracted",)))
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "verify":
