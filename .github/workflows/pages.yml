@@ -48,15 +48,18 @@ jobs:
       - name: Verify archive before extraction
         run: python scripts\verify_pages_snapshot.py .pages-data\RA2-Explorer-Pages-Data.zip --lock packaging\pages-data.json
       - name: Build static application
+        working-directory: frontend
         run: |
-          cd frontend
           npm ci
           npm run build:pages
       - name: Assemble and verify site
         run: |
+          if not exist frontend\dist\index.html exit /b 1
+          if not exist frontend\dist\assets exit /b 1
           mkdir frontend\dist\data
           tar -xf .pages-data\RA2-Explorer-Pages-Data.zip -C frontend\dist\data
           copy /y NUL frontend\dist\.nojekyll >NUL
+          if not exist frontend\dist\data\manifest.json exit /b 1
           python scripts\verify_pages_snapshot.py frontend\dist\data
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v4
