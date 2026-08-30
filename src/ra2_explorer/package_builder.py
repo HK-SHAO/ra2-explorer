@@ -22,6 +22,7 @@ from ra2_explorer.config import (
 )
 from ra2_explorer.errors import Ra2ExplorerError
 from ra2_explorer.reference_data import sync_audio_transcript, sync_known_names
+from ra2_explorer.updates import UPDATE_CHANNEL_FILE, load_public_update_channel
 
 GAME_DATA_SUFFIXES = frozenset(
     {
@@ -100,6 +101,7 @@ ALLOWED_DISTRIBUTION_ROOT_ENTRIES = frozenset(
         "RA2 Explorer.exe",
         "ra2exp.exe",
         "README.txt",
+        UPDATE_CHANNEL_FILE,
     }
 )
 MARKER_FILE = ".ra2exp-distribution"
@@ -288,6 +290,16 @@ def _copy_reference_data(source_root: Path, package_root: Path) -> None:
             shutil.copy2(source, target)
 
 
+def _write_public_update_channel(source_root: Path, package_root: Path) -> None:
+    channel = load_public_update_channel(source_root)
+    if channel is None:
+        return
+    (package_root / UPDATE_CHANNEL_FILE).write_text(
+        json.dumps({"schema": 1, **channel}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _seal_portable_database(database_path: Path, source_id: str) -> None:
     with sqlite3.connect(database_path) as connection:
         connection.execute(
@@ -387,6 +399,8 @@ def audit_distribution(
     )
     if not all(path.is_file() for path in required):
         raise Ra2ExplorerError("发行目录缺少启动程序、许可证或用户说明")
+    if (package_root / UPDATE_CHANNEL_FILE).is_file():
+        load_public_update_channel(package_root)
     unexpected_root_entries = sorted(
         path.name
         for path in package_root.iterdir()
@@ -505,6 +519,7 @@ def build_windows_package(
         source_files = 0
         source_bytes = 0
         _copy_reference_data(source_root, package_root)
+        _write_public_update_channel(source_root, package_root)
         settings = None
         if sync_reference_data:
             settings = load_settings(working_directory=package_root)

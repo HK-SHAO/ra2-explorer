@@ -2,7 +2,7 @@
 
 ## 用户侧流程
 
-RA2 Explorer 通过 GitHub Releases 发布版本。应用只在用户点击“检查更新”，或用户明确开启“应用启动时检查更新”后，请求项目的 latest Release；不会静默下载或安装。自动检查发现新版本时只在左侧“设置”入口显示提示点。
+RA2 Explorer 在 GitHub Releases 发布版本，并把同一安装包和签名清单同步到 Hugging Face Space。应用只在用户点击“检查更新”，或用户明确开启“应用启动时检查更新”后联网；默认从 `https://hf-mirror.com` 读取清单和安装包，镜像不可用时才查询 GitHub，不会静默下载或安装。自动检查发现新版本时只在左侧“设置”入口显示提示点。
 
 发现新版本后，设置页显示版本号、发布时间、文件大小、SHA-256 摘要和 Release 说明。用户可以选择打开 Release 页面或下载 `RA2-Explorer-Web-x64.zip`。更新前关闭 RA2 Explorer，替换程序文件并保留原目录中的 `.runtime`，已有索引、预览、设置和 `.ra2pack` 不需要重新生成。
 
@@ -12,9 +12,12 @@ RA2 Explorer 通过 GitHub Releases 发布版本。应用只在用户点击“�
 
 1. 完成功能与验证后同步更新 `pyproject.toml` 和 `src/ra2_explorer/__init__.py` 的版本号；
 2. 创建并推送对应的 `vX.Y.Z` Git tag；
-3. Release workflow 在 Windows 中重新测试、隐私扫描和构建 generic 本地 Web 应用；
-4. workflow 上传 ZIP、生成构建来源证明，再创建带自动发布说明的 GitHub Release；
-5. 在仓库设置中为后续 Release 启用 immutability，锁定 tag 与资产。
+3. 在 GitHub 仓库配置 `HF_TOKEN_RELEASE` 和 `HF_SPACE_RELEASE_REPO` 两项 Actions secret；
+4. Release workflow 在 Windows 中重新测试、隐私扫描和构建 generic 本地 Web 应用；
+5. workflow 上传 ZIP、生成构建来源证明并创建 GitHub Release；GitHub Release 成功后，以同一 ZIP 生成固定路径、大小和 SHA-256 清单并同步到 Hugging Face；
+6. 在仓库设置中为后续 Release 启用 immutability，锁定 tag 与资产。
+
+HF 同步始终通过官方写入端点完成，用户下载才使用镜像。`releases/latest.json` 最后写入，因此不会先公布一个尚未上传完成的安装包。公共发行包只内嵌 Space 仓库标识和镜像地址，不包含 HF token、邮箱或本机配置。
 
 GitHub 的 latest Release API 会提供资产的 `browser_download_url`、大小和 `digest`，应用只接受当前项目仓库下名称完全匹配的 Windows ZIP：[REST Releases API](https://docs.github.com/en/rest/releases/releases)。Immutable Releases 会锁定 tag 与 Release 资产，并自动产生 Release attestation：[Immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)。工作流使用 GitHub artifact attestation 记录构建来源：[Artifact attestations](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)。
 

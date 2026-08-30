@@ -26,6 +26,7 @@ dev = [
   "ruff>=0.12,<1",
 ]
 release = [
+  "huggingface-hub>=0.35,<2",
   "pyinstaller>=6.15,<7",
 ]
 
