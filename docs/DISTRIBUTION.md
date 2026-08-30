@@ -26,13 +26,13 @@ RA2 Explorer 作为本地 Web 应用发布，不使用 GitHub Pages，也不采�
 
 | 项目 | 字节 | 约合 |
 | --- | ---: | ---: |
-| 公共 `generic` 解压目录 | 49,586,726 | 47.3 MiB |
-| 公共 ZIP | 28,806,600 | 27.5 MiB |
+| 公共 `generic` 解压目录 | 49,651,217 | 47.3 MiB |
+| 公共 ZIP | 28,860,063 | 27.5 MiB |
 | 完整索引的 `linked` 目录 | 58,024,576 | 55.3 MiB |
 | 本机安装中可识别的数据 | 668,107,876 | 637.2 MiB |
 | 可选 `portable` 解压目录 | 726,161,486 | 692.5 MiB |
 
-因此普通用户的首次下载流量约为 27.5 MiB；1,000 次完整下载约为 26.8 GiB。游戏数据从本机读取，不产生网络流量。预览与转码缓存也只在本机按需生成。
+因此普通用户的首次下载流量约为 27.5 MiB；1,000 次完整下载约为 26.9 GiB。游戏数据从本机读取，不产生网络流量。预览与转码缓存也只在本机按需生成。
 
 GitHub Releases 的单个资产必须小于 2 GiB，单个 Release 最多 1,000 个资产；官方文档同时说明 Release 的总大小和带宽没有额外限制。当前公共 ZIP 远低于单资产上限，适合通过 Release 分发：[GitHub Releases 官方说明](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)。
 
