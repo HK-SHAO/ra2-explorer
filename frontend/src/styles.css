@@ -444,7 +444,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .settings-header { padding: 16px 18px; border-bottom: 1px solid var(--line); }
 .settings-header h2 { margin: 0; }
 .settings-header > div:nth-child(2) { min-width: 0; display: flex; align-items: baseline; gap: 10px; }
-.settings-header > div:nth-child(2) small { overflow: hidden; color: #858b95; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .settings-layout { min-height: 0; display: grid; grid-template-columns: 154px minmax(0, 1fr); }
 .settings-nav { min-height: 0; display: flex; flex-direction: column; gap: 4px; padding: 14px 10px; overflow-y: auto; border-right: 1px solid var(--line); background: #15171b; }
 .settings-nav button { min-height: 38px; padding: 0 11px; border: 1px solid transparent; border-radius: 3px; color: #989da6; background: transparent; font-size: 13px; text-align: left; cursor: pointer; }
@@ -453,6 +452,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .settings-content::-webkit-scrollbar { width: 11px; }
 .settings-content::-webkit-scrollbar-track { background: #17191d; }
 .settings-content::-webkit-scrollbar-thumb { min-height: 34px; border: 2px solid #17191d; border-radius: 8px; background: #555b66; }
+.settings-build-info { min-height: 50px; display: flex; align-items: center; gap: 10px; margin-top: 20px; padding: 9px 11px; border: 1px solid #37404a; color: #aeb7c3; background: #15191e; }
+.settings-build-info > .icon { flex: 0 0 auto; color: #8798ab; }
+.settings-build-info span, .settings-build-info strong, .settings-build-info small { min-width: 0; display: block; }
+.settings-build-info strong { color: #d5d9df; font-size: 13px; }
+.settings-build-info small { margin-top: 3px; overflow: hidden; color: #858c97; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .settings-section { padding: 22px 0 2px; scroll-margin-top: 8px; }
 .settings-section + .settings-section { margin-top: 18px; border-top: 1px solid var(--line); }
 .settings-section > header { min-height: 28px; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }

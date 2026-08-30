@@ -3719,7 +3719,7 @@ function SettingsDialog({
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
       <section className="dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-        <div className="dialog-header settings-header"><div className="dialog-icon"><Icon name="settings" /></div><div><h2 id="settings-title">设置</h2>{isStaticSnapshot && <small title={staticBuildDescription(currentVersion)}>精简网页版 · {staticBuildDescription(currentVersion)}</small>}</div><button type="button" onClick={onClose} disabled={busy} aria-label="关闭"><Icon name="close" /></button></div>
+        <div className="dialog-header settings-header"><div className="dialog-icon"><Icon name="settings" /></div><div><h2 id="settings-title">设置</h2></div><button type="button" onClick={onClose} disabled={busy} aria-label="关闭"><Icon name="close" /></button></div>
         <div className="settings-layout">
           <nav className="settings-nav" aria-label="设置分区">
             <button type="button" onClick={() => scrollToSection("settings-display")}>显示</button>
@@ -3729,6 +3729,10 @@ function SettingsDialog({
             {!isStaticSnapshot && <button type="button" onClick={() => scrollToSection("settings-updates")}>应用更新</button>}
           </nav>
           <div className="settings-content">
+            {isStaticSnapshot && <div className="settings-build-info" role="status">
+              <Icon name="info" size={17} />
+              <span><strong>精简网页版</strong><small>{staticBuildDescription(currentVersion)}</small></span>
+            </div>}
             <section className="settings-section" id="settings-display">
               <header><h3>显示</h3></header>
               <div className="display-settings">
