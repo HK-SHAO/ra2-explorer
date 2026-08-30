@@ -15,7 +15,7 @@ RA2 Explorer 的完整在线版本使用 Hugging Face Docker Space，而不是 S
 
 Docker 镜像采用两个阶段：
 
-1. 构建阶段安装应用 wheel，并把 `resources/default.ra2pack` 校验、解包成索引和派生产物；
+1. 构建阶段安装应用 wheel，按 SHA-256 校验并组合 `resources/default.ra2pack.parts/`，再把资源包解包成索引和派生产物；
 2. 运行阶段只复制解包结果、应用运行依赖和编译后的前端，不复制 `.ra2pack` 本身，也不复制项目源码树、测试或开发文档。
 
 容器以非 root 用户运行，监听 Space 规定的 `7860` 端口，并设置 `RA2_EXPLORER_HOSTED=1`。托管模式关闭 OpenAPI 和全部写操作；本地应用仍只监听 `127.0.0.1:46120`，保留目录解析、重扫、导入和导出功能。Space 文件系统重启后可以从镜像中的预置快照恢复，不依赖持久卷。
@@ -32,7 +32,7 @@ Space 仓库需要预先配置为公开仓库，并在 GitHub Actions 中保存 
 .venv\Scripts\python.exe scripts\publish_hf_release.py --resource-pack ".runtime\RA2MD-Ext\packages\PACKAGE.ra2pack"
 ```
 
-脚本只接受 `contains_game_files=false` 的 RA2 Explorer 资源包，并校验安全路径、条目上限、允许扩展名、语义快照、产物数量和字节数。上传大文件由 `huggingface_hub` 自动使用仓库的大文件存储机制；官方上传接口说明见 [Upload files to the Hub](https://huggingface.co/docs/huggingface_hub/en/guides/upload)。
+脚本只接受 `contains_game_files=false` 的 RA2 Explorer 资源包，并校验安全路径、条目上限、允许扩展名、语义快照、产物数量和字节数。通过后生成 16 MiB 内容寻址分片；每个分片独立提交，重复运行会跳过已存在的分片，最后才原子更新总 SHA-256 和激活清单。这样国内长链路中断时不必重传整个约 178 MiB 文件。上传由 `huggingface_hub` 使用仓库的大文件存储机制；官方上传接口说明见 [Upload files to the Hub](https://huggingface.co/docs/huggingface_hub/en/guides/upload)。
 
 正常版本发布只需推送 `vX.Y.Z` tag。GitHub workflow 会：
 
@@ -42,7 +42,7 @@ Space 仓库需要预先配置为公开仓库，并在 GitHub Actions 中保存 
 4. 生成只含 wheel、前端和 Docker 配置的 Space 上下文；
 5. 在一个 Hugging Face commit 中同步 Windows ZIP、SHA-256 清单和 Space 运行文件。
 
-同步计划不会删除 `.gitattributes`、`resources/` 或旧版 `releases/`。若 `resources/default.ra2pack` 尚未存在，发布会明确失败，避免把无法启动的 Docker 配置推到 Space。
+同步计划不会删除 `.gitattributes`、`resources/` 或旧版 `releases/`。若资源分片或总 SHA-256 尚未存在，发布会明确失败，避免把无法启动的 Docker 配置推到 Space。
 
 ## 恢复与更新
 

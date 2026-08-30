@@ -42,7 +42,7 @@ RA2 Explorer 可以把当前资料库的索引、语义关联和已经生成的�
 .venv\Scripts\ra2exp.exe resource-pack export SOURCE_ID --output "D:\Backups\yr-assets.ra2pack"
 ```
 
-`.runtime` 已被 Git 忽略，默认 Windows 构建和 Release 也不会收集资源包，因此本机备份不会随源码或 Windows 程序发布。在线 Space 使用的授权派生包通过独立维护命令直接上传到 Space 的 `resources/default.ra2pack`，不会进入 GitHub 主分支；发布器在上传前执行与导入器相同的结构、白名单、语义快照和体积一致性校验。
+`.runtime` 已被 Git 忽略，默认 Windows 构建和 Release 也不会收集资源包，因此本机备份不会随源码或 Windows 程序发布。在线 Space 使用的授权派生包通过独立维护命令上传为 `resources/default.ra2pack.parts/` 下的内容寻址分片，不会进入 GitHub 主分支；发布器在上传前执行与导入器相同的结构、白名单、语义快照和体积一致性校验，并在容器构建时重新验证总 SHA-256。
 
 当前本机官方尤里复仇资料库的 `0.8.0` 实测包为 186,796,592 字节（178.1 MiB），包含 9,793 个已生成产物，对应 16,820 项资产索引；未压缩的派生产物合计 277,647,800 字节。这个大小取决于实际浏览和缓存过的内容，不是固定下载体积。
 

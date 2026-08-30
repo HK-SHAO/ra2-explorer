@@ -27,6 +27,10 @@ _SPACE_MANAGED_ROOT_FILES = frozenset(
 )
 _SPACE_MANAGED_PREFIXES = ("app/", "config/", "frontend/")
 _SPACE_LEGACY_FILES = frozenset({"index.html", "style.css"})
+_RESOURCE_PART_BYTES = 16 * 1024 * 1024
+_RESOURCE_PARTS_PREFIX = "resources/default.ra2pack.parts/"
+_RESOURCE_PARTS_MANIFEST = "resources/default.ra2pack.parts.json"
+_RESOURCE_CHECKSUM = "resources/default.ra2pack.sha256"
 
 
 def build_manifest(
@@ -127,18 +131,108 @@ def publish_resource_pack(pack_path: Path) -> None:
     if not token or not repository:
         raise RuntimeError("HF release credentials are not configured")
     validate_resource_pack(pack_path)
+    parts_root = Path.cwd() / ".outputs" / "hf-resource-parts"
+    manifest, parts = build_resource_part_manifest(pack_path, parts_root)
+    encoded_manifest = (
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+    ).encode("utf-8")
+    checksum = f"{manifest['archive']['sha256']}  default.ra2pack\n".encode()
 
-    from huggingface_hub import HfApi
+    os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+    from huggingface_hub import CommitOperationAdd, CommitOperationDelete, HfApi
 
     api = HfApi(endpoint=OFFICIAL_HF_ENDPOINT, token=token)
-    api.upload_file(
-        path_or_fileobj=pack_path,
-        path_in_repo="resources/default.ra2pack",
+    remote_files = set(api.list_repo_files(repo_id=repository, repo_type="space"))
+    for index, (path_in_repo, local_path) in enumerate(parts, start=1):
+        if path_in_repo in remote_files:
+            print(f"Derived resource part {index}/{len(parts)} already uploaded")
+            continue
+        print(f"Uploading derived resource part {index}/{len(parts)}")
+        api.upload_file(
+            path_or_fileobj=local_path,
+            path_in_repo=path_in_repo,
+            repo_id=repository,
+            repo_type="space",
+            commit_message=f"Upload derived resource part {index} of {len(parts)}",
+        )
+        remote_files.add(path_in_repo)
+    current_parts = {path for path, _local_path in parts}
+    stale = sorted(
+        path
+        for path in remote_files
+        if path.startswith(_RESOURCE_PARTS_PREFIX) and path not in current_parts
+    )
+    if "resources/default.ra2pack" in remote_files:
+        stale.append("resources/default.ra2pack")
+    operations = [
+        CommitOperationAdd(
+            path_in_repo=_RESOURCE_PARTS_MANIFEST,
+            path_or_fileobj=io.BytesIO(encoded_manifest),
+        ),
+        CommitOperationAdd(
+            path_in_repo=_RESOURCE_CHECKSUM,
+            path_or_fileobj=io.BytesIO(checksum),
+        ),
+        *(CommitOperationDelete(path_in_repo=path) for path in stale),
+    ]
+    api.create_commit(
         repo_id=repository,
         repo_type="space",
-        commit_message="Update derived RA2 Explorer resources",
+        operations=operations,
+        commit_message="Activate derived RA2 Explorer resources",
     )
     print("Hugging Face derived resource synchronization completed")
+
+
+def build_resource_part_manifest(
+    pack_path: Path,
+    parts_root: Path,
+    *,
+    part_bytes: int = _RESOURCE_PART_BYTES,
+) -> tuple[dict[str, object], list[tuple[str, Path]]]:
+    if part_bytes < 1024 * 1024:
+        raise ValueError("resource part size must be at least 1 MiB")
+    resolved = pack_path.expanduser().resolve(strict=True)
+    parts_root.mkdir(parents=True, exist_ok=True)
+    archive_digest = hashlib.sha256()
+    part_records: list[dict[str, object]] = []
+    local_parts: list[tuple[str, Path]] = []
+    with resolved.open("rb") as stream:
+        index = 0
+        while chunk := stream.read(part_bytes):
+            archive_digest.update(chunk)
+            digest = hashlib.sha256(chunk).hexdigest()
+            name = f"{index:03d}-{digest}.part"
+            local_path = parts_root / name
+            if not local_path.is_file() or local_path.stat().st_size != len(chunk):
+                temporary = local_path.with_suffix(".tmp")
+                try:
+                    temporary.write_bytes(chunk)
+                    os.replace(temporary, local_path)
+                finally:
+                    temporary.unlink(missing_ok=True)
+            path_in_repo = f"{_RESOURCE_PARTS_PREFIX}{name}"
+            part_records.append(
+                {"name": name, "size": len(chunk), "sha256": digest}
+            )
+            local_parts.append((path_in_repo, local_path))
+            index += 1
+    if not part_records:
+        raise ValueError("resource pack is empty")
+    return (
+        {
+            "schema": 1,
+            "kind": "ra2-explorer-resource-pack-parts",
+            "archive": {
+                "name": "default.ra2pack",
+                "size": resolved.stat().st_size,
+                "sha256": archive_digest.hexdigest(),
+            },
+            "parts": part_records,
+        },
+        local_parts,
+    )
 
 
 def space_sync_plan(
@@ -147,7 +241,10 @@ def space_sync_plan(
 ) -> tuple[list[tuple[str, Path]], list[str]]:
     resolved = bundle.expanduser().resolve(strict=True)
     audit_space_bundle(resolved)
-    if "resources/default.ra2pack" not in remote_files:
+    has_resource_parts = any(
+        path.startswith(_RESOURCE_PARTS_PREFIX) for path in remote_files
+    )
+    if _RESOURCE_CHECKSUM not in remote_files or not has_resource_parts:
         raise RuntimeError("Hugging Face Space derived resource pack is missing")
     additions = sorted(
         (

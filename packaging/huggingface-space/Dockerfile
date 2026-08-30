@@ -9,10 +9,15 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
 WORKDIR /opt/ra2
 COPY app/*.whl /tmp/ra2exp/
 RUN python -m pip install /tmp/ra2exp/*.whl && rm -rf /tmp/ra2exp
-COPY resources/default.ra2pack /tmp/default.ra2pack
-RUN RA2_EXPLORER_DATA_DIR=/opt/ra2/runtime \
+COPY resources/default.ra2pack.parts/ /tmp/default.ra2pack.parts/
+COPY resources/default.ra2pack.sha256 /tmp/default.ra2pack.sha256
+RUN cat /tmp/default.ra2pack.parts/*.part > /tmp/default.ra2pack \
+    && cd /tmp \
+    && sha256sum -c default.ra2pack.sha256 \
+    && RA2_EXPLORER_DATA_DIR=/opt/ra2/runtime \
     ra2exp resource-pack import /tmp/default.ra2pack \
     && rm /tmp/default.ra2pack \
+    && rm -rf /tmp/default.ra2pack.parts \
     && rm -rf /opt/ra2/runtime/RA2MD-Ext/imports \
     && rm -rf /opt/ra2/runtime/RA2MD-Ext/packages
 

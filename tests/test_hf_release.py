@@ -4,7 +4,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from scripts.publish_hf_release import build_manifest, space_sync_plan
+from scripts.publish_hf_release import (
+    build_manifest,
+    build_resource_part_manifest,
+    space_sync_plan,
+)
 
 
 def test_hf_release_script_can_run_from_file_path() -> None:
@@ -61,7 +65,8 @@ def test_space_sync_only_replaces_managed_runtime_files(tmp_path, monkeypatch) -
             "style.css",
             "frontend/assets/old.js",
             "releases/latest.json",
-            "resources/default.ra2pack",
+            "resources/default.ra2pack.parts/000-example.part",
+            "resources/default.ra2pack.sha256",
         ],
     )
 
@@ -70,3 +75,26 @@ def test_space_sync_only_replaces_managed_runtime_files(tmp_path, monkeypatch) -
         ("frontend/index.html", Path(bundle / "frontend" / "index.html")),
     ]
     assert deletions == ["frontend/assets/old.js", "index.html", "style.css"]
+
+
+def test_resource_pack_parts_are_deterministic_and_bounded(tmp_path) -> None:
+    archive = tmp_path / "sample.ra2pack"
+    archive.write_bytes(b"a" * (1024 * 1024) + b"b" * 7)
+
+    manifest, parts = build_resource_part_manifest(
+        archive,
+        tmp_path / "parts",
+        part_bytes=1024 * 1024,
+    )
+
+    assert manifest["archive"]["size"] == archive.stat().st_size
+    assert len(manifest["parts"]) == 2
+    assert [path.stat().st_size for _remote, path in parts] == [1024 * 1024, 7]
+    assert parts[0][0].startswith("resources/default.ra2pack.parts/000-")
+    repeated, repeated_parts = build_resource_part_manifest(
+        archive,
+        tmp_path / "parts",
+        part_bytes=1024 * 1024,
+    )
+    assert repeated == manifest
+    assert repeated_parts == parts

@@ -94,7 +94,8 @@ def audit_space_bundle(bundle: Path) -> None:
     dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
     required = (
         "COPY app/*.whl",
-        "COPY resources/default.ra2pack",
+        "COPY resources/default.ra2pack.parts/",
+        "sha256sum -c default.ra2pack.sha256",
         "RA2_EXPLORER_HOSTED=1",
         '"--host", "0.0.0.0", "--port", "7860"',
         "COPY --from=seed",

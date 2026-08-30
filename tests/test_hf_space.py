@@ -37,7 +37,8 @@ def test_space_bundle_is_docker_hosted_and_excludes_development_tree(tmp_path) -
     audit_space_bundle(root)
 
     dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
-    assert "resources/default.ra2pack" in dockerfile
+    assert "resources/default.ra2pack.parts/" in dockerfile
+    assert "sha256sum -c default.ra2pack.sha256" in dockerfile
     assert "RA2_EXPLORER_HOSTED=1" in dockerfile
     assert "COPY src" not in dockerfile
     assert "COPY docs" not in dockerfile
