@@ -3,11 +3,13 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import uuid
+from collections import Counter
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -187,8 +189,17 @@ def _resume_reusable_data(target: Path, staging: Path) -> int:
                 if output.exists():
                     continue
                 output.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(path, output)
+                try:
+                    os.link(path, output)
+                except OSError:
+                    shutil.copyfile(path, output)
                 copied += 1
+                if copied % 2_000 == 0:
+                    print(
+                        f"[pages] 已复用 {copied:,} 个文件",
+                        file=sys.stderr,
+                        flush=True,
+                    )
             break
     if copied:
         print(f"[pages] 复用中断构建结果：{copied:,} 个文件", file=sys.stderr, flush=True)
@@ -707,17 +718,24 @@ def _export_render_tasks(
     _run_parallel(label, tasks, export, workers=workers)
 
 
-def _directory_stats(root: Path) -> dict[str, object]:
+def _directory_stats(
+    root: Path,
+    *,
+    exclude: frozenset[str] = frozenset(),
+) -> dict[str, object]:
     categories: dict[str, dict[str, int]] = {}
     total_files = 0
     total_bytes = 0
     for path in root.rglob("*"):
         if not path.is_file():
             continue
+        relative = path.relative_to(root)
+        if relative.as_posix() in exclude:
+            continue
         size = path.stat().st_size
         total_files += 1
         total_bytes += size
-        category = path.relative_to(root).parts[0]
+        category = relative.parts[0]
         current = categories.setdefault(category, {"files": 0, "bytes": 0})
         current["files"] += 1
         current["bytes"] += size
@@ -820,12 +838,39 @@ def build_pages_snapshot(
             label="生成三维模型",
         )
 
-        stats = _request_json(client, "/api/stats", source_id=source_id)
+        format_counts = Counter(
+            str(item["asset"]["format"]) for item in media_cn["items"]
+        )
         audio_stats = {
             "total_assets": len(audio_ids),
             "formats": [
-                item for item in stats["formats"] if str(item["format"]) in _AUDIO_FORMATS
+                {"format": format_name, "count": count}
+                for format_name, count in sorted(format_counts.items())
             ],
+        }
+        diagnostics = _request_json(
+            client,
+            f"/api/semantic/{quote(source_id, safe='')}/diagnostics",
+            limit=8,
+        )
+        public_diagnostics = {
+            key: diagnostics[key]
+            for key in (
+                "status",
+                "entity_count",
+                "renderable_count",
+                "renderable_percent",
+                "localized_count",
+                "localized_percent",
+                "component_count",
+                "resolved_component_count",
+                "component_percent",
+                "dependency_count",
+                "unresolved_dependency_count",
+                "kinds",
+                "missing_components",
+                "warnings",
+            )
         }
         sanitized_source = {
             **source,
@@ -850,11 +895,7 @@ def build_pages_snapshot(
             "audio_bitrate": audio_bitrate,
             "source": sanitized_source,
             "stats": audio_stats,
-            "diagnostics": _request_json(
-                client,
-                f"/api/semantic/{quote(source_id, safe='')}/diagnostics",
-                limit=8,
-            ),
+            "diagnostics": public_diagnostics,
             "reference_status": _request_json(client, "/api/reference-data"),
             "catalog": {
                 "entities": int(entities_cn["total"]),
@@ -870,13 +911,13 @@ def build_pages_snapshot(
             "不包含 MIX/BAG/INI/CSF 等原始游戏文件。\n",
             encoding="utf-8",
         )
-        payload = _directory_stats(staging)
+        payload = _directory_stats(staging, exclude=frozenset({"manifest.json"}))
         manifest["payload"] = payload
         _write_json(staging / "manifest.json", manifest)
         if resolved.exists():
             shutil.rmtree(resolved)
         staging.replace(resolved)
-        result = {"output": str(resolved), **manifest, "payload": _directory_stats(resolved)}
+        result = {"output": str(resolved), **manifest}
         print(
             f"[pages] 完成：{result['payload']['files']:,} 个文件，"
             f"{result['payload']['bytes'] / 1024 / 1024:.1f} MiB",
