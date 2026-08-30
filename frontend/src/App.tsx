@@ -86,6 +86,7 @@ type IconName =
   | "close"
   | "download"
   | "file"
+  | "filter"
   | "folder"
   | "grid"
   | "image"
@@ -112,6 +113,7 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     close: <><path d="m6 6 12 12M18 6 6 18" /></>,
     download: <><path d="M12 3v12m0 0 4-4m-4 4-4-4" /><path d="M5 20h14" /></>,
     file: <><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /></>,
+    filter: <path d="M4 5h16l-6 7v6l-4 2v-8z" />,
     folder: <path d="M3 6h7l2 2h9v11H3z" />,
     grid: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
     image: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="m4 17 5-4 4 3 3-2 4 3" /></>,
@@ -485,6 +487,7 @@ function assetIcon(format: string): IconName {
 type LayoutMode = "list" | "grid";
 type DetailPlacement = "right" | "bottom";
 type EntitySort = "cameo" | "faction" | "name_asc" | "name_desc" | "cost_asc" | "cost_desc" | "strength_asc" | "strength_desc";
+type EntitySearchScope = "global" | "current";
 type PreviewAngle = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 const DEFAULT_PREVIEW_ANGLE: PreviewAngle = 1;
@@ -549,6 +552,9 @@ type BrowsingLocation = {
   entityKind: EntityKind;
   entityUsage: EntityUsage | "";
   entitySide: string;
+  entitySearchScope: EntitySearchScope;
+  entitySearchKinds: EntityKind[];
+  entitySearchUsages: EntityUsage[];
   selectedAssetId: string;
   selectedEntityId: string;
   assetQuery: string;
@@ -591,6 +597,25 @@ const entityUsageLabels: Record<EntityKind, Partial<Record<EntityUsage, string>>
   infantry: { buildable: "常规部队", hero: "英雄单位", civilian: "平民 / 生物", scenario: "任务 / 特殊" },
   building: { buildable: "玩家可建造", tech: "中立科技", civilian: "场景建筑", scenario: "任务 / 特殊" },
 };
+const entitySearchUsageLabels: Record<EntityUsage, string> = {
+  buildable: "可建造",
+  hero: "英雄单位",
+  tech: "中立科技",
+  civilian: "平民 / 场景",
+  scenario: "任务 / 衍生",
+};
+
+function rememberedEntityKinds(value: unknown): EntityKind[] {
+  if (!Array.isArray(value)) return [...entityKindOrder];
+  const selected = entityKindOrder.filter((kind) => value.includes(kind));
+  return selected.length > 0 ? selected : [...entityKindOrder];
+}
+
+function rememberedEntityUsages(value: unknown): EntityUsage[] {
+  if (!Array.isArray(value)) return [...entityUsageOrder];
+  const selected = entityUsageOrder.filter((usage) => value.includes(usage));
+  return selected.length > 0 ? selected : [...entityUsageOrder];
+}
 
 function entityUsageLabel(kind: EntityKind, usage: EntityUsage) {
   return entityUsageLabels[kind][usage] || usage;
@@ -852,6 +877,15 @@ function ExplorerApp() {
       : "vehicle",
   );
   const [entityQuery, setEntityQuery] = useState(rememberedLocation.entityQuery || "");
+  const [entitySearchScope, setEntitySearchScope] = useState<EntitySearchScope>(
+    rememberedLocation.entitySearchScope === "current" ? "current" : "global",
+  );
+  const [entitySearchKinds, setEntitySearchKinds] = useState<EntityKind[]>(
+    () => rememberedEntityKinds(rememberedLocation.entitySearchKinds),
+  );
+  const [entitySearchUsages, setEntitySearchUsages] = useState<EntityUsage[]>(
+    () => rememberedEntityUsages(rememberedLocation.entitySearchUsages),
+  );
   const [entityUsage, setEntityUsage] = useState<EntityUsage | "">(
     entityUsageOrder.includes(rememberedLocation.entityUsage as EntityUsage)
       ? rememberedLocation.entityUsage as EntityUsage
@@ -964,6 +998,9 @@ function ExplorerApp() {
     () => sortEntities(entities, entitySort, gameLanguage, entityBuildableFirst, entitySide),
     [entities, entitySort, gameLanguage, entityBuildableFirst, entitySide],
   );
+  const globalEntitySearchActive = entitySearchScope === "global" && Boolean(entityQuery.trim());
+  const entitySearchKindKey = entitySearchKinds.join(",");
+  const entitySearchUsageKey = entitySearchUsages.join(",");
   const compactAudioDetail = view === "assets" && isMediaCategory;
   const detailSize = detailPlacement === "bottom"
     ? compactAudioDetail ? audioDetailBottomSize : detailBottomSize
@@ -1098,6 +1135,9 @@ function ExplorerApp() {
       entityKind: entityKind || "vehicle",
       entityUsage,
       entitySide,
+      entitySearchScope,
+      entitySearchKinds,
+      entitySearchUsages,
       selectedAssetId: selectedId,
       selectedEntityId,
       assetQuery,
@@ -1110,7 +1150,7 @@ function ExplorerApp() {
     window.localStorage.setItem("ra2exp-browsing-location-v1", JSON.stringify(location));
   }, [
     loading, sourceId, view, assetCategory, assetFormatTag, mediaGroup, mediaEventType, entityKind, entityUsage,
-    entitySide, selectedId, selectedEntityId, assetQuery, entityQuery, assetSort,
+    entitySide, entitySearchScope, entitySearchKinds, entitySearchUsages, selectedId, selectedEntityId, assetQuery, entityQuery, assetSort,
     entitySort, entityBuildableFirst, mediaSort,
   ]);
 
@@ -1120,6 +1160,7 @@ function ExplorerApp() {
       setEntitySide("");
     }
     setView("entities");
+    setEntitySearchScope("current");
     setEntityKind(kind);
     setEntityUsage("");
   }
@@ -1351,8 +1392,10 @@ function ExplorerApp() {
     const timer = window.setTimeout(() => {
       api.entities(sourceId, {
         query: entityQuery,
-        kind: entityKind,
-        usage: entityUsage,
+        kind: globalEntitySearchActive ? "" : entityKind,
+        kinds: globalEntitySearchActive ? entitySearchKinds : undefined,
+        usage: globalEntitySearchActive ? "" : entityUsage,
+        usages: globalEntitySearchActive ? entitySearchUsages : undefined,
         side: entitySide,
         language: gameLanguage,
       })
@@ -1376,7 +1419,10 @@ function ExplorerApp() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [sourceId, sourceRevision, entityQuery, entityKind, entityUsage, entitySide, gameLanguage, view]);
+  }, [
+    sourceId, sourceRevision, entityQuery, entityKind, entityUsage, entitySide, gameLanguage, view,
+    globalEntitySearchActive, entitySearchScope, entitySearchKindKey, entitySearchUsageKey,
+  ]);
 
   useEffect(() => {
     if (!performancePreload || view !== "entities" || !sourceId || !sourceRevision || entities.length === 0) return;
@@ -1616,13 +1662,13 @@ function ExplorerApp() {
                 <div className="tree-children">
                   {entityKindOrder.map((kind) => {
                     const count = entityKinds.find((item) => item.kind === kind)?.count || 0;
-                    const active = view === "entities" && entityKind === kind;
+                    const active = view === "entities" && !globalEntitySearchActive && entityKind === kind;
                     return <div className="tree-child-group" key={kind}>
                       <button title={entityKindLabels[kind]} className={active && !entityUsage ? "active" : ""} onClick={() => selectEntityKind(kind)}><span><Icon name={entityKindIcons[kind]} /><b>{entityKindLabels[kind]}</b></span><em>{count}</em></button>
                       {active && entityUsageOrder.map((usage) => {
                         const usageCount = entityUsages.find((item) => item.usage === usage)?.count || 0;
                         const label = entityUsageLabels[kind][usage];
-                        return label && usageCount > 0 ? <button title={label} className={`tree-grandchild ${entityUsage === usage ? "active" : ""}`} key={usage} onClick={() => setEntityUsage(entityUsage === usage ? "" : usage)}><span><Icon name={entityKindIcons[kind]} /><b>{label}</b></span><em>{usageCount}</em></button> : null;
+                        return label && usageCount > 0 ? <button title={label} className={`tree-grandchild ${entityUsage === usage ? "active" : ""}`} key={usage} onClick={() => { setEntitySearchScope("current"); setEntityUsage(entityUsage === usage ? "" : usage); }}><span><Icon name={entityKindIcons[kind]} /><b>{label}</b></span><em>{usageCount}</em></button> : null;
                       })}
                     </div>;
                   })}
@@ -1738,6 +1784,12 @@ function ExplorerApp() {
               loading={entityLoading}
               query={entityQuery}
               setQuery={setEntityQuery}
+              searchScope={entitySearchScope}
+              setSearchScope={setEntitySearchScope}
+              searchKinds={entitySearchKinds}
+              setSearchKinds={setEntitySearchKinds}
+              searchUsages={entitySearchUsages}
+              setSearchUsages={setEntitySearchUsages}
               sort={entitySort}
               setSort={updateEntitySort}
               buildableFirst={entityBuildableFirst}
@@ -1751,7 +1803,7 @@ function ExplorerApp() {
               layout={layout}
               setLayout={updateLayout}
               previewAngle={previewAngle}
-              scrollKey={`entities:${sourceId}:${entityKind}:${entityUsage}:${entitySide}:${entityQuery}:${entitySort}:${entityBuildableFirst}:${layout}`}
+              scrollKey={`entities:${sourceId}:${entityKind}:${entityUsage}:${entitySide}:${entityQuery}:${entitySearchScope}:${entitySearchKindKey}:${entitySearchUsageKey}:${entitySort}:${entityBuildableFirst}:${layout}`}
             />
             <div className="workspace-resizer" role="separator" tabIndex={0} aria-label="调整详情区域大小" aria-orientation={detailPlacement === "bottom" ? "horizontal" : "vertical"} aria-valuenow={detailSize} onPointerDown={beginDetailResize} onKeyDown={resizeDetailWithKeyboard}><span /></div>
             <EntityDetailPanel
@@ -1976,12 +2028,18 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
   );
 }
 
-function EntityListPanel({ entities, total, loading, query, setQuery, sort, setSort, buildableFirst, setBuildableFirst, selectedId, setSelectedId, sourceId, sides, selectedSide, setSelectedSide, layout, setLayout, previewAngle, scrollKey }: {
+function EntityListPanel({ entities, total, loading, query, setQuery, searchScope, setSearchScope, searchKinds, setSearchKinds, searchUsages, setSearchUsages, sort, setSort, buildableFirst, setBuildableFirst, selectedId, setSelectedId, sourceId, sides, selectedSide, setSelectedSide, layout, setLayout, previewAngle, scrollKey }: {
   entities: EntitySummary[];
   total: number;
   loading: boolean;
   query: string;
   setQuery: (value: string) => void;
+  searchScope: EntitySearchScope;
+  setSearchScope: (value: EntitySearchScope) => void;
+  searchKinds: EntityKind[];
+  setSearchKinds: (value: EntityKind[]) => void;
+  searchUsages: EntityUsage[];
+  setSearchUsages: (value: EntityUsage[]) => void;
   sort: EntitySort;
   setSort: (value: EntitySort) => void;
   buildableFirst: boolean;
@@ -1998,10 +2056,25 @@ function EntityListPanel({ entities, total, loading, query, setQuery, sort, setS
   scrollKey: string;
 }) {
   const listScroll = useRememberedScroll(scrollKey, entities.length);
+  function toggleSearchKind(kind: EntityKind, checked: boolean) {
+    const next = entityKindOrder.filter((value) => value === kind ? checked : searchKinds.includes(value));
+    if (next.length > 0) setSearchKinds(next);
+  }
+  function toggleSearchUsage(usage: EntityUsage, checked: boolean) {
+    const next = entityUsageOrder.filter((value) => value === usage ? checked : searchUsages.includes(value));
+    if (next.length > 0) setSearchUsages(next);
+  }
   return (
     <section className="asset-panel entity-panel panel">
       <div className="asset-toolbar">
-        <label className="search-box"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索中文名、单位 ID、武器或阵营…" aria-label="搜索单位" />{query && <button onClick={() => setQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</label>
+        <div className="search-box entity-search-box" role="search"><Icon name="search" /><select value={searchScope} onChange={(event) => setSearchScope(event.target.value as EntitySearchScope)} aria-label="单位搜索范围" title="单位搜索范围"><option value="global">全局</option><option value="current">当前</option></select><span className="search-scope-divider" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchScope === "global" ? "搜索全部单位，支持模糊匹配…" : "搜索当前分类…"} aria-label="搜索单位" />{query && <button type="button" onClick={() => setQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</div>
+        {searchScope === "global" && <details className="entity-search-filter">
+          <summary><Icon name="filter" size={15} /><span>筛选</span><em>{searchKinds.length + searchUsages.length}/9</em></summary>
+          <div className="entity-search-filter-popover">
+            <section><header><strong>单位类型</strong><button type="button" onClick={() => setSearchKinds([...entityKindOrder])}>全选</button></header>{entityKindOrder.map((kind) => <label key={kind}><input type="checkbox" checked={searchKinds.includes(kind)} onChange={(event) => toggleSearchKind(kind, event.target.checked)} /><Icon name={entityKindIcons[kind]} size={15} /><span>{entityKindLabels[kind]}</span></label>)}</section>
+            <section><header><strong>单位用途</strong><button type="button" onClick={() => setSearchUsages([...entityUsageOrder])}>全选</button></header>{entityUsageOrder.map((usage) => <label key={usage}><input type="checkbox" checked={searchUsages.includes(usage)} onChange={(event) => toggleSearchUsage(usage, event.target.checked)} /><span>{entitySearchUsageLabels[usage]}</span></label>)}</section>
+          </div>
+        </details>}
         <span className="result-count">显示 {entities.length} / {total}</span>
         <LayoutToggle layout={layout} onChange={setLayout} />
       </div>
@@ -2034,7 +2107,7 @@ function EntityListPanel({ entities, total, loading, query, setQuery, sort, setS
           </button>
         )) : entities.map((entity) => <EntityGridCard key={entity.id} entity={entity} sourceId={sourceId} previewAngle={previewAngle} selected={selectedId === entity.id} onSelect={setSelectedId} />)}
         {loading && entities.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在解析规则实体…</strong></div>}
-        {!loading && entities.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的单位</strong><button onClick={() => { setQuery(""); setSelectedSide(""); }}>清除筛选</button></div>}
+        {!loading && entities.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的单位</strong><button onClick={() => { setQuery(""); setSelectedSide(""); setSearchKinds([...entityKindOrder]); setSearchUsages([...entityUsageOrder]); }}>清除筛选</button></div>}
       </div>
     </section>
   );
