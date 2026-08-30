@@ -27,7 +27,8 @@ _SPACE_MANAGED_ROOT_FILES = frozenset(
 )
 _SPACE_MANAGED_PREFIXES = ("app/", "config/", "frontend/")
 _SPACE_LEGACY_FILES = frozenset({"index.html", "style.css"})
-_RESOURCE_PART_BYTES = 16 * 1024 * 1024
+_RESOURCE_PART_BYTES = 4 * 1024 * 1024
+_RESOURCE_UPLOAD_BATCH = 3
 _RESOURCE_PARTS_PREFIX = "resources/default.ra2pack.parts/"
 _RESOURCE_PARTS_MANIFEST = "resources/default.ra2pack.parts.json"
 _RESOURCE_CHECKSUM = "resources/default.ra2pack.sha256"
@@ -144,19 +145,31 @@ def publish_resource_pack(pack_path: Path) -> None:
 
     api = HfApi(endpoint=OFFICIAL_HF_ENDPOINT, token=token)
     remote_files = set(api.list_repo_files(repo_id=repository, repo_type="space"))
-    for index, (path_in_repo, local_path) in enumerate(parts, start=1):
-        if path_in_repo in remote_files:
-            print(f"Derived resource part {index}/{len(parts)} already uploaded")
-            continue
-        print(f"Uploading derived resource part {index}/{len(parts)}")
-        api.upload_file(
-            path_or_fileobj=local_path,
-            path_in_repo=path_in_repo,
+    pending = [part for part in parts if part[0] not in remote_files]
+    batch_total = (len(pending) + _RESOURCE_UPLOAD_BATCH - 1) // _RESOURCE_UPLOAD_BATCH
+    for batch_index, offset in enumerate(
+        range(0, len(pending), _RESOURCE_UPLOAD_BATCH),
+        start=1,
+    ):
+        batch = pending[offset : offset + _RESOURCE_UPLOAD_BATCH]
+        first_index = parts.index(batch[0]) + 1
+        last_index = parts.index(batch[-1]) + 1
+        print(
+            f"Uploading derived resource parts {first_index}-{last_index}/{len(parts)} "
+            f"(batch {batch_index}/{batch_total})"
+        )
+        api.create_commit(
             repo_id=repository,
             repo_type="space",
-            commit_message=f"Upload derived resource part {index} of {len(parts)}",
+            operations=[
+                CommitOperationAdd(path_in_repo=path, path_or_fileobj=local_path)
+                for path, local_path in batch
+            ],
+            commit_message=f"Upload derived resource batch {batch_index} of {batch_total}",
         )
-        remote_files.add(path_in_repo)
+        remote_files.update(path for path, _local_path in batch)
+    if not pending:
+        print(f"All {len(parts)} derived resource parts are already uploaded")
     current_parts = {path for path, _local_path in parts}
     stale = sorted(
         path

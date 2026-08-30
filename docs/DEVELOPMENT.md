@@ -128,7 +128,7 @@ scripts\build_windows.cmd --game-dir ".runtime\RA2MD" --include-game-data
 
 带 `v*` 的 Git tag 会触发 `.github\workflows\release.yml`，运行测试、隐私扫描、参考数据同步、Windows 构建和 CLI smoke test；随后创建 GitHub Release，并把同一 ZIP、版本清单和 Docker Space 运行文件原子同步到 Hugging Face。手动运行 workflow 只生成可下载的 Actions artifact，不创建 Release。
 
-首次部署 Space 前，维护者需要先上传一份通过白名单校验的派生资源包。凭据只从 `.secrets\local.env` 或进程环境读取，不得写入命令参数、日志或仓库。上传器会切成 16 MiB 内容寻址分片，重复运行会跳过已有分片，从网络中断处继续：
+首次部署 Space 前，维护者需要先上传一份通过白名单校验的派生资源包。凭据只从 `.secrets\local.env` 或进程环境读取，不得写入命令参数、日志或仓库。上传器会切成 4 MiB 内容寻址分片并小批提交，避免依赖受限网络中的 LFS/Xet 上传域；重复运行会跳过已有分片，从网络中断处继续：
 
 ```bat
 .venv\Scripts\python.exe scripts\publish_hf_release.py --resource-pack ".runtime\RA2MD-Ext\packages\PACKAGE.ra2pack"
