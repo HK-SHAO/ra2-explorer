@@ -488,6 +488,7 @@ type EntitySort = "cameo" | "faction" | "name_asc" | "name_desc" | "cost_asc" | 
 type PreviewAngle = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 const DEFAULT_PREVIEW_ANGLE: PreviewAngle = 1;
+const entitySortValues: EntitySort[] = ["cameo", "faction", "name_asc", "name_desc", "cost_asc", "cost_desc", "strength_asc", "strength_desc"];
 
 function staticBuildDescription(currentVersion: string) {
   const tag = import.meta.env.VITE_RA2EXP_BUILD_TAG?.trim();
@@ -742,7 +743,13 @@ function sortEntities(
       const aircraft = Number(Boolean(left.considered_aircraft)) - Number(Boolean(right.considered_aircraft));
       if (aircraft) return aircraft;
     }
-    return compareNumbers(left.tech_level ?? null, right.tech_level ?? null, true)
+    const leftTechLevel = numeric(left.tech_level ?? null);
+    const rightTechLevel = numeric(right.tech_level ?? null);
+    return compareNumbers(
+      leftTechLevel !== null && leftTechLevel >= 0 ? String(leftTechLevel) : null,
+      rightTechLevel !== null && rightTechLevel >= 0 ? String(rightTechLevel) : null,
+      true,
+    )
       || compareNumbers(left.cost, right.cost, true)
       || compareNames(left, right);
   };
@@ -851,8 +858,13 @@ function ExplorerApp() {
       : "",
   );
   const [entitySide, setEntitySide] = useState(rememberedLocation.entitySide || "");
-  const [entitySort, setEntitySort] = useState<EntitySort>(rememberedLocation.entitySort || "name_asc");
-  const [entityBuildableFirst, setEntityBuildableFirst] = useState(rememberedLocation.entityBuildableFirst === true);
+  const [entitySort, setEntitySort] = useState<EntitySort>(() => {
+    const stored = window.localStorage.getItem("ra2exp-entity-sort-v2") as EntitySort | null;
+    return stored && entitySortValues.includes(stored) ? stored : "cameo";
+  });
+  const [entityBuildableFirst, setEntityBuildableFirst] = useState(
+    () => window.localStorage.getItem("ra2exp-entity-buildable-first-v2") !== "false",
+  );
   const [selectedEntityId, setSelectedEntityId] = useState(rememberedLocation.selectedEntityId || "");
   const [selectedEntity, setSelectedEntity] = useState<GameEntity | null>(null);
   const [entityLoading, setEntityLoading] = useState(false);
@@ -983,6 +995,16 @@ function ExplorerApp() {
   function updatePreviewAngle(next: PreviewAngle) {
     setPreviewAngle(next);
     window.localStorage.setItem("ra2exp-preview-angle-v1", String(next));
+  }
+
+  function updateEntitySort(next: EntitySort) {
+    setEntitySort(next);
+    window.localStorage.setItem("ra2exp-entity-sort-v2", next);
+  }
+
+  function updateEntityBuildableFirst(next: boolean) {
+    setEntityBuildableFirst(next);
+    window.localStorage.setItem("ra2exp-entity-buildable-first-v2", String(next));
   }
 
   function updateSidebarCollapsed(next: boolean) {
@@ -1717,9 +1739,9 @@ function ExplorerApp() {
               query={entityQuery}
               setQuery={setEntityQuery}
               sort={entitySort}
-              setSort={setEntitySort}
+              setSort={updateEntitySort}
               buildableFirst={entityBuildableFirst}
-              setBuildableFirst={setEntityBuildableFirst}
+              setBuildableFirst={updateEntityBuildableFirst}
               selectedId={selectedEntityId}
               setSelectedId={setSelectedEntityId}
               sourceId={sourceId}
