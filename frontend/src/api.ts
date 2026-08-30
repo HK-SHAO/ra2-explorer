@@ -45,6 +45,13 @@ export interface Stats {
   formats: FormatCount[];
 }
 
+export interface AppInfo {
+  status: "ok";
+  name: string;
+  version: string;
+  pid: number;
+}
+
 export interface ShpFrame {
   index: number;
   x: number;
@@ -151,6 +158,7 @@ export interface UpdateInfo {
   release_url: string;
   published_at: string | null;
   notes: string;
+  provider: "huggingface" | "github";
   asset: {
     name: string;
     size: number;
@@ -429,6 +437,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  health: () => request<AppInfo>("/api/health"),
   sources: () => request<Source[]>("/api/sources"),
   discovery: () => request<DiscoveryResult>("/api/discovery"),
   addSource: (path: string, name?: string) =>

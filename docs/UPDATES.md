@@ -2,7 +2,7 @@
 
 ## 用户侧流程
 
-RA2 Explorer 在 GitHub Releases 发布版本，并把同一安装包和签名清单同步到 Hugging Face Space。应用只在用户点击“检查更新”，或用户明确开启“应用启动时检查更新”后联网；默认从 `https://hf-mirror.com` 读取清单和安装包，镜像不可用时才查询 GitHub，不会静默下载或安装。自动检查发现新版本时只在左侧“设置”入口显示提示点。
+RA2 Explorer 在 GitHub Releases 发布版本，并把同一安装包和签名清单同步到 Hugging Face Space。应用只在用户点击“检查更新”，或用户明确开启“应用启动时检查更新”后联网；默认从 `https://hf-mirror.com` 读取清单和安装包，镜像不可用时才查询 GitHub，不会静默下载或安装。设置页始终显示本机版本，自动检查发现新版本时只在左侧“设置”入口显示提示点。
 
 发现新版本后，设置页显示版本号、发布时间、文件大小、SHA-256 摘要和 Release 说明。用户可以选择打开 Release 页面或下载 `RA2-Explorer-Web-x64.zip`。更新前关闭 RA2 Explorer，替换程序文件并保留原目录中的 `.runtime`，已有索引、预览、设置和 `.ra2pack` 不需要重新生成。
 

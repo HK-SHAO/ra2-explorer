@@ -794,6 +794,7 @@ function ExplorerApp() {
   const [notice, setNotice] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [resourcePacks, setResourcePacks] = useState<ResourcePack[]>([]);
+  const [currentVersion, setCurrentVersion] = useState("");
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateError, setUpdateError] = useState("");
@@ -1077,13 +1078,15 @@ function ExplorerApp() {
     Promise.all([
       api.sources(),
       api.playerColors().catch(() => []),
+      api.health().catch(() => null),
     ])
-      .then(([nextSources, nextPlayerColors]) => {
+      .then(([nextSources, nextPlayerColors, appInfo]) => {
         setSources(nextSources);
         setSourceId(nextSources.some((source) => source.id === rememberedLocation.sourceId)
           ? rememberedLocation.sourceId || ""
           : nextSources[0]?.id || "");
         setPlayerColors(nextPlayerColors);
+        setCurrentVersion(appInfo?.version || "");
       })
       .catch((reason: Error) => setError(reason.message))
       .finally(() => setLoading(false));
@@ -1627,6 +1630,7 @@ function ExplorerApp() {
         }}
         onImportResourcePack={importResourcePack}
         onExportResourcePack={exportResourcePack}
+        currentVersion={currentVersion}
         automaticUpdateCheck={automaticUpdateCheck}
         onAutomaticUpdateCheckChange={updateAutomaticUpdateCheck}
         updateInfo={updateInfo}
@@ -3418,6 +3422,7 @@ function SettingsDialog({
   onScanSource,
   onImportResourcePack,
   onExportResourcePack,
+  currentVersion,
   automaticUpdateCheck,
   onAutomaticUpdateCheckChange,
   updateInfo,
@@ -3444,6 +3449,7 @@ function SettingsDialog({
   onScanSource: (sourceId: string) => Promise<void>;
   onImportResourcePack: (file: File) => Promise<void>;
   onExportResourcePack: (sourceId: string) => Promise<void>;
+  currentVersion: string;
   automaticUpdateCheck: boolean;
   onAutomaticUpdateCheckChange: (enabled: boolean) => void;
   updateInfo: UpdateInfo | null;
@@ -3573,8 +3579,8 @@ function SettingsDialog({
             </section>
 
             <section className="settings-section" id="settings-updates">
-              <header><h3>应用更新</h3>{updateInfo && <span>当前 {updateInfo.current_version}</span>}</header>
-              <label className="settings-toggle"><input type="checkbox" checked={automaticUpdateCheck} onChange={(event) => onAutomaticUpdateCheckChange(event.target.checked)} /><span><strong>应用启动时检查更新</strong><small>仅在启用后访问 GitHub，不会自动下载或安装。</small></span></label>
+              <header><h3>应用更新</h3><span>当前 {currentVersion || updateInfo?.current_version || "—"}</span></header>
+              <label className="settings-toggle"><input type="checkbox" checked={automaticUpdateCheck} onChange={(event) => onAutomaticUpdateCheckChange(event.target.checked)} /><span><strong>应用启动时检查更新</strong><small>优先使用 Hugging Face 镜像；不会自动下载或安装。</small></span></label>
               <div className="update-actions">
                 <button type="button" className="button ghost" disabled={updateChecking} onClick={() => void onCheckUpdate()}>{updateChecking ? "正在检查…" : "检查更新"}</button>
                 {updateInfo?.update_available && updateInfo.asset && <a className="button primary" href={updateInfo.asset.download_url} target="_blank" rel="noreferrer"><Icon name="download" />下载 {updateInfo.latest_version}</a>}
@@ -3583,7 +3589,7 @@ function SettingsDialog({
               {updateError && <div className="settings-message error" role="alert">{updateError}</div>}
               {updateInfo && <div className={`settings-message ${updateInfo.update_available ? "available" : "current"}`}>
                 <strong>{updateInfo.update_available ? `发现 ${updateInfo.latest_version}` : "已经是最新版本"}</strong>
-                {updateInfo.asset && <span>{formatBytes(updateInfo.asset.size)}{updateInfo.asset.digest ? ` · ${updateInfo.asset.digest}` : ""}</span>}
+                {updateInfo.asset && <span>{updateInfo.provider === "huggingface" ? "Hugging Face 镜像" : "GitHub 备用源"} · {formatBytes(updateInfo.asset.size)}{updateInfo.asset.digest ? ` · ${updateInfo.asset.digest}` : ""}</span>}
                 {updateInfo.notes && <p>{updateInfo.notes}</p>}
               </div>}
             </section>
