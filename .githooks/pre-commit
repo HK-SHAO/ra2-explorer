@@ -1,0 +1,2 @@
+#!/bin/sh
+exec cmd.exe /d /s /c ".githooks\privacy-check.cmd"
