@@ -43,11 +43,12 @@ import {
 
 const VoxelViewer = lazy(async () => ({ default: (await import("./VoxelViewer")).VoxelViewer }));
 
-function VoxelPreview({ url, label, viewKey, onFacingChange }: {
+function VoxelPreview({ url, label, viewKey, previewAngle = DEFAULT_PREVIEW_ANGLE, onPreviewAngleChange }: {
   url: string;
   label: string;
   viewKey: string;
-  onFacingChange?: (facing: number) => void;
+  previewAngle?: PreviewAngle;
+  onPreviewAngleChange?: (angle: PreviewAngle) => void;
 }) {
   const finishPriorityRef = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
@@ -62,7 +63,7 @@ function VoxelPreview({ url, label, viewKey, onFacingChange }: {
     finishPriorityRef.current?.();
     finishPriorityRef.current = null;
   }, []);
-  return <Suspense fallback={<div className="voxel-viewer"><div className="voxel-status">正在载入三维视图…</div></div>}><VoxelViewer url={url} label={label} viewKey={viewKey} onFacingChange={onFacingChange} onLoadSettled={finishPriority} /></Suspense>;
+  return <Suspense fallback={<div className="voxel-viewer"><div className="voxel-status">正在载入三维视图…</div></div>}><VoxelViewer url={url} label={label} viewKey={viewKey} previewAngle={previewAngle} onPreviewAngleChange={onPreviewAngleChange} onLoadSettled={finishPriority} /></Suspense>;
 }
 
 type IconName =
@@ -465,6 +466,38 @@ function assetIcon(format: string): IconName {
 type LayoutMode = "list" | "grid";
 type DetailPlacement = "right" | "bottom";
 type EntitySort = "name_asc" | "name_desc" | "cost_asc" | "cost_desc" | "strength_asc" | "strength_desc";
+type PreviewAngle = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+const DEFAULT_PREVIEW_ANGLE: PreviewAngle = 1;
+const previewAngleOptions: Array<{ value: PreviewAngle; label: string }> = [
+  { value: 0, label: "正面" },
+  { value: 1, label: "右前侧（推荐）" },
+  { value: 2, label: "右侧" },
+  { value: 3, label: "右后侧" },
+  { value: 4, label: "背面" },
+  { value: 5, label: "左后侧" },
+  { value: 6, label: "左侧" },
+  { value: 7, label: "左前侧" },
+];
+
+function normalizePreviewAngle(value: number): PreviewAngle {
+  const normalized = ((Math.round(value) % 8) + 8) % 8;
+  return normalized as PreviewAngle;
+}
+
+function shpFacingForPreviewAngle(angle: PreviewAngle) {
+  return (4 + angle) % 8;
+}
+
+function vxlFacingForPreviewAngle(angle: PreviewAngle) {
+  return (1 - angle + 8) % 8;
+}
+
+function entityFacingForPreviewAngle(bodyFormat: string | null, angle: PreviewAngle) {
+  return bodyFormat === "vxl"
+    ? vxlFacingForPreviewAngle(angle)
+    : shpFacingForPreviewAngle(angle);
+}
 
 type BrowsingLocation = {
   view: "assets" | "entities";
@@ -641,6 +674,15 @@ function storedGameLanguage(): GameLanguage {
     : "zh-CN";
 }
 
+function storedPreviewAngle(): PreviewAngle {
+  const value = window.localStorage.getItem("ra2exp-preview-angle-v1");
+  if (value === null) return DEFAULT_PREVIEW_ANGLE;
+  const stored = Number(value);
+  return Number.isInteger(stored) && stored >= 0 && stored <= 7
+    ? normalizePreviewAngle(stored)
+    : DEFAULT_PREVIEW_ANGLE;
+}
+
 function categoryCount(stats: Stats, formats: string[]) {
   const selected = new Set(formats);
   return stats.formats.reduce(
@@ -678,6 +720,7 @@ function ExplorerApp() {
     window.localStorage.getItem("ra2exp-detail-placement") === "right" ? "right" : "bottom",
   );
   const [gameLanguage, setGameLanguage] = useState<GameLanguage>(storedGameLanguage);
+  const [previewAngle, setPreviewAngle] = useState<PreviewAngle>(storedPreviewAngle);
   const [entities, setEntities] = useState<EntitySummary[]>([]);
   const [entityTotal, setEntityTotal] = useState(0);
   const [entityKinds, setEntityKinds] = useState<Array<{ kind: EntityKind; count: number }>>([]);
@@ -804,6 +847,11 @@ function ExplorerApp() {
   function updateGameLanguage(next: GameLanguage) {
     setGameLanguage(next);
     window.localStorage.setItem("ra2exp-game-language-v1", next);
+  }
+
+  function updatePreviewAngle(next: PreviewAngle) {
+    setPreviewAngle(next);
+    window.localStorage.setItem("ra2exp-preview-angle-v1", String(next));
   }
 
   function updateSidebarCollapsed(next: boolean) {
@@ -1445,6 +1493,7 @@ function ExplorerApp() {
               setSelectedSide={setEntitySide}
               layout={layout}
               setLayout={updateLayout}
+              previewAngle={previewAngle}
               scrollKey={`entities:${sourceId}:${entityKind}:${entityUsage}:${entitySide}:${entityQuery}:${entitySort}:${layout}`}
             />
             <div className="workspace-resizer" role="separator" tabIndex={0} aria-label="调整详情区域大小" aria-orientation={detailPlacement === "bottom" ? "horizontal" : "vertical"} aria-valuenow={detailSize} onPointerDown={beginDetailResize} onKeyDown={resizeDetailWithKeyboard}><span /></div>
@@ -1453,6 +1502,7 @@ function ExplorerApp() {
               entity={selectedEntity}
               loading={entityDetailLoading}
               playerColors={playerColors}
+              defaultPreviewAngle={previewAngle}
               wide={detailPlacement === "bottom"}
               scrollKey={`entity:${sourceId}:${selectedEntityId}`}
               onPopout={() => window.open(`/?detail=entity&source_id=${encodeURIComponent(sourceId)}&entity_id=${encodeURIComponent(selectedEntityId)}`, `ra2exp-entity-${selectedEntityId}`, "popup=yes,width=1100,height=780")}
@@ -1462,7 +1512,7 @@ function ExplorerApp() {
       )}
 
       {addOpen && <AddSourceDialog discoveries={discovery.candidates} busy={busy} onClose={() => setAddOpen(false)} onSubmit={async (path, name) => { await runAction(() => api.addSource(path, name), "资源目录已导入"); setAddOpen(false); }} />}
-      {settingsOpen && <FormatSettingsDialog formats={stats.formats} enabled={enabledFormats} onChange={updateEnabledFormats} detailPlacement={detailPlacement} onDetailPlacementChange={updateDetailPlacement} gameLanguage={gameLanguage} onGameLanguageChange={updateGameLanguage} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <FormatSettingsDialog formats={stats.formats} enabled={enabledFormats} onChange={updateEnabledFormats} detailPlacement={detailPlacement} onDetailPlacementChange={updateDetailPlacement} gameLanguage={gameLanguage} onGameLanguageChange={updateGameLanguage} previewAngle={previewAngle} onPreviewAngleChange={updatePreviewAngle} onClose={() => setSettingsOpen(false)} />}
       {error && <div className="toast error" role="alert"><Icon name="info" /><span>{error}</span><button onClick={() => setError("")} aria-label="关闭"><Icon name="close" size={15} /></button></div>}
       {notice && <div className="toast success" role="status"><span className="check">✓</span><span>{notice}</span></div>}
     </div>
@@ -1632,7 +1682,7 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
   );
 }
 
-function EntityListPanel({ entities, total, loading, query, setQuery, sort, setSort, selectedId, setSelectedId, sourceId, sides, selectedSide, setSelectedSide, layout, setLayout, scrollKey }: {
+function EntityListPanel({ entities, total, loading, query, setQuery, sort, setSort, selectedId, setSelectedId, sourceId, sides, selectedSide, setSelectedSide, layout, setLayout, previewAngle, scrollKey }: {
   entities: EntitySummary[];
   total: number;
   loading: boolean;
@@ -1648,6 +1698,7 @@ function EntityListPanel({ entities, total, loading, query, setQuery, sort, setS
   setSelectedSide: (value: string) => void;
   layout: LayoutMode;
   setLayout: (layout: LayoutMode) => void;
+  previewAngle: PreviewAngle;
   scrollKey: string;
 }) {
   const listScroll = useRememberedScroll(scrollKey, entities.length);
@@ -1680,7 +1731,7 @@ function EntityListPanel({ entities, total, loading, query, setQuery, sort, setS
             <span className="entity-stats"><strong>{entity.cost ? `$${entity.cost}` : "—"}</strong><small>{entity.strength ? `${entity.strength} HP` : entity.renderable ? `${entity.component_count} 个组件` : entityBodyStatusLabel(entity)}</small></span>
             <Icon name="chevron" size={15} />
           </button>
-        )) : entities.map((entity) => <EntityGridCard key={entity.id} entity={entity} sourceId={sourceId} selected={selectedId === entity.id} onSelect={setSelectedId} />)}
+        )) : entities.map((entity) => <EntityGridCard key={entity.id} entity={entity} sourceId={sourceId} previewAngle={previewAngle} selected={selectedId === entity.id} onSelect={setSelectedId} />)}
         {loading && entities.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在解析规则实体…</strong></div>}
         {!loading && entities.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的单位</strong><button onClick={() => { setQuery(""); setSelectedSide(""); }}>清除筛选</button></div>}
       </div>
@@ -1688,10 +1739,10 @@ function EntityListPanel({ entities, total, loading, query, setQuery, sort, setS
   );
 }
 
-function EntityGridCard({ entity, sourceId, selected, onSelect }: { entity: EntitySummary; sourceId: string; selected: boolean; onSelect: (id: string) => void }) {
+function EntityGridCard({ entity, sourceId, previewAngle, selected, onSelect }: { entity: EntitySummary; sourceId: string; previewAngle: PreviewAngle; selected: boolean; onSelect: (id: string) => void }) {
   return (
     <button className={`asset-card entity-card ${selected ? "selected" : ""}`} onClick={() => onSelect(entity.id)}>
-      <EntityCardPreview entity={entity} sourceId={sourceId} />
+      <EntityCardPreview entity={entity} sourceId={sourceId} previewAngle={previewAngle} />
       <span className="asset-card-copy"><strong title={entity.display_name}>{entity.display_name}</strong></span>
     </button>
   );
@@ -1747,12 +1798,12 @@ function scheduleCardPreview(start: () => void, weight: number) {
   };
 }
 
-function EntityCardPreview({ entity, sourceId }: { entity: EntitySummary; sourceId: string }) {
+function EntityCardPreview({ entity, sourceId, previewAngle }: { entity: EntitySummary; sourceId: string; previewAngle: PreviewAngle }) {
   const previewRef = useRef<HTMLSpanElement>(null);
   const finishRef = useRef<(() => void) | null>(null);
   const [requested, setRequested] = useState(false);
   const url = entity.renderable
-    ? api.entityPreviewUrl(sourceId, entity.id, { scale: 2, thumbnail: true })
+    ? api.entityPreviewUrl(sourceId, entity.id, { facing: entityFacingForPreviewAngle(entity.body_format, previewAngle), scale: 2, thumbnail: true })
     : "";
 
   useEffect(() => {
@@ -2366,17 +2417,22 @@ function mergeSoundAssociations(associations: MediaAssociation[]): DisplaySoundA
   return [...merged.values()];
 }
 
-function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = false, onPopout, scrollKey = "" }: {
+function EntityDetailPanel({ sourceId, entity, loading, playerColors, defaultPreviewAngle, wide = false, onPopout, scrollKey = "" }: {
   sourceId: string;
   entity: GameEntity | null;
   loading: boolean;
   playerColors: PlayerColor[];
+  defaultPreviewAngle: PreviewAngle;
   wide?: boolean;
   onPopout?: () => void;
   scrollKey?: string;
 }) {
   const [frame, setFrame] = useState(0);
-  const [facing, setFacing] = useState(0);
+  const [previewAngle, setPreviewAngle] = useState<PreviewAngle>(defaultPreviewAngle);
+  const defaultPreviewAngleRef = useRef(defaultPreviewAngle);
+  defaultPreviewAngleRef.current = defaultPreviewAngle;
+  const facing = shpFacingForPreviewAngle(previewAngle);
+  const renderFacing = entityFacingForPreviewAngle(entity?.preview.format || null, previewAngle);
   const [playerColor, setPlayerColor] = useState("");
   const [playing, setPlaying] = useState(false);
   const [frameMode, setFrameMode] = useState<"sequence" | "grid">("sequence");
@@ -2467,7 +2523,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
 
   useEffect(() => {
     setFrame(0);
-    setFacing(0);
+    setPreviewAngle(defaultPreviewAngleRef.current);
     setPlayerColor("");
     setPlaying(false);
     setFrameMode("sequence");
@@ -2485,6 +2541,8 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
         : "data");
   }, [entity?.id]);
 
+  useEffect(() => setPreviewAngle(defaultPreviewAngle), [defaultPreviewAngle]);
+
   useEffect(() => {
     if (!playing || frameCount < 2) return;
     const timer = window.setInterval(() => setFrame((current) => (current + 1) % frameCount), entity?.voxel ? 240 : 160);
@@ -2494,8 +2552,8 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
   const previewUrl = useMemo(() => entity?.renderable ? api.entityPreviewUrl(
     sourceId,
     entity.id,
-    { frame, facing, playerColor, scale: 4 },
-  ) : "", [sourceId, entity, frame, facing, playerColor]);
+    { frame, facing: renderFacing, playerColor, scale: 4 },
+  ) : "", [sourceId, entity, frame, renderFacing, playerColor]);
 
   useEffect(() => setPreviewFailed(false), [previewUrl]);
 
@@ -2687,16 +2745,16 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
             {activeAnimationReplacesBody && activeAnimationAsset?.format === "shp"
               ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${activeAnimationAsset.id}:${activeAnimation?.event || "body"}`} fitContent={Boolean(activeAnimationFrameFit)} frameFit={activeAnimationFrameFit} src={activeAnimationPreviewUrl} alt={`${activeAnimationTitle}预览`} building={entity.kind === "building"} />
               : activeAnimationReplacesBody && activeAnimationAsset && ["vxl", "hva"].includes(activeAnimationAsset.format)
-                ? <VoxelPreview url={api.assetModelUrl(activeAnimationAsset.id, activeAnimationSourceFrame, playerColor)} label={animationEventLabel(activeAnimation?.event || activeAnimationAsset.display_name)} viewKey={`asset:${activeAnimationAsset.id}`} />
+                ? <VoxelPreview url={api.assetModelUrl(activeAnimationAsset.id, activeAnimationSourceFrame, playerColor)} label={animationEventLabel(activeAnimation?.event || activeAnimationAsset.display_name)} viewKey={`asset:${activeAnimationAsset.id}`} previewAngle={previewAngle} onPreviewAngleChange={setPreviewAngle} />
                 : buildingOperationPreviewUrl
                   ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${entity.id}:operation:${activeAnimationAsset?.id || "effect"}`} fitContent={false} src={buildingOperationPreviewUrl} alt={`${activeAnimationTitle}组合预览`} building />
                   : !activeAnimationAsset && frameMode === "grid" && hasRawBodyAnimation
-                    ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing, playerColor, scale: 3 })} />
+                    ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing: renderFacing, playerColor, scale: 3 })} />
                     : <div className="entity-composite-stage">
                     {effectBodyPreviewUrl
                       ? <ImageViewport className="shp entity-composite-body" fitKey={`${entity.id}:${effectBodyAssociation?.event || "body"}`} fitContent={Boolean(effectBodyFrameFit)} frameFit={effectBodyFrameFit} src={effectBodyPreviewUrl} alt={`${entity.display_name} 主体动作`} building={entity.kind === "building"} />
                       : entity.voxel
-                        ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} viewKey={`entity:${sourceId}:${entity.id}`} onFacingChange={setFacing} />
+                        ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} viewKey={`entity:${sourceId}:${entity.id}`} previewAngle={previewAngle} onPreviewAngleChange={setPreviewAngle} />
                         : previewFailed
                           ? <div className="preview-stage shp"><div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div></div>
                           : <ImageViewport className="shp entity-composite-body" fitKey={entity.id} fitContent={activeAnimation?.role === "operation" && entity.kind === "building" ? false : !playing || frameCount <= 1} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
@@ -2718,7 +2776,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, wide = fal
               {activeAnimationAsset && <button type="button" className="return-body-action" onClick={() => { setActiveAnimation(null); setPlaying(hasRawBodyAnimation); }}>返回主体</button>}
             </div>}
             <div className="entity-render-options compact-render-options">
-              {!entity.voxel && entity.preview.supports_facing && <label><span>朝向</span><select value={facing} onChange={(event) => setFacing(Number(event.target.value))}>{Array.from({ length: 8 }, (_, index) => <option key={index} value={index}>{index * 45}°</option>)}</select></label>}
+              {!entity.voxel && entity.preview.supports_facing && <label><span>角度</span><select aria-label="单位预览角度" value={previewAngle} onChange={(event) => setPreviewAngle(normalizePreviewAngle(Number(event.target.value)))}>{previewAngleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
               {entity.preview.supports_player_color && <label title="选择玩家颜色"><select aria-label="玩家颜色" value={playerColor} onChange={(event) => setPlayerColor(event.target.value)}><option value="">原始色</option>{playerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
             </div>
           </div> : <div className="unsupported-preview"><Icon name="unit" size={34} /><strong>{entityBodyStatusLabel(entity)}</strong></div>}
@@ -3011,7 +3069,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   );
 }
 
-function FormatSettingsDialog({ formats, enabled, onChange, detailPlacement, onDetailPlacementChange, gameLanguage, onGameLanguageChange, onClose }: {
+function FormatSettingsDialog({ formats, enabled, onChange, detailPlacement, onDetailPlacementChange, gameLanguage, onGameLanguageChange, previewAngle, onPreviewAngleChange, onClose }: {
   formats: Stats["formats"];
   enabled: string[];
   onChange: (formats: string[]) => void;
@@ -3019,6 +3077,8 @@ function FormatSettingsDialog({ formats, enabled, onChange, detailPlacement, onD
   onDetailPlacementChange: (placement: DetailPlacement) => void;
   gameLanguage: GameLanguage;
   onGameLanguageChange: (language: GameLanguage) => void;
+  previewAngle: PreviewAngle;
+  onPreviewAngleChange: (angle: PreviewAngle) => void;
   onClose: () => void;
 }) {
   const enabledSet = new Set(enabled);
@@ -3051,6 +3111,12 @@ function FormatSettingsDialog({ formats, enabled, onChange, detailPlacement, onD
               <button type="button" className={gameLanguage === "zh-CN" ? "active" : ""} onClick={() => onGameLanguageChange("zh-CN")}>简体中文</button>
               <button type="button" className={gameLanguage === "zh-TW" ? "active" : ""} onClick={() => onGameLanguageChange("zh-TW")}>繁體中文</button>
             </div>
+          </section>
+          <section className="display-setting-row">
+            <strong>单位默认角度</strong>
+            <select className="display-setting-select" aria-label="单位默认预览角度" value={previewAngle} onChange={(event) => onPreviewAngleChange(normalizePreviewAngle(Number(event.target.value)))}>
+              {previewAngleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
           </section>
         </div>
         <div className="format-settings-actions">
@@ -3095,6 +3161,7 @@ function AddSourceDialog({ discoveries, busy, onClose, onSubmit }: { discoveries
 
 function DetachedEntityDetail({ sourceId, entityId }: { sourceId: string; entityId: string }) {
   const [gameLanguage] = useState<GameLanguage>(storedGameLanguage);
+  const [previewAngle] = useState<PreviewAngle>(storedPreviewAngle);
   const [entity, setEntity] = useState<GameEntity | null>(null);
   const [colors, setColors] = useState<PlayerColor[]>([]);
   const [error, setError] = useState("");
@@ -3107,7 +3174,7 @@ function DetachedEntityDetail({ sourceId, entityId }: { sourceId: string; entity
       })
       .catch((reason: Error) => setError(reason.message));
   }, [sourceId, entityId, gameLanguage]);
-  return <main className="detached-shell">{error ? <div className="detached-error">{error}</div> : <EntityDetailPanel sourceId={sourceId} entity={entity} loading={!entity} playerColors={colors} wide scrollKey={`detached-entity:${sourceId}:${entityId}`} />}</main>;
+  return <main className="detached-shell">{error ? <div className="detached-error">{error}</div> : <EntityDetailPanel sourceId={sourceId} entity={entity} loading={!entity} playerColors={colors} defaultPreviewAngle={previewAngle} wide scrollKey={`detached-entity:${sourceId}:${entityId}`} />}</main>;
 }
 
 function DetachedAssetDetail({ assetId }: { assetId: string }) {

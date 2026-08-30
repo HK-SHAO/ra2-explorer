@@ -29,21 +29,27 @@ interface ViewerEngine {
   render: (() => void) | null;
 }
 
-export function VoxelViewer({ url, label, viewKey, onFacingChange, onLoadSettled }: {
+type PreviewAngle = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+export function VoxelViewer({ url, label, viewKey, previewAngle, onPreviewAngleChange, onLoadSettled }: {
   url: string;
   label: string;
   viewKey: string;
-  onFacingChange?: (facing: number) => void;
+  previewAngle: PreviewAngle;
+  onPreviewAngleChange?: (angle: PreviewAngle) => void;
   onLoadSettled?: () => void;
 }) {
   const mountRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<ViewerEngine | null>(null);
-  const onFacingChangeRef = useRef(onFacingChange);
+  const previewAngleRef = useRef(previewAngle);
+  const reportedPreviewAngleRef = useRef<PreviewAngle | null>(null);
+  const onPreviewAngleChangeRef = useRef(onPreviewAngleChange);
   const onLoadSettledRef = useRef(onLoadSettled);
   const [loadedScene, setLoadedScene] = useState<{ data: VoxelSceneData; viewKey: string } | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  onFacingChangeRef.current = onFacingChange;
+  previewAngleRef.current = previewAngle;
+  onPreviewAngleChangeRef.current = onPreviewAngleChange;
   onLoadSettledRef.current = onLoadSettled;
 
   useEffect(() => {
@@ -79,16 +85,17 @@ export function VoxelViewer({ url, label, viewKey, onFacingChange, onLoadSettled
       controls.minZoom = 0.35;
       controls.maxZoom = 12;
 
-      let lastFacing = -1;
+      let lastPreviewAngle = -1;
       const render = () => {
         renderer.render(scene, camera);
         const offsetX = camera.position.x - controls.target.x;
         const offsetZ = camera.position.z - controls.target.z;
         const sector = Math.round(Math.atan2(offsetX, offsetZ) / (Math.PI / 4));
-        const facing = (sector + 10) % 8;
-        if (facing !== lastFacing) {
-          lastFacing = facing;
-          onFacingChangeRef.current?.(facing);
+        const currentPreviewAngle = ((sector % 8) + 8) % 8 as PreviewAngle;
+        if (currentPreviewAngle !== lastPreviewAngle) {
+          lastPreviewAngle = currentPreviewAngle;
+          reportedPreviewAngleRef.current = currentPreviewAngle;
+          onPreviewAngleChangeRef.current?.(currentPreviewAngle);
         }
       };
       controls.addEventListener("change", render);
@@ -170,6 +177,14 @@ export function VoxelViewer({ url, label, viewKey, onFacingChange, onLoadSettled
       `${label} 交互式三维模型`,
     );
   }, [label]);
+
+  useEffect(() => {
+    if (reportedPreviewAngleRef.current === previewAngle) {
+      reportedPreviewAngleRef.current = null;
+      return;
+    }
+    engineRef.current?.resetView?.();
+  }, [previewAngle]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -274,7 +289,8 @@ export function VoxelViewer({ url, label, viewKey, onFacingChange, onLoadSettled
     const resetView = () => {
       const radius = Math.max(diameter / 2, 0.05);
       const distance = Math.max(radius * 4, 1);
-      const direction = new THREE.Vector3(1, 1, 1).normalize();
+      const angle = previewAngleRef.current * (Math.PI / 4);
+      const direction = new THREE.Vector3(Math.sin(angle), 1, Math.cos(angle)).normalize();
       engine.camera.near = Math.max(distance - radius * 2.5, 0.000_1);
       engine.camera.far = Math.max(distance + radius * 4, 100);
       engine.camera.position.copy(center).addScaledVector(direction, distance);
@@ -301,7 +317,7 @@ export function VoxelViewer({ url, label, viewKey, onFacingChange, onLoadSettled
     <div className="voxel-viewer" aria-busy={loading}>
       <div ref={mountRef} className="voxel-canvas" />
       {loadedScene && !loading && (
-        <button type="button" className="voxel-reset" onClick={() => engineRef.current?.resetView?.()}>
+        <button type="button" className="voxel-reset" onClick={() => engineRef.current?.resetView?.()} title="重置到显示设置中的默认角度">
           重置视角
         </button>
       )}
