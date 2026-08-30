@@ -6,39 +6,39 @@ RA2 Explorer 已具备纯静态 GitHub Pages 发行模式。在线版地址是 <
 
 精简版的导航和载入范围由快照清单限定，不继承本地版保存过的其他格式开关。只有快照中实际存在且数量大于零的声音格式会参与分类；缺少的数据接口不会用空的地图、图像、调色板或资源包占位。
 
-Pages 不运行 Python、FastAPI 或 SQLite。发布前由本地解析器把真实安装转换成只读静态快照，前端的静态适配层在浏览器中完成目录读取、简繁搜索、阵营/事件筛选、排序、关联查询和详情请求。VXL 详情仍由 Three.js 交互渲染，SHP 与卡片使用预生成 WebP，声音按需播放 24 kbit/s Opus。
+Pages 不运行 Python、FastAPI 或 SQLite。发布前由本地解析器把真实安装转换成只读静态快照，前端的静态适配层在浏览器中完成目录读取、简繁/模糊/拼音搜索与补全、明确归属和无阵营筛选、事件筛选、排序、关联查询和详情请求。VXL 详情仍由 Three.js 交互渲染，SHP 与卡片使用预生成 WebP，声音按需播放 24 kbit/s Opus。
 
 ## 数据边界与实测体积
 
-当前固定快照 `ra2md-slim-9c67ead2747d` 包含：
+当前固定快照 `ra2md-slim-ea7811b00fa5` 包含：
 
 | 内容 | 数量或字节 | 约合 |
 | --- | ---: | ---: |
 | 单位 | 559 | — |
 | 声音 | 3,322 | — |
-| 发布文件 | 29,478 | — |
-| 解包后的 Pages 数据 | 146,254,240 字节 | 139.5 MiB |
-| 固定数据 ZIP | 86,590,616 字节 | 82.6 MiB |
-| ZIP SHA-256 | `f20ec4f5ebf20149210c4e9282954c23b97784fd5021e4be5b82f91503c70784` | — |
+| 发布文件 | 28,967 | — |
+| 解包后的 Pages 数据 | 144,037,918 字节 | 137.4 MiB |
+| 固定数据 ZIP | 79,221,500 字节 | 75.6 MiB |
+| ZIP SHA-256 | `58402e1a53b0305ce028cb48ad973f8e4478aac3a6c326ffd258d76738f3c9e9` | — |
 
 解包数据按用途分布如下：
 
 | 目录 | 字节 | 用途 |
 | --- | ---: | --- |
-| `previews` | 43,741,632 | 单位、主体动作与建筑图层 WebP |
+| `previews` | 39,581,782 | 单位、主体动作与建筑图层 WebP |
 | `models` | 41,886,903 | 可交互 VXL/HVA 场景 JSON |
 | `audio` | 24,774,611 | Opus 声音 |
-| `assets` | 17,722,853 | 资产元数据和关联 |
-| `entities` | 13,103,172 | 简体/繁体单位详情 |
-| `catalog` | 5,024,896 | 简体/繁体单位与声音目录 |
+| `assets` | 19,228,101 | 资产元数据和关联 |
+| `entities` | 13,407,158 | 简体/繁体单位详情 |
+| `catalog` | 5,159,190 | 简体/繁体单位与声音目录 |
 
-站点不会启动时下载这 139.5 MiB。JavaScript、CSS、当前语言目录、可见卡片、选中详情和用户实际播放的声音分别延迟请求。一次 Playwright 验收覆盖了单位列表、grid 预览、搜索并打开“战斗要塞”、加载交互模型、进入声音并播放一项、打开设置，实测传输约 0.88 MiB、浏览器解码内容约 5.12 MiB。不同 CDN 压缩、浏览器缓存和所选单位会改变实际数字；完整遍历所有资源的最坏上界仍约为 139.5 MiB。
+站点不会启动时下载这 137.4 MiB。JavaScript、CSS、当前语言目录、可见卡片、选中详情和用户实际播放的声音分别延迟请求。一次 Playwright 验收覆盖了单位列表、grid 预览、搜索并打开“战斗要塞”、加载交互模型、进入声音并播放一项、打开设置，实测传输约 0.88 MiB、浏览器解码内容约 5.12 MiB。不同 CDN 压缩、浏览器缓存和所选单位会改变实际数字；完整遍历所有资源的最坏上界仍约为 137.4 MiB。
 
-GitHub 官方给出的 Pages 限制包括：发布站点最大 1 GB、每月 100 GB 软带宽限制、部署最长 10 分钟。当前站点约占容量上限的 14%；如果每位访客真的完整遍历全部资源，100 GB 约支持 730 次完整传输，而常规按需会话远低于这一流量。[GitHub Pages 限制](https://docs.github.com/en/enterprise-cloud@latest/pages/getting-started-with-github-pages/github-pages-limits)
+GitHub 官方给出的 Pages 限制包括：发布站点最大 1 GB、每月 100 GB 软带宽限制、部署最长 10 分钟。当前站点约占容量上限的 14%；如果每位访客真的完整遍历全部资源，100 GB 约支持 745 次完整传输，而常规按需会话远低于这一流量。[GitHub Pages 限制](https://docs.github.com/en/enterprise-cloud@latest/pages/getting-started-with-github-pages/github-pages-limits)
 
 ## 为什么大数据不进入主分支
 
-主分支只追踪前端、导出器、审计脚本和不足 1 KiB 的 `packaging/pages-data.json`。82.6 MiB ZIP 存放在现有的公开 Hugging Face 发布仓库 `rockstarengine/ra2-explorer-release` 的 `pages-data/pages-data-v1/`，并由提交 `b8875f5ed407c925f25c8fbdeae7039cf6850b22` 固定。这个仓库的 Space 运行时保持暂停；文件下载不启动容器，也不消耗 CPU Basic 配额。
+主分支只追踪前端、导出器、审计脚本和不足 1 KiB 的 `packaging/pages-data.json`。75.6 MiB ZIP 存放在现有的公开 Hugging Face 发布仓库 `rockstarengine/ra2-explorer-release` 的 `pages-data/pages-data-v1/`，并由提交 `e9c0739a519750ad4bba50423b858f9e19a6aa14` 固定。这个仓库的 Space 运行时保持暂停；文件下载不启动容器，也不消耗 CPU Basic 配额。
 
 Pages workflow 默认从 `https://hf-mirror.com` 下载，网络失败才回退 `https://huggingface.co`。下载后必须依次通过固定字节数、SHA-256、ZIP 路径安全、文件类型白名单、原始游戏格式禁令、清单计数和隐私扫描，之后才允许解包进站点 artifact。代码版本更新不会重新上传数据；只有解析结果、模型或声音实际变化时才发布新快照并更新锁定清单。
 
