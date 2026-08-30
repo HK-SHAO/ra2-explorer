@@ -89,10 +89,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release view %GITHUB_REF_NAME% --json body --jq .body > .outputs\release-notes.txt
+      - name: Prepare Hugging Face Space runtime
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          HF_ENDPOINT: https://hf-mirror.com
+          HF_SPACE_RELEASE_REPO: ${{ secrets.HF_SPACE_RELEASE_REPO }}
+        run: .venv\Scripts\python.exe scripts\prepare_hf_space.py --output .outputs\huggingface-space --overwrite
       - name: Synchronize Hugging Face release
         if: startsWith(github.ref, 'refs/tags/')
         env:
           HF_ENDPOINT: https://hf-mirror.com
           HF_SPACE_RELEASE_REPO: ${{ secrets.HF_SPACE_RELEASE_REPO }}
           HF_TOKEN_RELEASE: ${{ secrets.HF_TOKEN_RELEASE }}
-        run: .venv\Scripts\python.exe scripts\publish_hf_release.py .outputs\RA2-Explorer-Web-x64.zip --version %GITHUB_REF_NAME% --notes-file .outputs\release-notes.txt
+        run: .venv\Scripts\python.exe scripts\publish_hf_release.py .outputs\RA2-Explorer-Web-x64.zip --version %GITHUB_REF_NAME% --notes-file .outputs\release-notes.txt --space-bundle .outputs\huggingface-space
