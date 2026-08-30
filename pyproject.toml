@@ -9,6 +9,8 @@ description = "Local-first Red Alert 2 asset explorer"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "ra2-explorer contributors" }]
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
   "fastapi>=0.116,<1",
   "opencc>=1.4.2,<2",

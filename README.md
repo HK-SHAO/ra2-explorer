@@ -57,6 +57,10 @@ ra2exp.exe package --game-dir "D:\Games\RA2" --output "D:\RA2 Explorer Local"
 
 ## 开发
 
-源码搭建、测试、后台服务、CLI 与发布命令已移至 [开发指南](docs/DEVELOPMENT.md)；实现边界见 [架构说明](docs/ARCHITECTURE.md)。项目目前没有声明代码许可证；在维护者补充许可证前，请不要把“可查看源码”理解为已经获得复制、修改或再分发代码的许可。
+源码搭建、测试、后台服务、CLI 与发布命令已移至 [开发指南](docs/DEVELOPMENT.md)；实现边界见 [架构说明](docs/ARCHITECTURE.md)。
+
+## 许可证
+
+RA2 Explorer 源代码采用 [MIT License](LICENSE)。该许可证只适用于本项目代码，不授予 Electronic Arts、Westwood 或其他权利人的游戏文件、名称、图像、音频及其他素材的权利。
 
 RA2 Explorer 与 Electronic Arts 或其许可方没有隶属关系。游戏内容的使用与再分发仍须遵守适用法律、平台条款和你实际取得的授权。
