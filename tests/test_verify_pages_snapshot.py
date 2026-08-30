@@ -83,3 +83,15 @@ def test_verify_pages_snapshot_rejects_archive_traversal(tmp_path: Path) -> None
 
     with pytest.raises(SnapshotValidationError, match="非法快照路径"):
         verify_snapshot(archive)
+
+
+def test_verify_pages_snapshot_rejects_nonexistent_slim_format(tmp_path: Path) -> None:
+    snapshot = tmp_path / "snapshot"
+    _write_snapshot(snapshot)
+    manifest_path = snapshot / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["stats"]["formats"] = [{"format": "map", "count": 1}]
+    manifest_path.write_text(json.dumps(manifest, separators=(",", ":")), encoding="utf-8")
+
+    with pytest.raises(SnapshotValidationError, match="不存在或不支持"):
+        verify_snapshot(snapshot)

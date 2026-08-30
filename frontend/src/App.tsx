@@ -687,6 +687,7 @@ function sortEntities(entities: EntitySummary[], sort: EntitySort, language: Gam
 }
 
 function initialVisibleFormats() {
+  if (isStaticSnapshot) return defaultVisibleFormats;
   try {
     const stored = JSON.parse(window.localStorage.getItem("ra2exp-visible-formats-v2") || "null");
     if (Array.isArray(stored) && stored.every((item) => typeof item === "string")) return stored as string[];
@@ -837,8 +838,13 @@ function ExplorerApp() {
 
   const activeSource = sources.find((item) => item.id === sourceId) ?? null;
   const sourceRevision = activeSource?.scanned_at || "";
+  const availableFormatNames = new Set(
+    stats.formats.filter((item) => item.count > 0).map((item) => item.format),
+  );
   const visibleCategories = assetCategories.filter((item) =>
-    item.formats.some((formatName) => enabledFormats.includes(formatName)),
+    item.formats.some((formatName) => (
+      enabledFormats.includes(formatName) && availableFormatNames.has(formatName)
+    )),
   );
   const selectedCategory = visibleCategories.find((item) => item.id === assetCategory)
     || visibleCategories[0]
@@ -1099,7 +1105,7 @@ function ExplorerApp() {
   useEffect(() => {
     Promise.all([
       api.sources(),
-      api.playerColors().catch(() => []),
+      isStaticSnapshot ? Promise.resolve([] as PlayerColor[]) : api.playerColors().catch(() => []),
       api.health().catch(() => null),
     ])
       .then(([nextSources, nextPlayerColors, appInfo]) => {
@@ -1148,7 +1154,7 @@ function ExplorerApp() {
     let cancelled = false;
     Promise.all([
       api.stats(sourceId),
-      api.palettes(sourceId),
+      isStaticSnapshot ? Promise.resolve([] as Asset[]) : api.palettes(sourceId),
       api.media(sourceId, { kind: "voice", limit: 1, language: gameLanguage }),
     ])
       .then(([nextStats, nextPalettes, mediaFacets]) => {
@@ -3681,7 +3687,10 @@ function DetachedEntityDetail({ sourceId, entityId }: { sourceId: string; entity
   const [colors, setColors] = useState<PlayerColor[]>([]);
   const [error, setError] = useState("");
   useEffect(() => {
-    Promise.all([api.entity(sourceId, entityId, gameLanguage), api.playerColors()])
+    Promise.all([
+      api.entity(sourceId, entityId, gameLanguage),
+      isStaticSnapshot ? Promise.resolve([] as PlayerColor[]) : api.playerColors(),
+    ])
       .then(([nextEntity, nextColors]) => {
         setEntity(nextEntity);
         setColors(nextColors);
@@ -3711,8 +3720,8 @@ function DetachedAssetDetail({ assetId }: { assetId: string }) {
         const [nextMetadata, nextAssociations, nextPalettes, nextColors] = await Promise.all([
           api.metadata(assetId),
           api.assetAssociations(assetId, gameLanguage).catch(() => null),
-          api.palettes(nextAsset.source_id),
-          api.playerColors(),
+          isStaticSnapshot ? Promise.resolve([] as Asset[]) : api.palettes(nextAsset.source_id),
+          isStaticSnapshot ? Promise.resolve([] as PlayerColor[]) : api.playerColors(),
         ]);
         setAsset(nextAsset);
         setMetadata(nextMetadata);

@@ -3,7 +3,6 @@ import type {
   Asset,
   AssetAssociationPage,
   AssetMetadata,
-  AssetPage,
   EntityPage,
   EntitySummary,
   GameEntity,
@@ -14,7 +13,6 @@ import type {
   SemanticDiagnostics,
   Source,
   Stats,
-  UpdateInfo,
 } from "./api";
 
 export const isStaticSnapshot = import.meta.env.VITE_RA2EXP_STATIC_SNAPSHOT === "1";
@@ -30,10 +28,18 @@ interface StaticSnapshotManifest {
   snapshot_id: string;
   created_at: string;
   app_version: string;
+  edition: "pages-slim";
+  included: Array<"units" | "sounds">;
   source: Source;
   stats: Stats;
   diagnostics: SemanticDiagnostics;
   reference_status: ReferenceStatus;
+}
+
+function requireContent(manifest: StaticSnapshotManifest, content: "units" | "sounds") {
+  if (!manifest.included.includes(content)) {
+    throw new Error(`精简网页版未包含${content === "units" ? "单位" : "声音"}资料`);
+  }
 }
 
 const jsonCache = new Map<string, Promise<unknown>>();
@@ -210,25 +216,19 @@ export async function staticSnapshotRequest<T>(path: string, init?: RequestInit)
     } as T;
   }
   if (route === "/api/sources") return [currentManifest.source] as T;
-  if (route === "/api/stats") return currentManifest.stats as T;
-  if (route === "/api/palettes" || route === "/api/player-colors" || route === "/api/resource-packs") return [] as T;
-  if (route === "/api/discovery") return { candidates: [], checked_locations: [], official_sources: [] } as T;
+  if (route === "/api/stats") {
+    requireContent(currentManifest, "sounds");
+    return currentManifest.stats as T;
+  }
   if (route === "/api/reference-data") return currentManifest.reference_status as T;
   if (route.includes("/api/semantic/") && route.endsWith("/diagnostics")) return currentManifest.diagnostics as T;
-  if (route === "/api/entities") return await filterEntities(url.searchParams) as T;
-  if (route === "/api/media") return await filterMedia(url.searchParams) as T;
-  if (route === "/api/assets") return { items: [], total: 0 } satisfies AssetPage as T;
-  if (route === "/api/updates/latest") {
-    return {
-      current_version: currentManifest.app_version,
-      latest_version: currentManifest.app_version,
-      update_available: false,
-      release_url: "https://github.com/Hansimov/ra2-explorer/releases",
-      published_at: null,
-      notes: "GitHub Pages 会自动使用最新稳定网页版本。",
-      provider: "github",
-      asset: null,
-    } satisfies UpdateInfo as T;
+  if (route === "/api/entities") {
+    requireContent(currentManifest, "units");
+    return await filterEntities(url.searchParams) as T;
+  }
+  if (route === "/api/media") {
+    requireContent(currentManifest, "sounds");
+    return await filterMedia(url.searchParams) as T;
   }
 
   const entityMatch = route.match(/^\/api\/entities\/[^/]+\/([^/]+)$/);

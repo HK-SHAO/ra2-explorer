@@ -22,6 +22,7 @@ MAX_FILES = 50_000
 MAX_BYTES = 256 * 1024 * 1024
 MAX_FILE_BYTES = 64 * 1024 * 1024
 ALLOWED_FILES = {"manifest.json", "ASSET-NOTICE.txt"}
+ALLOWED_AUDIO_FORMATS = {"aud", "bag_audio", "wav"}
 ALLOWED_SUFFIXES = {
     "assets": {".json"},
     "audio": {".ogg"},
@@ -192,6 +193,16 @@ def _validate_manifest(
         stats.get("total_assets", -1)
     ):
         raise SnapshotValidationError("声音格式统计与声音总数不一致")
+    if any(
+        not isinstance(item, dict)
+        or item.get("format") not in ALLOWED_AUDIO_FORMATS
+        or not isinstance(item.get("count"), int)
+        or item["count"] <= 0
+        for item in formats
+    ):
+        raise SnapshotValidationError("精简快照声明了不存在或不支持的声音格式")
+    if int(stats["total_assets"]) != int(catalog.get("audio", -1)):
+        raise SnapshotValidationError("载入类型统计与实际声音文件数不一致")
     category_counts = Counter(entry.path.split("/", 1)[0] for entry in entries)
     expected_counts = {
         "assets": int(catalog.get("referenced_assets", -1)),
