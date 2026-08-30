@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -11,9 +12,31 @@ from ra2_explorer.pages_snapshot import (
     _asset_usages,
     _AssetUsage,
     _directory_stats,
+    _prune_reused_exports,
     _safe_filename,
     _snapshot_identity,
 )
+
+
+def test_pages_prune_removes_only_stale_reused_exports(tmp_path: Path) -> None:
+    expected = tmp_path / "previews" / "assets" / "body" / "auto" / "0.webp"
+    stale = tmp_path / "previews" / "assets" / "weapon" / "auto" / "0.webp"
+    expected.parent.mkdir(parents=True)
+    stale.parent.mkdir(parents=True)
+    expected.write_bytes(b"expected")
+    stale.write_bytes(b"stale")
+
+    removed = _prune_reused_exports(
+        tmp_path,
+        asset_ids=set(),
+        audio_ids=set(),
+        animation_ids={"body"},
+        entity_ids=set(),
+    )
+
+    assert removed == 1
+    assert expected.read_bytes() == b"expected"
+    assert not stale.exists()
 
 
 def test_pages_asset_usages_exclude_incomplete_combat_effects() -> None:

@@ -206,6 +206,47 @@ def _resume_reusable_data(target: Path, staging: Path) -> int:
     return copied
 
 
+def _prune_reused_exports(
+    root: Path,
+    *,
+    asset_ids: set[str],
+    audio_ids: set[str],
+    animation_ids: set[str],
+    entity_ids: set[str],
+) -> int:
+    allowed = {
+        root / "assets": {f"{_safe_filename(asset_id)}.json" for asset_id in asset_ids},
+        root / "audio": {f"{_safe_filename(asset_id)}.ogg" for asset_id in audio_ids},
+        root / "previews" / "assets": {
+            _safe_filename(asset_id) for asset_id in animation_ids
+        },
+        root / "models" / "assets": {
+            _safe_filename(asset_id) for asset_id in animation_ids
+        },
+        root / "previews" / "entities": {
+            _safe_filename(entity_id) for entity_id in entity_ids
+        },
+        root / "models" / "entities": {
+            _safe_filename(entity_id) for entity_id in entity_ids
+        },
+    }
+    removed = 0
+    for directory, expected_names in allowed.items():
+        if not directory.is_dir():
+            continue
+        for path in directory.iterdir():
+            if path.name in expected_names:
+                continue
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+            removed += 1
+    if removed:
+        print(f"[pages] 清理失效复用项：{removed:,} 项", file=sys.stderr, flush=True)
+    return removed
+
+
 def _collect_catalog(
     client: TestClient,
     source_id: str,
@@ -847,6 +888,17 @@ def build_pages_snapshot(
             entity_models + animation_models,
             workers=workers,
             label="生成三维模型",
+        )
+        _prune_reused_exports(
+            staging,
+            asset_ids=set(referenced),
+            audio_ids=audio_ids,
+            animation_ids=set(animation_usages),
+            entity_ids={
+                str(entity["id"])
+                for entity in details_cn
+                if entity.get("renderable")
+            },
         )
 
         format_counts = Counter(
