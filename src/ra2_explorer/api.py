@@ -546,7 +546,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             services,
             "metadata",
             asset_record,
-            "inspection",
+            "inspection-v2-shp-bounds",
             extension="json",
         )
         cached = services.derived.read_json(artifact_path)

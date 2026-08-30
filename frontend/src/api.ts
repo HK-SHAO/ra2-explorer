@@ -52,6 +52,8 @@ export interface ShpFrame {
   width: number;
   height: number;
   compression: number;
+  content_bounds?: { x: number; y: number; width: number; height: number } | null;
+  paired_shadow_frame?: number | null;
 }
 
 export interface ShpMetadata {
@@ -499,7 +501,7 @@ export const api = {
       frame: String(options.frame ?? 0),
       facing: String(options.facing ?? 0),
       scale: String(options.scale ?? 4),
-      v: "10",
+      v: "12",
     });
     if (options.playerColor) params.set("player_color", options.playerColor);
     if (options.paletteId) params.set("palette_id", options.paletteId);

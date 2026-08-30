@@ -1233,9 +1233,10 @@ function ExplorerApp() {
   }, [selected, gameLanguage]);
 
   useEffect(() => {
-    if (!playing || !selected || !["shp", "hva"].includes(selected.format) || !metadata?.frame_count || metadata.frame_count < 2) return;
+    const playbackFrameCount = assetPlaybackFrameCount(selected?.format, metadata);
+    if (!playing || !selected || !["shp", "hva"].includes(selected.format) || playbackFrameCount < 2) return;
     const timer = window.setInterval(
-      () => setFrame((current) => (current + 1) % metadata.frame_count!),
+      () => setFrame((current) => (current + 1) % playbackFrameCount),
       selected.format === "hva" ? 350 : 140,
     );
     return () => window.clearInterval(timer);
@@ -1267,8 +1268,12 @@ function ExplorerApp() {
   const previewUrl = useMemo(() => {
     if (!selected || !imageFormats.includes(selected.format)) return "";
     const scale = selected.format === "pcx" ? 1 : selected.format === "pal" ? 3 : selected.format === "shp" ? 5 : 4;
-    return api.previewUrl(selected.id, frame, paletteId, scale);
-  }, [selected, frame, paletteId]);
+    if (selected.format !== "shp") return api.previewUrl(selected.id, frame, paletteId, scale);
+    const playbackFrames = shpPlaybackFrames(metadata);
+    const sourceFrame = playbackFrames[frame % Math.max(1, playbackFrames.length)] ?? 0;
+    const shadowFrame = metadata?.frames?.[sourceFrame]?.paired_shadow_frame ?? undefined;
+    return api.previewUrl(selected.id, sourceFrame, paletteId, scale, "", { shadowFrame });
+  }, [selected, frame, paletteId, metadata]);
 
   async function runAction(action: () => Promise<Source>, message: string) {
     setBusy(true);
@@ -1876,6 +1881,29 @@ function FrameGrid({ count, active, onSelect, urlFor }: { count: number; active:
   return <div className="frame-grid" aria-label="全部动画帧">{Array.from({ length: count }, (_, index) => <button type="button" key={index} className={active === index ? "active" : ""} onClick={() => onSelect(index)}><img loading="lazy" src={urlFor(index)} alt={`第 ${index + 1} 帧`} /><span>{index + 1}</span></button>)}</div>;
 }
 
+function FrameTransport({ frame, count, playing, onPlayingChange, onFrameChange, label = "动画帧", playDisabled = false }: {
+  frame: number;
+  count: number;
+  playing: boolean;
+  onPlayingChange: (playing: boolean) => void;
+  onFrameChange: (frame: number) => void;
+  label?: string;
+  playDisabled?: boolean;
+}) {
+  const activeFrame = Math.min(Math.max(0, frame), Math.max(0, count - 1));
+  function selectFrame(nextFrame: number) {
+    onPlayingChange(false);
+    onFrameChange(Math.min(Math.max(0, nextFrame), Math.max(0, count - 1)));
+  }
+  return <>
+    <button type="button" className="play-button" disabled={playDisabled} onClick={() => onPlayingChange(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : "play"} size={16} /></button>
+    <button type="button" className="frame-step-button previous" disabled={activeFrame <= 0} onClick={() => selectFrame(activeFrame - 1)} aria-label={`上一${label}`} title={`上一${label}`}>‹</button>
+    <button type="button" className="frame-step-button next" disabled={activeFrame >= count - 1} onClick={() => selectFrame(activeFrame + 1)} aria-label={`下一${label}`} title={`下一${label}`}>›</button>
+    <input type="range" min="0" max={Math.max(0, count - 1)} value={activeFrame} onChange={(event) => selectFrame(Number(event.target.value))} aria-label={`当前${label}`} />
+    <span>{String(activeFrame + 1).padStart(2, "0")} <i>/</i> {String(count).padStart(2, "0")}</span>
+  </>;
+}
+
 function animationSourceFramesFromTotal(sample: MediaSample | undefined, totalFrames: number, facing: number) {
   const total = Math.max(0, totalFrames);
   const playback = sample?.animation;
@@ -1911,6 +1939,31 @@ function effectBodySequence(associations: MediaAssociation[], slot: string) {
     if (match) return match;
   }
   return bodySequences.find((association) => association.event.toLowerCase().includes("fire")) || null;
+}
+
+function preferredBodySequence(associations: MediaAssociation[]) {
+  const bodySequences = associations.filter(
+    (association) => association.kind === "animation" && association.slot === "body_sequence",
+  );
+  const preferredEvents = ["ready", "guard", "deployed", "hover", "fly", "walk"];
+  return preferredEvents
+    .map((event) => bodySequences.find((association) => association.event.toLowerCase() === event))
+    .find((association): association is MediaAssociation => Boolean(association))
+    || bodySequences[0]
+    || null;
+}
+
+function defaultBuildingOperationSamples(associations: MediaAssociation[], facing: number) {
+  const seen = new Set<string>();
+  const samples: MediaSample[] = [];
+  for (const association of associations) {
+    for (const sample of animationCardSamples(association, facing)) {
+      if (!sample.asset || sample.asset.format !== "shp" || seen.has(sample.asset.id)) continue;
+      seen.add(sample.asset.id);
+      samples.push(sample);
+    }
+  }
+  return samples;
 }
 
 const animationDirections = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
@@ -2143,23 +2196,81 @@ interface ImageFrameFit {
   width: number;
   height: number;
   bounds: { x: number; y: number; width: number; height: number };
+  focusBounds: { x: number; y: number; width: number; height: number };
 }
 
-function sequenceFrameFit(metadata: AssetMetadata | null, frameIndices: number[]): ImageFrameFit | null {
+function unionImageBounds(bounds: Array<{ x: number; y: number; width: number; height: number }>) {
+  if (bounds.length === 0) return null;
+  const left = Math.min(...bounds.map((item) => item.x));
+  const top = Math.min(...bounds.map((item) => item.y));
+  const right = Math.max(...bounds.map((item) => item.x + item.width));
+  const bottom = Math.max(...bounds.map((item) => item.y + item.height));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function shpFrameBounds(frame: NonNullable<AssetMetadata["frames"]>[number]) {
+  const content = frame.content_bounds;
+  return content && content.width > 0 && content.height > 0
+    ? content
+    : { x: frame.x, y: frame.y, width: frame.width, height: frame.height };
+}
+
+function isVisibleShpFrame(frame: NonNullable<AssetMetadata["frames"]>[number]) {
+  return frame.width > 0 && frame.height > 0 && frame.content_bounds !== null;
+}
+
+function shpPlaybackFrames(metadata: AssetMetadata | null) {
+  if (!metadata?.frames?.length) return Array.from({ length: metadata?.frame_count || 0 }, (_, index) => index);
+  const shadowFrames = new Set(metadata.frames
+    .map((frame) => frame.paired_shadow_frame)
+    .filter((frame): frame is number => frame !== null && frame !== undefined));
+  const playbackFrames = metadata.frames
+    .filter((frame) => isVisibleShpFrame(frame) && !shadowFrames.has(frame.index))
+    .map((frame) => frame.index);
+  return playbackFrames.length > 0 ? playbackFrames : metadata.frames.map((frame) => frame.index);
+}
+
+function assetPlaybackFrameCount(format: string | undefined, metadata: AssetMetadata | null) {
+  return format === "shp" ? Math.max(1, shpPlaybackFrames(metadata).length) : Math.max(1, metadata?.frame_count || 1);
+}
+
+function sequenceFrameFit(metadata: AssetMetadata | null, frameIndices: number[], shadowFrameIndices?: number[]): ImageFrameFit | null {
   if (!metadata?.width || !metadata.height || !metadata.frames?.length) return null;
-  const frames = [...new Set(frameIndices)]
+  const mainFrames = [...new Set(frameIndices)]
     .map((index) => metadata.frames?.[index])
-    .filter((frame): frame is NonNullable<typeof frame> => Boolean(frame && frame.width > 0 && frame.height > 0));
-  if (frames.length === 0) return null;
-  const left = Math.min(...frames.map((frame) => frame.x));
-  const top = Math.min(...frames.map((frame) => frame.y));
-  const right = Math.max(...frames.map((frame) => frame.x + frame.width));
-  const bottom = Math.max(...frames.map((frame) => frame.y + frame.height));
+    .filter((frame): frame is NonNullable<typeof frame> => Boolean(frame && isVisibleShpFrame(frame)));
+  if (mainFrames.length === 0) return null;
+  const resolvedShadowIndices = shadowFrameIndices ?? mainFrames
+    .map((frame) => frame.paired_shadow_frame)
+    .filter((frame): frame is number => frame !== null && frame !== undefined);
+  const shadowFrames = [...new Set(resolvedShadowIndices)]
+    .map((index) => metadata.frames?.[index])
+    .filter((frame): frame is NonNullable<typeof frame> => Boolean(frame && isVisibleShpFrame(frame)));
+  const focusBounds = unionImageBounds(mainFrames.map(shpFrameBounds));
+  const bounds = unionImageBounds([...mainFrames, ...shadowFrames].map(shpFrameBounds));
+  if (!focusBounds || !bounds) return null;
   return {
     width: metadata.width,
     height: metadata.height,
-    bounds: { x: left, y: top, width: right - left, height: bottom - top },
+    bounds,
+    focusBounds,
   };
+}
+
+function combineFrameFits(...fits: Array<ImageFrameFit | null>): ImageFrameFit | null {
+  const available = fits.filter((fit): fit is ImageFrameFit => Boolean(fit));
+  if (available.length === 0) return null;
+  const width = Math.max(...available.map((fit) => fit.width));
+  const height = Math.max(...available.map((fit) => fit.height));
+  const translated = available.map((fit) => {
+    const offsetX = (width - fit.width) / 2;
+    const offsetY = (height - fit.height) / 2;
+    const translate = (bounds: ImageFrameFit["bounds"]) => ({ ...bounds, x: bounds.x + offsetX, y: bounds.y + offsetY });
+    return { bounds: translate(fit.bounds), focusBounds: translate(fit.focusBounds) };
+  });
+  const bounds = unionImageBounds(translated.map((fit) => fit.bounds));
+  const focusBounds = translated[0]?.focusBounds || null;
+  return bounds && focusBounds ? { width, height, bounds, focusBounds } : null;
 }
 
 function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, building = false, className = "", onError }: {
@@ -2175,15 +2286,11 @@ function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, b
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
-  const [imageFit, setImageFit] = useState<{
-    width: number;
-    height: number;
-    bounds: { x: number; y: number; width: number; height: number };
-  } | null>(null);
+  const [imageFit, setImageFit] = useState<ImageFrameFit | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ pointerId: number; x: number; y: number; panX: number; panY: number } | null>(null);
   const frameFitIdentity = frameFit
-    ? `${frameFit.width}:${frameFit.height}:${frameFit.bounds.x}:${frameFit.bounds.y}:${frameFit.bounds.width}:${frameFit.bounds.height}`
+    ? `${frameFit.width}:${frameFit.height}:${frameFit.bounds.x}:${frameFit.bounds.y}:${frameFit.bounds.width}:${frameFit.bounds.height}:${frameFit.focusBounds.x}:${frameFit.focusBounds.y}:${frameFit.focusBounds.width}:${frameFit.focusBounds.height}`
     : "";
 
   function reset() {
@@ -2240,6 +2347,12 @@ function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, b
           width: frameFit.bounds.width * scaleX,
           height: frameFit.bounds.height * scaleY,
         },
+        focusBounds: {
+          x: frameFit.focusBounds.x * scaleX,
+          y: frameFit.focusBounds.y * scaleY,
+          width: frameFit.focusBounds.width * scaleX,
+          height: frameFit.focusBounds.height * scaleY,
+        },
       };
       setImageFit((current) => current
         && current.width === nextFit.width
@@ -2248,6 +2361,10 @@ function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, b
         && current.bounds.y === nextFit.bounds.y
         && current.bounds.width === nextFit.bounds.width
         && current.bounds.height === nextFit.bounds.height
+        && current.focusBounds.x === nextFit.focusBounds.x
+        && current.focusBounds.y === nextFit.focusBounds.y
+        && current.focusBounds.width === nextFit.focusBounds.width
+        && current.focusBounds.height === nextFit.focusBounds.height
         ? current
         : nextFit);
       return;
@@ -2285,9 +2402,10 @@ function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, b
             height: (bottom - top + 1) / sampleScale,
           }
         : { x: 0, y: 0, width, height };
-      setImageFit({ width, height, bounds });
+      setImageFit({ width, height, bounds, focusBounds: bounds });
     } catch {
-      setImageFit({ width, height, bounds: { x: 0, y: 0, width, height } });
+      const bounds = { x: 0, y: 0, width, height };
+      setImageFit({ width, height, bounds, focusBounds: bounds });
     }
   }
 
@@ -2305,15 +2423,25 @@ function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, b
     const padding = Math.max(32, Math.min(viewportSize.width, viewportSize.height) * 0.12);
     const availableWidth = Math.max(1, viewportSize.width - padding * 2);
     const availableHeight = Math.max(1, viewportSize.height - padding * 2);
+    const focusCenterX = imageFit.focusBounds.x + imageFit.focusBounds.width / 2;
+    const focusCenterY = imageFit.focusBounds.y + imageFit.focusBounds.height / 2;
+    const stableWidth = Math.max(1, 2 * Math.max(
+      focusCenterX - imageFit.bounds.x,
+      imageFit.bounds.x + imageFit.bounds.width - focusCenterX,
+    ));
+    const stableHeight = Math.max(1, 2 * Math.max(
+      focusCenterY - imageFit.bounds.y,
+      imageFit.bounds.y + imageFit.bounds.height - focusCenterY,
+    ));
     const scale = Math.min(1.75,
-      availableWidth / Math.max(1, imageFit.bounds.width),
-      availableHeight / Math.max(1, imageFit.bounds.height),
+      availableWidth / stableWidth,
+      availableHeight / stableHeight,
     );
     return {
       width: imageFit.width * scale,
       height: imageFit.height * scale,
-      left: viewportSize.width / 2 - (imageFit.bounds.x + imageFit.bounds.width / 2) * scale,
-      top: viewportSize.height / 2 - (imageFit.bounds.y + imageFit.bounds.height / 2) * scale,
+      left: viewportSize.width / 2 - focusCenterX * scale,
+      top: viewportSize.height / 2 - focusCenterY * scale,
     };
   }, [imageFit, viewportSize]);
   const activeFittedImageStyle = fitContent ? fittedImageStyle : undefined;
@@ -2463,6 +2591,8 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, defaultPre
   const [activeAnimation, setActiveAnimation] = useState<ActiveEntityAnimation | null>(null);
   const [animationMetadata, setAnimationMetadata] = useState<AssetMetadata | null>(null);
   const [effectBodyMetadata, setEffectBodyMetadata] = useState<AssetMetadata | null>(null);
+  const [bodyMetadata, setBodyMetadata] = useState<AssetMetadata | null>(null);
+  const [operationMetadata, setOperationMetadata] = useState<Record<string, AssetMetadata>>({});
   const [animationFrame, setAnimationFrame] = useState(0);
   const [animationPlaying, setAnimationPlaying] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
@@ -2515,9 +2645,25 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, defaultPre
     : [];
   const activeAnimationFrameFit = sequenceFrameFit(
     animationMetadata,
-    [...activeAnimationFrames, ...activeAnimationShadowFrames],
+    activeAnimationFrames,
+    activeAnimationShadowFrames,
   );
-  const effectBodyFrameFit = sequenceFrameFit(effectBodyMetadata, effectBodyFrames);
+  const effectBodyShadowFrames = effectBodySample?.animation?.shadow && effectBodyMetadata?.frame_count
+    ? effectBodyFrames
+      .map((sourceFrame) => sourceFrame + Math.floor(effectBodyMetadata.frame_count! / 2))
+      .filter((sourceFrame) => sourceFrame < effectBodyMetadata.frame_count!)
+    : [];
+  const effectBodyFrameFit = sequenceFrameFit(effectBodyMetadata, effectBodyFrames, effectBodyShadowFrames);
+  const defaultBodyAssociation = preferredBodySequence(bodyAnimationAssociations);
+  const defaultBodySample = defaultBodyAssociation?.samples.find((sample) => sample.asset) || null;
+  const bodyFrameIndices = defaultBodySample
+    ? animationSourceFrames(defaultBodySample, bodyMetadata, facing)
+    : entity?.preview.frame_indices || shpPlaybackFrames(bodyMetadata);
+  const entityBodyFrameFit = sequenceFrameFit(
+    bodyMetadata,
+    bodyFrameIndices,
+    entityKind === "building" ? undefined : [],
+  );
   const activeAnimationFrameCount = activeAnimation
     ? Math.max(activeAnimationFrames.length, effectBodyFrames.length, 1)
     : activeAnimationFrames.length;
@@ -2576,6 +2722,17 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, defaultPre
   ) : "", [sourceId, entity, frame, renderFacing, playerColor]);
 
   useEffect(() => setPreviewFailed(false), [previewUrl]);
+
+  useEffect(() => {
+    setBodyMetadata(null);
+    const bodyAsset = entity?.components.find((component) => component.role === "body")?.asset;
+    if (!bodyAsset || bodyAsset.format !== "shp") return;
+    let cancelled = false;
+    api.metadata(bodyAsset.id)
+      .then((nextMetadata) => !cancelled && setBodyMetadata(nextMetadata))
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [entity?.id]);
 
   useEffect(() => {
     setAnimationMetadata(null);
@@ -2763,7 +2920,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, defaultPre
         <div className="entity-preview-column">
           {entity.renderable ? <div className="preview-block entity-preview">
             {activeAnimationReplacesBody && activeAnimationAsset?.format === "shp"
-              ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${activeAnimationAsset.id}:${activeAnimation?.event || "body"}`} fitContent={Boolean(activeAnimationFrameFit)} frameFit={activeAnimationFrameFit} src={activeAnimationPreviewUrl} alt={`${activeAnimationTitle}预览`} building={entity.kind === "building"} />
+              ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${activeAnimationAsset.id}:${activeAnimation?.event || "body"}`} frameFit={activeAnimationFrameFit} src={activeAnimationPreviewUrl} alt={`${activeAnimationTitle}预览`} building={entity.kind === "building"} />
               : activeAnimationReplacesBody && activeAnimationAsset && ["vxl", "hva"].includes(activeAnimationAsset.format)
                 ? <VoxelPreview url={api.assetModelUrl(activeAnimationAsset.id, activeAnimationSourceFrame, playerColor)} label={animationEventLabel(activeAnimation?.event || activeAnimationAsset.display_name)} viewKey={`asset:${activeAnimationAsset.id}`} previewAngle={previewAngle} onPreviewAngleChange={setPreviewAngle} />
                 : buildingOperationPreviewUrl
@@ -2772,21 +2929,21 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, defaultPre
                     ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing: renderFacing, playerColor, scale: 3 })} />
                     : <div className="entity-composite-stage">
                     {effectBodyPreviewUrl
-                      ? <ImageViewport className="shp entity-composite-body" fitKey={`${entity.id}:${effectBodyAssociation?.event || "body"}`} fitContent={Boolean(effectBodyFrameFit)} frameFit={effectBodyFrameFit} src={effectBodyPreviewUrl} alt={`${entity.display_name} 主体动作`} building={entity.kind === "building"} />
+                      ? <ImageViewport className="shp entity-composite-body" fitKey={`${entity.id}:${effectBodyAssociation?.event || "body"}`} frameFit={effectBodyFrameFit} src={effectBodyPreviewUrl} alt={`${entity.display_name} 主体动作`} building={entity.kind === "building"} />
                       : entity.voxel
                         ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} viewKey={`entity:${sourceId}:${entity.id}`} previewAngle={previewAngle} onPreviewAngleChange={setPreviewAngle} />
                         : previewFailed
                           ? <div className="preview-stage shp"><div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div></div>
-                          : <ImageViewport className="shp entity-composite-body" fitKey={entity.id} fitContent={activeAnimation?.role === "operation" && entity.kind === "building" ? false : !playing || frameCount <= 1} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
+                          : <ImageViewport className="shp entity-composite-body" fitKey={entity.id} frameFit={entityBodyFrameFit} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
                     {activeAnimationAsset?.format === "shp" && <span className={`entity-effect-overlay ${activeAnimation?.role === "operation" ? "attached" : ""} ${effectFrameVisible ? "visible" : "hidden"}`} style={{ "--effect-x": `${effectAnchor.x}%`, "--effect-y": `${effectAnchor.y}%` } as CSSProperties} aria-hidden="true">
                       <StablePreviewImage src={activeAnimationPreviewUrl} alt="" />
                     </span>}
                     </div>}
             {(activeAnimationAsset || hasRawBodyAnimation) && <div className="entity-preview-controls">
               {activeAnimationAsset && activeAnimationFrameCount > 1
-                ? <div className="frame-controls"><button className="play-button" onClick={() => setAnimationPlaying(!animationPlaying)} aria-label={animationPlaying ? "暂停" : "播放"}><Icon name={animationPlaying ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={activeAnimationFrameCount - 1} value={Math.min(animationFrame, activeAnimationFrameCount - 1)} onChange={(event) => setAnimationFrame(Number(event.target.value))} aria-label="关联动画帧" /><span>{String(animationFrame + 1).padStart(2, "0")} <i>/</i> {String(activeAnimationFrameCount).padStart(2, "0")} · 源 {activeAnimationSourceFrame + 1}</span></div>
+                ? <div className="frame-controls"><FrameTransport frame={animationFrame} count={activeAnimationFrameCount} playing={animationPlaying} onPlayingChange={setAnimationPlaying} onFrameChange={setAnimationFrame} label="帧" /></div>
                 : !activeAnimationAsset && hasRawBodyAnimation && <div className="frame-controls">
-                  {frameMode === "sequence" && <><button className="play-button" onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={frameCount - 1} value={Math.min(frame, frameCount - 1)} onChange={(event) => setFrame(Number(event.target.value))} aria-label="当前动画帧" /><span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(frameCount).padStart(2, "0")}</span></>}
+                  {frameMode === "sequence" && <FrameTransport frame={frame} count={frameCount} playing={playing} onPlayingChange={setPlaying} onFrameChange={setFrame} label="帧" />}
                   <div className="frame-mode-toggle"><button className={frameMode === "sequence" ? "active" : ""} onClick={() => setFrameMode("sequence")} title="顺序播放"><Icon name="play" size={14} /></button><button className={frameMode === "grid" ? "active" : ""} onClick={() => { setPlaying(false); setFrameMode("grid"); }} title="全部帧"><Icon name="grid" size={14} /></button></div>
                 </div>}
               {activeAnimation && activeAnimationCandidates.length > 1 && <label className="animation-candidate-control"><span>候选</span><select aria-label="动画候选" value={activeAnimation.sample.name} onChange={(event) => {
@@ -2936,8 +3093,19 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   const activeAudioDetailTab = audioDetailTab === "associations" && !hasAudioRelationshipTabs
     ? "data"
     : audioDetailTab;
-  const frameCount = metadata?.frame_count || 1;
-  const activeFrame = metadata?.frames?.[frame];
+  const shpFrames = asset.format === "shp" ? shpPlaybackFrames(metadata) : [];
+  const frameCount = assetPlaybackFrameCount(asset.format, metadata);
+  const sourceFrame = asset.format === "shp"
+    ? shpFrames[frame % Math.max(1, shpFrames.length)] ?? 0
+    : frame;
+  const sourceShadowFrame = asset.format === "shp"
+    ? metadata?.frames?.[sourceFrame]?.paired_shadow_frame ?? undefined
+    : undefined;
+  const shpSequenceFit = asset.format === "shp" ? sequenceFrameFit(metadata, shpFrames) : null;
+  const resolvedPreviewUrl = asset.format === "shp"
+    ? api.previewUrl(asset.id, sourceFrame, paletteId, 5, playerColor, { shadowFrame: sourceShadowFrame })
+    : previewUrl;
+  const activeFrame = metadata?.frames?.[sourceFrame];
   const activeLimb = metadata?.limbs?.[frame];
   const hasFrameControl = ["shp", "tmp", "hva"].includes(asset.format) && frameCount > 1;
   const canChoosePalette = ["shp", "vxl", "hva", "tmp"].includes(asset.format) && palettes.length > 0;
@@ -3027,7 +3195,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
           ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.previewUrl(asset.id, index, paletteId, 3, playerColor)} />
           : <VoxelPreview url={api.assetModelUrl(asset.id, frame, playerColor, paletteId)} label={asset.display_name} viewKey={`asset:${asset.id}`} />}
         {asset.format === "hva" && hasFrameControl && <div className="frame-controls">
-          {frameMode === "sequence" && <><button className="play-button" onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : "play"} size={16} /></button><input type="range" min="0" max={frameCount - 1} value={Math.min(frame, frameCount - 1)} onChange={(event) => setFrame(Number(event.target.value))} aria-label="当前动画帧" /><span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(frameCount).padStart(2, "0")}</span></>}
+          {frameMode === "sequence" && <FrameTransport frame={frame} count={frameCount} playing={playing} onPlayingChange={setPlaying} onFrameChange={setFrame} label="帧" />}
           <div className="frame-mode-toggle"><button className={frameMode === "sequence" ? "active" : ""} onClick={() => setFrameMode("sequence")} title="顺序播放"><Icon name="play" size={14} /></button><button className={frameMode === "grid" ? "active" : ""} onClick={() => { setPlaying(false); setFrameMode("grid"); }} title="全部帧"><Icon name="grid" size={14} /></button></div>
         </div>}
       </div>}
@@ -3035,10 +3203,13 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
       {canPreview && (
         <div className="preview-block">
           {frameMode === "grid" && asset.format === "shp" && frameCount > 1
-            ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.previewUrl(asset.id, index, paletteId, 3, playerColor)} />
-            : <ImageViewport className={asset.format} fitKey={asset.id} fitContent={asset.format !== "shp" || frameCount <= 1} src={previewUrl} alt={`${asset.display_name} 预览`} />}
+            ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => {
+              const source = shpFrames[index] ?? 0;
+              return api.previewUrl(asset.id, source, paletteId, 3, playerColor, { shadowFrame: metadata?.frames?.[source]?.paired_shadow_frame ?? undefined });
+            }} />
+            : <ImageViewport className={asset.format} fitKey={asset.id} frameFit={shpSequenceFit} src={resolvedPreviewUrl} alt={`${asset.display_name} 预览`} />}
           {hasFrameControl && <div className="frame-controls">
-            {frameMode === "sequence" && <><button className="play-button" disabled={asset.format === "tmp"} onClick={() => setPlaying(!playing)} aria-label={playing ? "暂停" : "播放"}><Icon name={playing ? "pause" : assetIcon(asset.format)} size={16} /></button><input type="range" min="0" max={Math.max(0, frameCount - 1)} value={Math.min(frame, frameCount - 1)} onChange={(event) => setFrame(Number(event.target.value))} aria-label={asset.format === "vxl" ? "当前部件" : asset.format === "tmp" ? "当前地块" : "当前帧"} /><span>{String(frame + 1).padStart(2, "0")} <i>/</i> {String(frameCount).padStart(2, "0")}</span></>}
+            {frameMode === "sequence" && <FrameTransport frame={frame} count={frameCount} playing={playing} onPlayingChange={setPlaying} onFrameChange={setFrame} label={asset.format === "tmp" ? "地块" : "帧"} playDisabled={asset.format === "tmp"} />}
             {asset.format === "shp" && <div className="frame-mode-toggle"><button className={frameMode === "sequence" ? "active" : ""} onClick={() => setFrameMode("sequence")} title="顺序播放"><Icon name="play" size={14} /></button><button className={frameMode === "grid" ? "active" : ""} onClick={() => { setPlaying(false); setFrameMode("grid"); }} title="全部帧"><Icon name="grid" size={14} /></button></div>}
           </div>}
         </div>
@@ -3234,8 +3405,9 @@ function DetachedAssetDetail({ assetId }: { assetId: string }) {
     return () => window.clearTimeout(timer);
   }, [asset, textQuery]);
   useEffect(() => {
-    if (!playing || !asset || !["shp", "hva"].includes(asset.format) || !metadata?.frame_count || metadata.frame_count < 2) return;
-    const timer = window.setInterval(() => setFrame((current) => (current + 1) % metadata.frame_count!), asset.format === "hva" ? 350 : 140);
+    const playbackFrameCount = assetPlaybackFrameCount(asset?.format, metadata);
+    if (!playing || !asset || !["shp", "hva"].includes(asset.format) || playbackFrameCount < 2) return;
+    const timer = window.setInterval(() => setFrame((current) => (current + 1) % playbackFrameCount), asset.format === "hva" ? 350 : 140);
     return () => window.clearInterval(timer);
   }, [playing, asset, metadata]);
   const previewUrl = asset && imageFormats.includes(asset.format)
