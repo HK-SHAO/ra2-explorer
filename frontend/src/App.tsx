@@ -3,6 +3,7 @@ import {
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   lazy,
+  memo,
   PointerEvent as ReactPointerEvent,
   ReactNode,
   Suspense,
@@ -104,8 +105,7 @@ type IconName =
   | "unit"
   | "voice";
 
-function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
-  const paths: Record<IconName, ReactNode> = {
+const iconPaths: Record<IconName, ReactNode> = {
     aircraft: <><path d="m3 14 8-3V5l2-2 1 8 7 3v2l-7-1.5-1 6.5h-2l-1-6.5L3 16z" /></>,
     archive: <><path d="M4 7.5h16v12H4z" /><path d="M3 4.5h18v3H3zM9 11h6" /></>,
     building: <><path d="M5 21V4h10v17M15 9h4v12M8 8h4M8 12h4M8 16h4M3 21h18" /></>,
@@ -130,13 +130,15 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     swatch: <><path d="M4 4h6v16H4zM10 7h5v13h-5zM15 10h5v10h-5z" /><path d="M7 16h.01M12.5 16h.01M17.5 16h.01" /></>,
     unit: <><path d="M5 10h11l3 3v4H5z" /><path d="M8 10V7h6l2 3M14 7l3-2M4 17h16" /><circle cx="8" cy="18" r="2" /><circle cx="17" cy="18" r="2" /></>,
     voice: <><path d="M5 5h14v11H9l-4 4z" /><path d="M9 9h6M9 12h4" /></>,
-  };
+};
+
+const Icon = memo(function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   return (
     <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <g stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</g>
+      <g stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{iconPaths[name]}</g>
     </svg>
   );
-}
+});
 
 function SidebarToggle({ initialCollapsed, onChange }: {
   initialCollapsed: boolean;

@@ -64,7 +64,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .workspace.detail-bottom > .workspace-resizer span { width: 38px; height: 2px; }
 .workspace-resizer:hover span, .workspace-resizer:focus-visible span { background: var(--red-bright); }
 .panel { min-width: 0; background: var(--panel); }
-.source-panel { min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
+.source-panel { min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); contain: layout paint; }
+.source-panel .icon { display: block; flex: 0 0 auto; contain: layout paint; }
 .sidebar-brand { position: relative; min-height: 64px; display: flex; align-items: center; gap: 11px; padding: 10px 9px 10px 15px; border-bottom: 1px solid var(--line-soft); }
 .sidebar-brand .brand-mark { width: 34px; height: 34px; }
 .sidebar-brand .brand-mark span { font-size: 21px; }
