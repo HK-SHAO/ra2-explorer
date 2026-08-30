@@ -25,7 +25,7 @@ interface ViewerEngine {
   viewKey: string | null;
   viewHeight: number;
   updateProjection: (() => void) | null;
-  resetView: (() => void) | null;
+  resetView: ((angle?: PreviewAngle) => void) | null;
   render: (() => void) | null;
 }
 
@@ -60,17 +60,19 @@ export async function preloadVoxelScenes(urls: string[], signal?: AbortSignal) {
   }
 }
 
-export function VoxelViewer({ url, label, viewKey, previewAngle, onPreviewAngleChange, onLoadSettled }: {
+export function VoxelViewer({ url, label, viewKey, previewAngle, resetAngle = previewAngle, onPreviewAngleChange, onLoadSettled }: {
   url: string;
   label: string;
   viewKey: string;
   previewAngle: PreviewAngle;
+  resetAngle?: PreviewAngle;
   onPreviewAngleChange?: (angle: PreviewAngle) => void;
   onLoadSettled?: () => void;
 }) {
   const mountRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<ViewerEngine | null>(null);
   const previewAngleRef = useRef(previewAngle);
+  const resetAngleRef = useRef(resetAngle);
   const reportedPreviewAngleRef = useRef<PreviewAngle | null>(null);
   const onPreviewAngleChangeRef = useRef(onPreviewAngleChange);
   const onLoadSettledRef = useRef(onLoadSettled);
@@ -78,6 +80,7 @@ export function VoxelViewer({ url, label, viewKey, previewAngle, onPreviewAngleC
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   previewAngleRef.current = previewAngle;
+  resetAngleRef.current = resetAngle;
   onPreviewAngleChangeRef.current = onPreviewAngleChange;
   onLoadSettledRef.current = onLoadSettled;
 
@@ -115,6 +118,7 @@ export function VoxelViewer({ url, label, viewKey, previewAngle, onPreviewAngleC
       controls.maxZoom = 12;
 
       let lastPreviewAngle = -1;
+      let userAdjustingView = false;
       const render = () => {
         renderer.render(scene, camera);
         const offsetX = camera.position.x - controls.target.x;
@@ -123,11 +127,17 @@ export function VoxelViewer({ url, label, viewKey, previewAngle, onPreviewAngleC
         const currentPreviewAngle = ((sector % 8) + 8) % 8 as PreviewAngle;
         if (currentPreviewAngle !== lastPreviewAngle) {
           lastPreviewAngle = currentPreviewAngle;
-          reportedPreviewAngleRef.current = currentPreviewAngle;
-          onPreviewAngleChangeRef.current?.(currentPreviewAngle);
+          if (userAdjustingView) {
+            reportedPreviewAngleRef.current = currentPreviewAngle;
+            onPreviewAngleChangeRef.current?.(currentPreviewAngle);
+          }
         }
       };
+      const beginViewAdjustment = () => { userAdjustingView = true; };
+      const finishViewAdjustment = () => { userAdjustingView = false; };
       controls.addEventListener("change", render);
+      controls.addEventListener("start", beginViewAdjustment);
+      controls.addEventListener("end", finishViewAdjustment);
 
       const engine: ViewerEngine = {
         scene,
@@ -310,10 +320,10 @@ export function VoxelViewer({ url, label, viewKey, previewAngle, onPreviewAngleC
     });
     engine.scene.add(grid);
     engine.grid = grid;
-    const resetView = () => {
+    const resetView = (requestedAngle = previewAngleRef.current) => {
       const radius = Math.max(diameter / 2, 0.05);
       const distance = Math.max(radius * 4, 1);
-      const angle = previewAngleRef.current * (Math.PI / 4);
+      const angle = requestedAngle * (Math.PI / 4);
       const direction = new THREE.Vector3(Math.sin(angle), 1, Math.cos(angle)).normalize();
       engine.camera.near = Math.max(distance - radius * 2.5, 0.000_1);
       engine.camera.far = Math.max(distance + radius * 4, 100);
@@ -341,7 +351,12 @@ export function VoxelViewer({ url, label, viewKey, previewAngle, onPreviewAngleC
     <div className="voxel-viewer" aria-busy={loading}>
       <div ref={mountRef} className="voxel-canvas" />
       {loadedScene && !loading && (
-        <button type="button" className="voxel-reset" onClick={() => engineRef.current?.resetView?.()} title="重置到显示设置中的默认角度">
+        <button type="button" className="voxel-reset" onClick={() => {
+          const angle = resetAngleRef.current;
+          reportedPreviewAngleRef.current = angle;
+          onPreviewAngleChangeRef.current?.(angle);
+          engineRef.current?.resetView?.(angle);
+        }} title="重置到显示设置中的默认角度">
           重置视角
         </button>
       )}

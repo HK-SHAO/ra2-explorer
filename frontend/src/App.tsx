@@ -54,11 +54,12 @@ function loadVoxelViewerModule() {
 
 const VoxelViewer = lazy(async () => ({ default: (await loadVoxelViewerModule()).VoxelViewer }));
 
-function VoxelPreview({ url, label, viewKey, previewAngle = DEFAULT_PREVIEW_ANGLE, onPreviewAngleChange }: {
+function VoxelPreview({ url, label, viewKey, previewAngle = DEFAULT_PREVIEW_ANGLE, resetAngle = previewAngle, onPreviewAngleChange }: {
   url: string;
   label: string;
   viewKey: string;
   previewAngle?: PreviewAngle;
+  resetAngle?: PreviewAngle;
   onPreviewAngleChange?: (angle: PreviewAngle) => void;
 }) {
   const finishPriorityRef = useRef<(() => void) | null>(null);
@@ -74,7 +75,7 @@ function VoxelPreview({ url, label, viewKey, previewAngle = DEFAULT_PREVIEW_ANGL
     finishPriorityRef.current?.();
     finishPriorityRef.current = null;
   }, []);
-  return <Suspense fallback={<div className="voxel-viewer"><div className="voxel-status">正在载入三维视图…</div></div>}><VoxelViewer url={url} label={label} viewKey={viewKey} previewAngle={previewAngle} onPreviewAngleChange={onPreviewAngleChange} onLoadSettled={finishPriority} /></Suspense>;
+  return <Suspense fallback={<div className="voxel-viewer"><div className="voxel-status">正在载入三维视图…</div></div>}><VoxelViewer url={url} label={label} viewKey={viewKey} previewAngle={previewAngle} resetAngle={resetAngle} onPreviewAngleChange={onPreviewAngleChange} onLoadSettled={finishPriority} /></Suspense>;
 }
 
 type IconName =
@@ -751,7 +752,7 @@ function ExplorerApp() {
   const [assetSort, setAssetSort] = useState<AssetSort>(rememberedLocation.assetSort || "name_asc");
   const [enabledFormats, setEnabledFormats] = useState<string[]>(initialVisibleFormats);
   const [layout, setLayout] = useState<LayoutMode>(() =>
-    window.localStorage.getItem("ra2exp-layout") === "grid" ? "grid" : "list",
+    window.localStorage.getItem("ra2exp-layout") === "list" ? "list" : "grid",
   );
   const [detailPlacement, setDetailPlacement] = useState<DetailPlacement>(() =>
     window.localStorage.getItem("ra2exp-detail-placement") === "right" ? "right" : "bottom",
@@ -2077,6 +2078,36 @@ function FrameTransport({ frame, count, playing, onPlayingChange, onFrameChange,
   </>;
 }
 
+function scheduleDecodedImageFrame(src: string, delayMs: number, onReady: () => void) {
+  let cancelled = false;
+  let delayElapsed = false;
+  let imageDecoded = false;
+  const finish = () => {
+    if (!cancelled && delayElapsed && imageDecoded) onReady();
+  };
+  const timer = window.setTimeout(() => {
+    delayElapsed = true;
+    finish();
+  }, delayMs);
+  const image = new Image();
+  const decoded = () => {
+    imageDecoded = true;
+    finish();
+  };
+  image.onload = () => {
+    if (typeof image.decode === "function") void image.decode().catch(() => undefined).then(decoded);
+    else decoded();
+  };
+  image.onerror = decoded;
+  image.src = src;
+  return () => {
+    cancelled = true;
+    window.clearTimeout(timer);
+    image.onload = null;
+    image.onerror = null;
+  };
+}
+
 function animationSourceFramesFromTotal(sample: MediaSample | undefined, totalFrames: number, facing: number) {
   const total = Math.max(0, totalFrames);
   const playback = sample?.animation;
@@ -2906,9 +2937,20 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
 
   useEffect(() => {
     if (!playing || frameCount < 2) return;
-    const timer = window.setInterval(() => setFrame((current) => (current + 1) % frameCount), entity?.voxel ? 240 : 160);
-    return () => window.clearInterval(timer);
-  }, [playing, frameCount, entity?.voxel]);
+    const nextFrame = (frame + 1) % frameCount;
+    const advance = () => setFrame((current) => current === frame ? nextFrame : current);
+    if (entity?.voxel) {
+      const timer = window.setTimeout(advance, 240);
+      return () => window.clearTimeout(timer);
+    }
+    if (!entity?.id) return;
+    const nextUrl = api.entityPreviewUrl(
+      sourceId,
+      entity.id,
+      { frame: nextFrame, facing: renderFacing, playerColor, scale: 4 },
+    );
+    return scheduleDecodedImageFrame(nextUrl, 160, advance);
+  }, [playing, frame, frameCount, entity?.id, entity?.voxel, sourceId, renderFacing, playerColor]);
 
   const previewUrl = useMemo(() => entity?.renderable ? api.entityPreviewUrl(
     sourceId,
@@ -3003,12 +3045,22 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
     if (!animationPlaying || activeAnimationFrameCount < 2) return;
     const requestedRate = activeAnimation?.sample.animation?.rate_ms || 140;
     const interval = Math.min(1000, Math.max(60, requestedRate));
-    const timer = window.setInterval(
-      () => setAnimationFrame((current) => (current + 1) % activeAnimationFrameCount),
-      interval,
-    );
-    return () => window.clearInterval(timer);
-  }, [animationPlaying, activeAnimationFrameCount, activeAnimation]);
+    const nextFrame = (animationFrame + 1) % activeAnimationFrameCount;
+    const advance = () => setAnimationFrame((current) => current === animationFrame ? nextFrame : current);
+    const animationSample = activeAnimation?.sample;
+    const animationAsset = animationSample?.asset;
+    if (animationAsset?.format === "shp" && animationSample) {
+      const sourceFrame = activeAnimationFrames[Math.min(nextFrame, activeAnimationFrames.length - 1)] || 0;
+      const shadowFrame = animationShadowFrame(animationSample, animationMetadata, sourceFrame);
+      const nextUrl = api.previewUrl(animationAsset.id, sourceFrame, "", 5, playerColor, {
+        palette: animationSample.palette || undefined,
+        shadowFrame,
+      });
+      return scheduleDecodedImageFrame(nextUrl, interval, advance);
+    }
+    const timer = window.setTimeout(advance, interval);
+    return () => window.clearTimeout(timer);
+  }, [animationPlaying, animationFrame, activeAnimationFrameCount, activeAnimation, activeAnimationFrames, animationMetadata, playerColor]);
 
   function selectAnimationTab(next: EntityAnimationTab) {
     setAnimationTab(next);
@@ -3140,7 +3192,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
             {activeAnimationReplacesBody && activeAnimationAsset?.format === "shp"
               ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${activeAnimationAsset.id}:${activeAnimation?.event || "body"}`} frameFit={activeAnimationFrameFit} src={activeAnimationPreviewUrl} alt={`${activeAnimationTitle}预览`} building={entity.kind === "building"} />
               : activeAnimationReplacesBody && activeAnimationAsset && ["vxl", "hva"].includes(activeAnimationAsset.format)
-                ? <VoxelPreview url={api.assetModelUrl(activeAnimationAsset.id, activeAnimationSourceFrame, playerColor)} label={animationEventLabel(activeAnimation?.event || activeAnimationAsset.display_name)} viewKey={`asset:${activeAnimationAsset.id}`} previewAngle={previewAngle} onPreviewAngleChange={setPreviewAngle} />
+                ? <VoxelPreview url={api.assetModelUrl(activeAnimationAsset.id, activeAnimationSourceFrame, playerColor)} label={animationEventLabel(activeAnimation?.event || activeAnimationAsset.display_name)} viewKey={`asset:${activeAnimationAsset.id}`} previewAngle={previewAngle} resetAngle={defaultPreviewAngle} onPreviewAngleChange={setPreviewAngle} />
                 : buildingOperationPreviewUrl
                   ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${entity.id}:operation:${activeAnimationAsset?.id || "effect"}`} frameFit={buildingOperationFrameFit} src={buildingOperationPreviewUrl} alt={`${activeAnimationTitle}组合预览`} building />
                   : !activeAnimationAsset && frameMode === "grid" && hasRawBodyAnimation
@@ -3149,7 +3201,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
                     {effectBodyPreviewUrl
                       ? <ImageViewport className="shp entity-composite-body" fitKey={`${entity.id}:${effectBodyAssociation?.event || "body"}`} frameFit={effectBodyFrameFit} src={effectBodyPreviewUrl} alt={`${entity.display_name} 主体动作`} building={entity.kind === "building"} />
                       : entity.voxel
-                        ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor, revision: sourceRevision })} label={entity.display_name} viewKey={`entity:${sourceId}:${entity.id}`} previewAngle={previewAngle} onPreviewAngleChange={setPreviewAngle} />
+                        ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor, revision: sourceRevision })} label={entity.display_name} viewKey={`entity:${sourceId}:${entity.id}`} previewAngle={previewAngle} resetAngle={defaultPreviewAngle} onPreviewAngleChange={setPreviewAngle} />
                         : previewFailed
                           ? <div className="preview-stage shp"><div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div></div>
                           : <ImageViewport className="shp entity-composite-body" fitKey={entity.id} frameFit={entityPresentationFrameFit} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
@@ -3171,7 +3223,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
               {activeAnimationAsset && <button type="button" className="return-body-action" onClick={() => { setActiveAnimation(null); setPlaying(hasRawBodyAnimation); }}>返回主体</button>}
             </div>}
             <div className="entity-render-options compact-render-options">
-              {!entity.voxel && entity.preview.supports_facing && <label><span>角度</span><select aria-label="单位预览角度" value={previewAngle} onChange={(event) => setPreviewAngle(normalizePreviewAngle(Number(event.target.value)))}>{previewAngleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
+              {(entity.voxel || entity.preview.supports_facing) && <label><span>角度</span><select aria-label="单位预览角度" value={previewAngle} onChange={(event) => setPreviewAngle(normalizePreviewAngle(Number(event.target.value)))}>{previewAngleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
               {entity.preview.supports_player_color && <label title="选择玩家颜色"><select aria-label="玩家颜色" value={playerColor} onChange={(event) => setPlayerColor(event.target.value)}><option value="">原始色</option>{playerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
             </div>
           </div> : <div className="unsupported-preview"><Icon name="unit" size={34} /><strong>{entityBodyStatusLabel(entity)}</strong></div>}
