@@ -171,6 +171,8 @@ def _build_from_source(project_root: Path, staging: Path) -> Path:
     package_root = dist_path / "RA2 Explorer"
     if not package_root.is_dir():
         raise Ra2ExplorerError("PyInstaller 未生成预期的发行目录")
+    shutil.copy2(project_root / "packaging" / "README.txt", package_root / "README.txt")
+    shutil.copy2(project_root / "LICENSE", package_root / "LICENSE")
     return package_root
 
 
