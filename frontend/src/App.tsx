@@ -2865,7 +2865,10 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   const canChoosePalette = ["shp", "vxl", "hva", "tmp"].includes(asset.format) && palettes.length > 0;
   const originalTexts = [...new Set([
     ...(associations?.original_texts || []),
-    ...(associations?.items || []).map((item) => item.original_text || item.text).filter((item): item is string => Boolean(item)),
+    ...(associations?.items || []).map((item) => item.original_text || (item.localized_text ? null : item.text)).filter((item): item is string => Boolean(item)),
+    ...(associations && associations.original_texts.length === 0 && associations.localized_texts.length === 0
+      ? associations.texts
+      : []),
   ])];
   const originalTextKeys = new Set(originalTexts.map((item) => item.trim().replace(/\s+/g, " ").toLocaleLowerCase()));
   const localizedTexts = [...new Set([
