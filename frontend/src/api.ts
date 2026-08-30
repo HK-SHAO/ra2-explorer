@@ -287,7 +287,16 @@ export interface MediaItem {
   localized_texts: string[];
   events: string[];
   slots: string[];
-  entities: Array<{ id: string; display_name: string; kind: EntityKind }>;
+  entities: Array<{
+    id: string;
+    display_name: string;
+    kind: EntityKind;
+    affiliation: {
+      kind: "country" | "side";
+      id: string;
+      display_name: string;
+    } | null;
+  }>;
   countries: string[];
   sides: string[];
   description: string | null;

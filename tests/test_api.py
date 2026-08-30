@@ -718,6 +718,60 @@ def test_orphaned_retail_audio_keeps_evidence_based_categories() -> None:
     assert items["MYSTERY.AUD"]["kind"] == "unknown"
 
 
+def test_shared_media_entity_refs_preserve_affiliation() -> None:
+    asset = {
+        "id": "shared.wav",
+        "display_name": "shared.wav",
+        "format": "wav",
+        "virtual_path": "loose::shared.wav",
+        "size": 1024,
+        "storage_kind": "loose",
+    }
+    sample = MediaSample("shared", "Shared line", asset)
+
+    def entity(entity_id: str, country: str, side: str, side_name: str) -> GameEntity:
+        return GameEntity(
+            id=entity_id,
+            kind="infantry",
+            usage="buildable",
+            display_name="工程师",
+            internal_name="Engineer",
+            ui_name=None,
+            ui_name_resolved=True,
+            image=entity_id,
+            voxel=False,
+            countries=(country,),
+            sides=(side,),
+            affiliation={"kind": "side", "id": side, "display_name": side_name},
+            rules={},
+            art={},
+            components=(),
+            dependencies=(),
+            media=(
+                MediaAssociation(
+                    "voice", "select", "EngineerSelect", entity_id, (sample,)
+                ),
+            ),
+        )
+
+    item = _build_media_items(
+        [asset],
+        (
+            entity("ENGINEER", "Americans", "GDI", "盟军"),
+            entity("SENGINEER", "Russians", "Nod", "苏军"),
+        ),
+        {},
+        (),
+        {},
+    )[0]
+
+    assert [ref["display_name"] for ref in item["entities"]] == ["工程师", "工程师"]
+    assert [ref["affiliation"]["display_name"] for ref in item["entities"]] == [
+        "盟军",
+        "苏军",
+    ]
+
+
 def test_retail_class_markers_do_not_fail_a_source(tmp_path: Path) -> None:
     source_dir = tmp_path / "retail"
     source_dir.mkdir()

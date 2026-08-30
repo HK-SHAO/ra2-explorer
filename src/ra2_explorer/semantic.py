@@ -1442,6 +1442,14 @@ def _build_media_items(
                 "id": entity.id,
                 "display_name": entity.display_name,
                 "kind": entity.kind,
+                "affiliation": (
+                    {
+                        key: entity.affiliation[key]
+                        for key in ("kind", "id", "display_name")
+                    }
+                    if entity.affiliation is not None
+                    else None
+                ),
             }
             state["countries"].update(entity.countries)
             state["sides"].update(entity.sides)
@@ -2668,7 +2676,8 @@ def _media_search_text(item: dict[str, object]) -> str:
             *(str(value) for value in item["countries"]),  # type: ignore[union-attr]
             *(str(value) for value in item["sides"]),  # type: ignore[union-attr]
             *(
-                f"{entity['id']} {entity['display_name']}"
+                f"{entity['id']} {entity['display_name']} "
+                f"{_media_entity_affiliation_name(entity)}"
                 for entity in entities  # type: ignore[union-attr]
             ),
         )
@@ -2694,14 +2703,37 @@ def _localized_media_item(
             for value in item["localized_texts"]  # type: ignore[union-attr]
         ],
         "entities": [
-            {
-                **entity,
-                "display_name": localize_game_text(
-                    str(entity["display_name"]), language
-                ),
-            }
+            _localized_media_entity(entity, language)
             for entity in entities  # type: ignore[union-attr]
         ],
+    }
+
+
+def _media_entity_affiliation_name(entity: dict[str, object]) -> str:
+    affiliation = entity.get("affiliation")
+    return (
+        str(affiliation.get("display_name") or "")
+        if isinstance(affiliation, dict)
+        else ""
+    )
+
+
+def _localized_media_entity(
+    entity: dict[str, object], language: GameLanguage
+) -> dict[str, object]:
+    affiliation = entity.get("affiliation")
+    localized_affiliation = None
+    if isinstance(affiliation, dict):
+        localized_affiliation = {
+            **affiliation,
+            "display_name": localize_game_text(
+                str(affiliation.get("display_name") or ""), language
+            ),
+        }
+    return {
+        **entity,
+        "display_name": localize_game_text(str(entity["display_name"]), language),
+        "affiliation": localized_affiliation,
     }
 
 

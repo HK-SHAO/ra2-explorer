@@ -1587,6 +1587,19 @@ function mediaSecondaryText(item: MediaItem) {
     .join(" · ");
 }
 
+function mediaEntityGroupLabels(entities: MediaItem["entities"]) {
+  const nameCounts = new Map<string, number>();
+  for (const entity of entities) {
+    nameCounts.set(entity.display_name, (nameCounts.get(entity.display_name) || 0) + 1);
+  }
+  return [...new Set(entities.map((entity) => {
+    const needsAffiliation = (nameCounts.get(entity.display_name) || 0) > 1;
+    return needsAffiliation && entity.affiliation?.display_name
+      ? `${entity.display_name}（${entity.affiliation.display_name}）`
+      : entity.display_name;
+  }))];
+}
+
 function mediaSectionIdentity(item: MediaItem) {
   if (item.entities.length === 1) {
     const entity = item.entities[0];
@@ -1596,12 +1609,12 @@ function mediaSectionIdentity(item: MediaItem) {
     const entities = [...item.entities].sort((left, right) => left.id.localeCompare(right.id));
     return {
       key: `shared:${entities.map((entity) => entity.id).join("|")}`,
-      label: "共同使用",
-      subtitle: entities.map((entity) => entity.display_name).join(" · "),
+      label: mediaEntityGroupLabels(entities).join(" · "),
+      subtitle: "",
     };
   }
   const group = item.groups[0] || "unclassified";
-  return { key: `group:${group}`, label: mediaGroupLabels[group] || group, subtitle: "未关联单位" };
+  return { key: `group:${group}`, label: mediaGroupLabels[group] || group, subtitle: "" };
 }
 
 function MediaListPanel({ items, total, loading, query, setQuery, groups, selectedGroup, setSelectedGroup, eventTypes, selectedEventType, setSelectedEventType, grouped, setGrouped, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore, scrollKey }: {
@@ -1679,7 +1692,7 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
       </div>
       <div ref={listScroll.ref} className={`asset-list ${grouped ? "media-grouped-list" : layout === "grid" ? "asset-grid media-grid" : "list-columns"}`} tabIndex={0} aria-label="声音列表" onScroll={(event) => { listScroll.remember(event); const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void onLoadMore(); }}>
         {grouped
-          ? sections.map((section) => <section className="media-group-section" key={section.key}><header><span><strong>{section.label}</strong><small>{section.subtitle}</small></span><em>{section.items.length}</em></header><div className={layout === "grid" ? "asset-grid media-grid media-group-items" : "list-columns media-group-items"}>{section.items.map(renderMediaItem)}</div></section>)
+          ? sections.map((section) => <section className="media-group-section" key={section.key}><header><span><strong title={section.label}>{section.label}</strong>{section.subtitle && <small>{section.subtitle}</small>}</span><em>{section.items.length}</em></header><div className={layout === "grid" ? "asset-grid media-grid media-group-items" : "list-columns media-group-items"}>{section.items.map(renderMediaItem)}</div></section>)
           : items.map(renderMediaItem)}
         {items.length < total && <button className="load-more" disabled={loading} onClick={() => void onLoadMore()}>{loading ? "正在载入…" : `载入更多（剩余 ${(total - items.length).toLocaleString("zh-CN")}）`}</button>}
         {loading && items.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在建立声音关联…</strong></div>}
