@@ -173,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
     services = Services(settings)
 
     if args.command == "serve":
-        if args.host not in {DEFAULT_HOST, "localhost", "::1"}:
+        if not settings.hosted and args.host not in {DEFAULT_HOST, "localhost", "::1"}:
             raise SystemExit("仅允许监听本机回环地址")
         if not 1 <= args.port <= 65_535:
             raise SystemExit("端口必须在 1 到 65535 之间")
