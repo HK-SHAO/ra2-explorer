@@ -109,7 +109,15 @@ function boundedSubsequence(needle: string, haystack: string) {
 function fuzzyEntityMatch(query: string, item: EntityPage["items"][number] | undefined) {
   const needle = normalizeSearchText(query);
   if (!item || !allowsFuzzyMatch(needle)) return false;
-  return [item.id, item.display_name, item.internal_name, item.ui_name || "", item.image].some((value) => {
+  return [
+    item.id,
+    item.display_name,
+    item.internal_name,
+    item.ui_name || "",
+    item.image,
+    item.search_aliases?.pinyin_compact || "",
+    item.search_aliases?.pinyin_initials || "",
+  ].some((value) => {
     const haystack = normalizeSearchText(value);
     return haystack.length <= Math.max(64, needle.length * 8) && boundedSubsequence(needle, haystack);
   });

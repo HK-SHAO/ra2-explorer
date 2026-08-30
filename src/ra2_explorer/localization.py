@@ -5,6 +5,7 @@ from functools import lru_cache
 from typing import Literal
 
 from opencc import OpenCC
+from pypinyin import Style, lazy_pinyin
 
 GameLanguage = Literal["zh-CN", "zh-TW"]
 DEFAULT_GAME_LANGUAGE: GameLanguage = "zh-CN"
@@ -35,6 +36,31 @@ def localized_fuzzy_search_match(query: str, text: str) -> bool:
         if len(haystack) > max(64, len(needle) * 8):
             continue
         if _bounded_subsequence(needle, haystack):
+            return True
+    return False
+
+
+def pinyin_search_aliases(value: str | None) -> dict[str, str] | None:
+    """Return stable full-pinyin and initial aliases for a Chinese display name."""
+    if not value or not any("\u3400" <= character <= "\u9fff" for character in value):
+        return None
+    return _pinyin_search_aliases(value)
+
+
+def pinyin_search_match(query: str, *values: str | None) -> bool:
+    """Match compact pinyin, spaced pinyin, or pinyin initials."""
+    needle = _normalize_search_text(query)
+    if len(needle) < 2 or not needle.isascii() or not needle.isalnum():
+        return False
+    for value in values:
+        aliases = pinyin_search_aliases(value)
+        if aliases is None:
+            continue
+        compact = aliases["pinyin_compact"]
+        initials = aliases["pinyin_initials"]
+        if needle in compact or needle in initials:
+            return True
+        if len(needle) >= 4 and _bounded_subsequence(needle, compact):
             return True
     return False
 
@@ -70,6 +96,17 @@ def _query_variants(query: str) -> tuple[str, ...]:
 
 
 @lru_cache(maxsize=16_384)
+def _pinyin_search_aliases(value: str) -> dict[str, str]:
+    syllables = lazy_pinyin(value, style=Style.NORMAL, errors="ignore")
+    initials = lazy_pinyin(value, style=Style.FIRST_LETTER, errors="ignore")
+    return {
+        "pinyin": " ".join(syllables),
+        "pinyin_compact": "".join(syllables),
+        "pinyin_initials": "".join(initials),
+    }
+
+
+@lru_cache(maxsize=16_384)
 def _convert(value: str, configuration: str) -> str:
     converter = getattr(_converters, configuration, None)
     if converter is None:
@@ -84,4 +121,6 @@ __all__ = [
     "localized_fuzzy_search_match",
     "localized_search_match",
     "localize_game_text",
+    "pinyin_search_aliases",
+    "pinyin_search_match",
 ]

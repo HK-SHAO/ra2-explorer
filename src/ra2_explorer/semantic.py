@@ -31,6 +31,8 @@ from ra2_explorer.localization import (
     localize_game_text,
     localized_fuzzy_search_match,
     localized_search_match,
+    pinyin_search_aliases,
+    pinyin_search_match,
 )
 from ra2_explorer.storage import Database
 
@@ -454,6 +456,7 @@ class GameEntity:
         self, language: GameLanguage = DEFAULT_GAME_LANGUAGE
     ) -> dict[str, object]:
         body = self.component("body")
+        display_name = localize_game_text(self.display_name, language) or self.display_name
         affiliation = None
         if self.affiliation is not None:
             affiliation = {
@@ -468,9 +471,10 @@ class GameEntity:
             "id": self.id,
             "kind": self.kind,
             "usage": self.usage,
-            "display_name": localize_game_text(self.display_name, language),
+            "display_name": display_name,
             "internal_name": self.internal_name,
             "ui_name": self.ui_name,
+            "search_aliases": pinyin_search_aliases(display_name),
             "image": self.image,
             "voxel": self.voxel,
             "countries": list(self.countries),
@@ -804,6 +808,7 @@ class SemanticLibrary:
                     localized_fuzzy_search_match(query, value)
                     for value in _entity_fuzzy_search_values(entity)
                 )
+                or pinyin_search_match(query, *_entity_pinyin_search_values(entity))
             ]
         usage_counts = Counter(entity.usage for entity in entities)
         if usages:
@@ -3042,6 +3047,15 @@ def _entity_fuzzy_search_values(entity: GameEntity) -> tuple[str, ...]:
         entity.internal_name,
         entity.ui_name or "",
         entity.image,
+    )
+
+
+def _entity_pinyin_search_values(entity: GameEntity) -> tuple[str | None, ...]:
+    return (
+        entity.display_name,
+        localize_game_text(entity.display_name, "zh-CN"),
+        localize_game_text(entity.display_name, "zh-TW"),
+        entity.ui_name,
     )
 
 

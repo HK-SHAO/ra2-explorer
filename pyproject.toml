@@ -15,6 +15,7 @@ dependencies = [
   "fastapi>=0.116,<1",
   "opencc>=1.4.2,<2",
   "pillow>=11.3,<13",
+  "pypinyin>=0.55,<1",
   "pycryptodome>=3.23,<4",
   "uvicorn>=0.35,<1",
 ]

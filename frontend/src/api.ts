@@ -192,6 +192,11 @@ export interface EntitySummary {
   display_name: string;
   internal_name: string;
   ui_name: string | null;
+  search_aliases: {
+    pinyin: string;
+    pinyin_compact: string;
+    pinyin_initials: string;
+  } | null;
   image: string;
   voxel: boolean;
   renderable: boolean;
