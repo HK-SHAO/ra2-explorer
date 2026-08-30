@@ -195,6 +195,121 @@ class Database:
             connection.execute("DELETE FROM sources WHERE id = ?", (source_id,))
         return source
 
+    def export_source_snapshot(self, source_id: str) -> dict[str, Any]:
+        source = self.get_source(source_id)
+        with self.connect() as connection:
+            archives = connection.execute(
+                """
+                SELECT * FROM archives WHERE source_id = ?
+                ORDER BY length(entry_chain), virtual_path
+                """,
+                (source_id,),
+            ).fetchall()
+            assets = connection.execute(
+                "SELECT * FROM assets WHERE source_id = ? ORDER BY virtual_path",
+                (source_id,),
+            ).fetchall()
+            segments = connection.execute(
+                """
+                SELECT asset_segments.* FROM asset_segments
+                JOIN assets ON assets.id = asset_segments.asset_id
+                WHERE assets.source_id = ? ORDER BY asset_segments.asset_id
+                """,
+                (source_id,),
+            ).fetchall()
+        return {
+            "schema": 1,
+            "source": {
+                key: value
+                for key, value in source.items()
+                if key != "root_path"
+            },
+            "archives": [dict(row) for row in archives],
+            "assets": [dict(row) for row in assets],
+            "segments": [dict(row) for row in segments],
+        }
+
+    def import_source_snapshot(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        root_path: str,
+    ) -> tuple[dict[str, Any], bool]:
+        source = dict(snapshot["source"])
+        source_id = str(source["id"])
+        archives = [dict(row) for row in snapshot["archives"]]
+        assets = [dict(row) for row in snapshot["assets"]]
+        segments = [dict(row) for row in snapshot["segments"]]
+        with self.connect() as connection:
+            existing = connection.execute(
+                "SELECT * FROM sources WHERE id = ?", (source_id,)
+            ).fetchone()
+            if existing and not str(existing["root_path"]).startswith("resource-pack://"):
+                return dict(existing), False
+            if existing:
+                connection.execute("DELETE FROM sources WHERE id = ?", (source_id,))
+            connection.execute(
+                """
+                INSERT INTO sources(
+                    id, name, root_path, created_at, scanned_at, state, error,
+                    archive_count, asset_count
+                ) VALUES (?, ?, ?, ?, ?, 'ready', NULL, ?, ?)
+                """,
+                (
+                    source_id,
+                    str(source.get("name") or "RA2 Explorer 资源包"),
+                    root_path,
+                    str(source.get("created_at") or datetime.now(UTC).isoformat()),
+                    str(source["scanned_at"]),
+                    len(archives),
+                    len(assets),
+                ),
+            )
+            connection.executemany(
+                """
+                INSERT INTO archives(
+                    id, source_id, parent_archive_id, virtual_path, root_relative_path,
+                    entry_chain, file_size, data_offset, data_size, encrypted, hash_type,
+                    entry_count, error
+                ) VALUES (
+                    :id, :source_id, :parent_archive_id, :virtual_path, :root_relative_path,
+                    :entry_chain, :file_size, :data_offset, :data_size, :encrypted, :hash_type,
+                    :entry_count, :error
+                )
+                """,
+                archives,
+            )
+            connection.executemany(
+                """
+                INSERT INTO assets(
+                    id, source_id, archive_id, ordinal, virtual_path, name, display_name,
+                    crc, size, format, extension, confidence, storage_kind,
+                    loose_relative_path
+                ) VALUES (
+                    :id, :source_id, :archive_id, :ordinal, :virtual_path, :name,
+                    :display_name, :crc, :size, :format, :extension, :confidence,
+                    :storage_kind, :loose_relative_path
+                )
+                """,
+                assets,
+            )
+            connection.executemany(
+                """
+                INSERT INTO asset_segments(
+                    asset_id, container_asset_id, data_offset, data_size,
+                    sample_rate, channels, codec, block_align
+                ) VALUES (
+                    :asset_id, :container_asset_id, :data_offset, :data_size,
+                    :sample_rate, :channels, :codec, :block_align
+                )
+                """,
+                segments,
+            )
+            imported = connection.execute(
+                "SELECT * FROM sources WHERE id = ?", (source_id,)
+            ).fetchone()
+        return dict(imported), True
+
     def set_source_state(self, source_id: str, state: str, error: str | None = None) -> None:
         with self.connect() as connection:
             connection.execute(

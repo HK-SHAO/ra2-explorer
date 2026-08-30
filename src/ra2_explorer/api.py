@@ -4,6 +4,7 @@ import io
 import json
 import math
 import os
+import uuid
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
@@ -52,6 +53,13 @@ from ra2_explorer.reference_data import (
     reference_status,
     sync_known_names,
 )
+from ra2_explorer.resource_pack import (
+    MAX_RESOURCE_PACK_BYTES,
+    create_resource_pack,
+    import_resource_pack,
+    list_resource_packs,
+    resource_pack_path,
+)
 from ra2_explorer.semantic import (
     ENTITY_KINDS,
     ENTITY_USAGES,
@@ -83,6 +91,10 @@ INSPECTABLE_FORMATS = {
 class SourceRequest(BaseModel):
     path: str = Field(min_length=1, max_length=2048)
     name: str | None = Field(default=None, max_length=160)
+
+
+class ResourcePackExportRequest(BaseModel):
+    source_id: str = Field(min_length=1, max_length=160)
 
 
 class Services:
@@ -177,6 +189,67 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.delete("/api/sources/{source_id}")
     def delete_source(source_id: str) -> dict[str, object]:
         return services.database.delete_source(source_id)
+
+    @app.get("/api/resource-packs")
+    def resource_packs() -> list[dict[str, object]]:
+        return list_resource_packs(services.derived)
+
+    @app.post("/api/resource-packs/export", status_code=201)
+    async def export_resource_pack(
+        payload: ResourcePackExportRequest,
+    ) -> dict[str, object]:
+        result = await run_in_threadpool(
+            create_resource_pack,
+            services.database,
+            services.semantic,
+            services.derived,
+            payload.source_id,
+        )
+        result.pop("path", None)
+        return result
+
+    @app.post("/api/resource-packs/import", status_code=201)
+    async def import_uploaded_resource_pack(
+        request: Request,
+        filename: str = Query(min_length=1, max_length=255),
+    ) -> dict[str, object]:
+        if Path(filename).name != filename:
+            raise HTTPException(status_code=422, detail="资源包文件名无效")
+        content_length = request.headers.get("content-length")
+        if content_length and (
+            not content_length.isdigit() or int(content_length) > MAX_RESOURCE_PACK_BYTES
+        ):
+            raise HTTPException(status_code=413, detail="资源包超过 2 GiB 限制")
+        upload_root = current_settings.derived_root / "imports"
+        upload_root.mkdir(parents=True, exist_ok=True)
+        temporary = upload_root / f".{uuid.uuid4().hex}.ra2pack"
+        total = 0
+        try:
+            with temporary.open("wb") as stream:
+                async for chunk in request.stream():
+                    total += len(chunk)
+                    if total > MAX_RESOURCE_PACK_BYTES:
+                        raise HTTPException(status_code=413, detail="资源包超过 2 GiB 限制")
+                    stream.write(chunk)
+            if total == 0:
+                raise HTTPException(status_code=422, detail="资源包为空")
+            return await run_in_threadpool(
+                import_resource_pack,
+                services.database,
+                services.derived,
+                temporary,
+            )
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    @app.get("/api/resource-packs/{filename}")
+    def download_resource_pack(filename: str) -> FileResponse:
+        path = resource_pack_path(services.derived, filename)
+        return FileResponse(
+            path,
+            media_type="application/zip",
+            filename=path.name,
+        )
 
     @app.get("/api/assets")
     def assets(
@@ -313,7 +386,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body = semantic_entity.component("body")
         if body is None:
             raise HTTPException(status_code=409, detail="该单位没有可渲染的主体资产")
-        palette = _select_palette(services, body, palette_id)
         player_color = _validated_player_color(player_color)
         renderer_version = "shp-layers-v3" if body["format"] == "shp" else "vpl-body-v3"
         artifact_path = _source_artifact_path(
@@ -341,6 +413,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 media_type="image/png",
                 headers={"Cache-Control": "private, max-age=3600"},
             )
+        palette = _select_palette(services, body, palette_id)
         _, image, focus_bounds = services.semantic.render(
             source_id,
             entity_id,
@@ -448,7 +521,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body = semantic_entity.component("body")
         if body is None or body["format"] != "vxl":
             raise HTTPException(status_code=409, detail="该单位不是 VXL 模型")
-        palette = _select_palette(services, body, palette_id)
         player_color = _validated_player_color(player_color)
         artifact_path = _source_artifact_path(
             services,
@@ -464,6 +536,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         cached = services.derived.read_bytes(artifact_path)
         if cached is not None:
             return _model_response(cached)
+        palette = _select_palette(services, body, palette_id)
         _, scene = services.semantic.model_scene(
             source_id,
             entity_id,

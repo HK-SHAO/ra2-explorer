@@ -72,6 +72,16 @@ class DerivedStore:
             raise Ra2ExplorerError("派生产物路径越过工作区") from error
         return candidate
 
+    def source_revision_root(self, source_id: object, revision: object) -> Path:
+        marker = self.artifact_path(
+            "metadata",
+            source_id=source_id,
+            revision=revision,
+            identity=("source-revision",),
+            extension="json",
+        )
+        return marker.parent.parent
+
     @staticmethod
     def read_bytes(path: Path) -> bytes | None:
         try:

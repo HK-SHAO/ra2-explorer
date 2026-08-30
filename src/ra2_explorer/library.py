@@ -94,6 +94,8 @@ class SourceLibrary:
 
     def scan(self, source_id: str) -> dict[str, object]:
         source = self.database.get_source(source_id)
+        if str(source["root_path"]).startswith("resource-pack://"):
+            raise Ra2ExplorerError("派生资源包不能重新扫描；请重新导入原版游戏目录")
         root = Path(source["root_path"])
         if not root.is_dir():
             self.database.set_source_state(source_id, "failed", "资源目录已不存在")
@@ -438,6 +440,10 @@ class AssetReader:
             cached = self.derived.read_bytes(cache_path)
             if cached is not None and len(cached) == int(asset["size"]):
                 return asset, cached
+        if str(source["root_path"]).startswith("resource-pack://"):
+            raise Ra2ExplorerError(
+                "该内容未包含在派生资源包中；请导入原版游戏目录并重新导出资源包"
+            )
 
         if asset["storage_kind"] == "bag":
             container = self.database.get_asset(str(segment["container_asset_id"]))

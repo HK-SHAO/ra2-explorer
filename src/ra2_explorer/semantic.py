@@ -4,7 +4,7 @@ import re
 import threading
 from collections import Counter, OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from PIL import Image
@@ -518,6 +518,179 @@ class SemanticCatalog:
         return entity
 
 
+def serialize_semantic_catalog(catalog: SemanticCatalog) -> dict[str, object]:
+    return {
+        "schema": 1,
+        "kind": "ra2-explorer-semantic-catalog",
+        "catalog": asdict(catalog),
+    }
+
+
+def deserialize_semantic_catalog(payload: dict[str, object]) -> SemanticCatalog:
+    if payload.get("schema") != 1 or payload.get("kind") != "ra2-explorer-semantic-catalog":
+        raise ValueError("unsupported semantic catalog snapshot")
+    raw_catalog = _snapshot_mapping(payload.get("catalog"))
+
+    def playback(value: object) -> AnimationPlayback | None:
+        if value is None:
+            return None
+        values = _snapshot_mapping(value)
+        return AnimationPlayback(
+            start_frame=int(values.get("start_frame") or 0),
+            frame_count=_optional_int(values.get("frame_count")),
+            facing_step=int(values.get("facing_step") or 0),
+            rate_ms=_optional_int(values.get("rate_ms")),
+            loop_start=_optional_int(values.get("loop_start")),
+            loop_end=_optional_int(values.get("loop_end")),
+            loop_count=_optional_int(values.get("loop_count")),
+            direction=_optional_text(values.get("direction")),
+            shadow=bool(values.get("shadow")),
+        )
+
+    def sample(value: object) -> MediaSample:
+        values = _snapshot_mapping(value)
+        asset = values.get("asset")
+        return MediaSample(
+            name=str(values["name"]),
+            text=_optional_text(values.get("text")),
+            asset=dict(_snapshot_mapping(asset)) if asset is not None else None,
+            original_text=_optional_text(values.get("original_text")),
+            localized_text=_optional_text(values.get("localized_text")),
+            text_label=_optional_text(values.get("text_label")),
+            animation=playback(values.get("animation")),
+            weight=int(values.get("weight") or 1),
+            palette=_optional_text(values.get("palette")),
+        )
+
+    def association(value: object) -> MediaAssociation:
+        values = _snapshot_mapping(value)
+        return MediaAssociation(
+            kind=str(values["kind"]),
+            slot=str(values["slot"]),
+            event=str(values["event"]),
+            source=str(values["source"]),
+            samples=tuple(sample(item) for item in _snapshot_sequence(values.get("samples"))),
+            role=_optional_text(values.get("role")),
+            aliases=tuple(str(item) for item in _snapshot_sequence(values.get("aliases"))),
+            selection=_optional_text(values.get("selection")),
+            selected_sample=_optional_text(values.get("selected_sample")),
+            selection_value=_optional_int(values.get("selection_value")),
+            rule_field=_optional_text(values.get("rule_field")),
+        )
+
+    def entity(value: object) -> GameEntity:
+        values = _snapshot_mapping(value)
+        components = []
+        for item in _snapshot_sequence(values.get("components")):
+            component = _snapshot_mapping(item)
+            asset = component.get("asset")
+            components.append(
+                EntityComponent(
+                    str(component["role"]),
+                    str(component["expected_name"]),
+                    dict(_snapshot_mapping(asset)) if asset is not None else None,
+                )
+            )
+        dependencies = []
+        for item in _snapshot_sequence(values.get("dependencies")):
+            dependency = _snapshot_mapping(item)
+            dependencies.append(
+                EntityDependency(
+                    str(dependency["id"]),
+                    str(dependency["kind"]),
+                    str(dependency["slot"]),
+                    _optional_text(dependency.get("parent")),
+                    bool(dependency.get("resolved")),
+                    {
+                        str(key): str(value)
+                        for key, value in _snapshot_mapping(
+                            dependency.get("properties")
+                        ).items()
+                    },
+                )
+            )
+        affiliation = values.get("affiliation")
+        return GameEntity(
+            id=str(values["id"]),
+            kind=str(values["kind"]),
+            usage=str(values["usage"]),
+            display_name=str(values["display_name"]),
+            internal_name=str(values["internal_name"]),
+            ui_name=_optional_text(values.get("ui_name")),
+            ui_name_resolved=bool(values.get("ui_name_resolved")),
+            image=str(values["image"]),
+            voxel=bool(values.get("voxel")),
+            countries=tuple(str(item) for item in _snapshot_sequence(values.get("countries"))),
+            sides=tuple(str(item) for item in _snapshot_sequence(values.get("sides"))),
+            affiliation=(
+                dict(_snapshot_mapping(affiliation)) if affiliation is not None else None
+            ),
+            rules={
+                str(key): str(value)
+                for key, value in _snapshot_mapping(values.get("rules")).items()
+            },
+            art={
+                str(key): str(value)
+                for key, value in _snapshot_mapping(values.get("art")).items()
+            },
+            components=tuple(components),
+            dependencies=tuple(dependencies),
+            media=tuple(
+                association(item) for item in _snapshot_sequence(values.get("media"))
+            ),
+        )
+
+    audio_events = {
+        str(key): tuple(sample(item) for item in _snapshot_sequence(value))
+        for key, value in _snapshot_mapping(raw_catalog.get("audio_events")).items()
+    }
+    inputs = {
+        str(key): tuple(dict(_snapshot_mapping(item)) for item in _snapshot_sequence(value))
+        for key, value in _snapshot_mapping(raw_catalog.get("inputs")).items()
+    }
+    return SemanticCatalog(
+        source_id=str(raw_catalog["source_id"]),
+        entities=tuple(entity(item) for item in _snapshot_sequence(raw_catalog.get("entities"))),
+        inputs=inputs,
+        warnings=tuple(str(item) for item in _snapshot_sequence(raw_catalog.get("warnings"))),
+        audio_events=audio_events,
+        eva_events=tuple(
+            association(item) for item in _snapshot_sequence(raw_catalog.get("eva_events"))
+        ),
+        countries=tuple(
+            {
+                str(key): str(value)
+                for key, value in _snapshot_mapping(item).items()
+            }
+            for item in _snapshot_sequence(raw_catalog.get("countries"))
+        ),
+        media_items=tuple(
+            dict(_snapshot_mapping(item))
+            for item in _snapshot_sequence(raw_catalog.get("media_items"))
+        ),
+    )
+
+
+def _snapshot_mapping(value: object) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("invalid semantic catalog mapping")
+    return value
+
+
+def _snapshot_sequence(value: object) -> list[object] | tuple[object, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("invalid semantic catalog sequence")
+    return value
+
+
+def _optional_text(value: object) -> str | None:
+    return None if value is None else str(value)
+
+
+def _optional_int(value: object) -> int | None:
+    return None if value is None else int(value)
+
+
 class SemanticLibrary:
     def __init__(
         self,
@@ -539,12 +712,51 @@ class SemanticLibrary:
         with self._lock:
             cached = self._cache.get(source_id)
             if cached and cached[0] == token:
+                self._store_catalog_snapshot(source, cached[1])
                 return cached[1]
             self._parsed_cache.clear()
             self._shp_frame_cache.clear()
-            catalog = self._build(source_id)
+            catalog = self._load_catalog_snapshot(source)
+            if catalog is None:
+                catalog = self._build(source_id)
+                self._store_catalog_snapshot(source, catalog)
             self._cache[source_id] = (token, catalog)
             return catalog
+
+    def _catalog_snapshot_path(self, source: dict[str, object]):
+        if self.reader.derived is None:
+            return None
+        return self.reader.derived.artifact_path(
+            "metadata",
+            source_id=source["id"],
+            revision=source.get("scanned_at") or source["created_at"],
+            identity=("semantic-catalog-v1",),
+            extension="json",
+        )
+
+    def _load_catalog_snapshot(
+        self, source: dict[str, object]
+    ) -> SemanticCatalog | None:
+        path = self._catalog_snapshot_path(source)
+        if path is None:
+            return None
+        payload = self.reader.derived.read_json(path)
+        if payload is None:
+            return None
+        try:
+            catalog = deserialize_semantic_catalog(payload)
+        except (KeyError, TypeError, ValueError):
+            return None
+        return catalog if catalog.source_id == str(source["id"]) else None
+
+    def _store_catalog_snapshot(
+        self,
+        source: dict[str, object],
+        catalog: SemanticCatalog,
+    ) -> None:
+        path = self._catalog_snapshot_path(source)
+        if path is not None:
+            self.reader.derived.write_json(path, serialize_semantic_catalog(catalog))
 
     def list_entities(
         self,
@@ -695,7 +907,10 @@ class SemanticLibrary:
         language: GameLanguage = DEFAULT_GAME_LANGUAGE,
     ) -> dict[str, object]:
         entity = self.catalog(source_id).get(entity_id)
-        return {**entity.as_dict(language), "preview": self._preview_info(entity)}
+        return {
+            **entity.as_dict(language),
+            "preview": self._preview_info(source_id, entity),
+        }
 
     def asset_associations(
         self,
@@ -1032,7 +1247,26 @@ class SemanticLibrary:
             parts.append(VxlRenderPart(model, animation))
         return tuple(parts)
 
-    def _preview_info(self, entity: GameEntity) -> dict[str, object]:
+    def _preview_info(
+        self,
+        source_id: str,
+        entity: GameEntity,
+    ) -> dict[str, object]:
+        source = self.database.get_source(source_id)
+        path = (
+            self.reader.derived.artifact_path(
+                "metadata",
+                source_id=source["id"],
+                revision=source.get("scanned_at") or source["created_at"],
+                identity=(entity.id, "entity-preview-info-v1"),
+                extension="json",
+            )
+            if self.reader.derived is not None
+            else None
+        )
+        cached = self.reader.derived.read_json(path) if path is not None else None
+        if cached is not None:
+            return cached
         body = entity.component("body")
         sequence_facings = any(
             sample.animation and sample.animation.facing_step > 0
@@ -1055,6 +1289,8 @@ class SemanticLibrary:
             "supports_player_color": entity.voxel or _yes(entity.art.get("remapable")),
         }
         if body is None:
+            if path is not None:
+                self.reader.derived.write_json(path, base)
             return base
         warnings = []
         try:
@@ -1098,6 +1334,8 @@ class SemanticLibrary:
             warnings.append(str(error))
         if warnings:
             base["warnings"] = warnings
+        if path is not None:
+            self.reader.derived.write_json(path, base)
         return base
 
     def _visible_shp_frames(
@@ -2782,4 +3020,6 @@ __all__ = [
     "VoiceText",
     "SemanticCatalog",
     "SemanticLibrary",
+    "deserialize_semantic_catalog",
+    "serialize_semantic_catalog",
 ]

@@ -22,6 +22,11 @@ from ra2_explorer.discovery import discover_installations
 from ra2_explorer.errors import Ra2ExplorerError
 from ra2_explorer.package_builder import build_windows_package
 from ra2_explorer.reference_data import sync_audio_transcript, sync_known_names
+from ra2_explorer.resource_pack import (
+    create_resource_pack,
+    import_resource_pack,
+    list_resource_packs,
+)
 from ra2_explorer.semantic import ENTITY_KINDS
 from ra2_explorer.validation import VALIDATED_FORMATS, validate_source
 
@@ -125,6 +130,21 @@ def build_parser() -> argparse.ArgumentParser:
     cache = subcommands.add_parser("cache", help="统计或清理可再生成的本地缓存")
     cache.add_argument("action", choices=("stats", "prune"))
     cache.add_argument("--kind", action="append", choices=sorted(ARTIFACT_KINDS))
+
+    resource_pack = subcommands.add_parser(
+        "resource-pack",
+        help="导出、导入或列出不含原始游戏文件的派生资源包",
+    )
+    resource_pack_commands = resource_pack.add_subparsers(
+        dest="resource_pack_action",
+        required=True,
+    )
+    export_pack = resource_pack_commands.add_parser("export", help="导出派生资源包")
+    export_pack.add_argument("source_id")
+    export_pack.add_argument("--output", type=Path)
+    import_pack = resource_pack_commands.add_parser("import", help="导入派生资源包")
+    import_pack.add_argument("path", type=Path)
+    resource_pack_commands.add_parser("list", help="列出本机派生资源包")
     return parser
 
 
@@ -262,6 +282,26 @@ def main(argv: list[str] | None = None) -> int:
             if args.action == "stats"
             else services.derived.prune(tuple(args.kind or ("extracted",)))
         )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "resource-pack":
+        if args.resource_pack_action == "export":
+            result = create_resource_pack(
+                services.database,
+                services.semantic,
+                services.derived,
+                args.source_id,
+                output=args.output,
+            )
+        elif args.resource_pack_action == "import":
+            result = import_resource_pack(
+                services.database,
+                services.derived,
+                args.path,
+            )
+        else:
+            result = list_resource_packs(services.derived)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 

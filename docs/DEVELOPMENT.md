@@ -48,6 +48,15 @@ scripts\setup_dev.cmd
 .venv\Scripts\ra2exp.exe cache prune
 ```
 
+备份当前资料库已经生成的索引和浏览器产物时使用派生资源包；它不会复制原始游戏成员：
+
+```bat
+.venv\Scripts\ra2exp.exe resource-pack export SOURCE_ID
+.venv\Scripts\ra2exp.exe resource-pack import ".runtime\RA2MD-Ext\packages\PACKAGE.ra2pack"
+```
+
+资源包的白名单和离线能力边界见 [派生资源包说明](RESOURCE_PACKS.md)。
+
 ## 开发服务
 
 构建前端并安装本机后台服务：
