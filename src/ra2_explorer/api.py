@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import os
 from pathlib import Path
 from typing import Literal
@@ -28,7 +29,7 @@ from ra2_explorer.codecs.csf import parse_csf
 from ra2_explorer.codecs.hva import parse_hva
 from ra2_explorer.codecs.map import parse_map
 from ra2_explorer.codecs.pal import PLAYER_COLOR_PRESETS, grayscale_palette, parse_palette
-from ra2_explorer.codecs.shp import parse_shp
+from ra2_explorer.codecs.shp import ShpFile, parse_shp
 from ra2_explorer.codecs.text import decode_legacy_text, parse_ini, text_excerpt
 from ra2_explorer.codecs.tmp import parse_tmp
 from ra2_explorer.codecs.vpl import parse_vpl
@@ -308,7 +309,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail="该单位没有可渲染的主体资产")
         palette = _select_palette(services, body, palette_id)
         player_color = _validated_player_color(player_color)
-        renderer_version = "shp-e1" if body["format"] == "shp" else "vpl-body-v3"
+        renderer_version = "shp-focus-v2" if body["format"] == "shp" else "vpl-body-v3"
         artifact_path = _source_artifact_path(
             services,
             "previews",
@@ -334,7 +335,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 media_type="image/png",
                 headers={"Cache-Control": "private, max-age=3600"},
             )
-        _, image = services.semantic.render(
+        _, image, focus_bounds = services.semantic.render(
             source_id,
             entity_id,
             palette=palette,
@@ -378,11 +379,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     effect_sprite.render_shadow(effect_shadow_frame, scale=scale)
                 )
             layers.extend((image, effect_main))
+            base_size = image.size
             image = _alpha_composite_centered(layers)
+            if focus_bounds is not None:
+                offset_x = (image.width - base_size[0]) // 2
+                offset_y = (image.height - base_size[1]) // 2
+                left, top, right, bottom = focus_bounds
+                focus_bounds = (
+                    left + offset_x,
+                    top + offset_y,
+                    right + offset_x,
+                    bottom + offset_y,
+                )
         if thumbnail:
             image = _crop_transparent_preview(
                 image,
                 padding_ratio=0.42 if semantic_entity.kind == "infantry" else 0.08,
+                focus_bounds=focus_bounds,
             )
         output = io.BytesIO()
         image.save(output, format="PNG")
@@ -461,17 +474,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "width": sprite.width,
             "height": sprite.height,
             "frame_count": len(sprite.frames),
-            "frames": [
-                {
-                    "index": frame.index,
-                    "x": frame.x,
-                    "y": frame.y,
-                    "width": frame.width,
-                    "height": frame.height,
-                    "compression": frame.compression,
-                }
-                for frame in sprite.frames
-            ],
+            "frames": _shp_frame_metadata(sprite),
         }
 
     @app.get("/api/assets/{asset_id}/model.json")
@@ -853,22 +856,68 @@ def _source_artifact_path(
     )
 
 
-def _crop_transparent_preview(image, *, padding_ratio: float = 0.08):
+def _crop_transparent_preview(
+    image,
+    *,
+    padding_ratio: float = 0.08,
+    focus_bounds: tuple[int, int, int, int] | None = None,
+):
     if "A" not in image.getbands():
         return image
     bounds = image.getchannel("A").getbbox()
     if bounds is None:
         return image
-    left, top, right, bottom = bounds
-    padding = max(2, round(max(right - left, bottom - top) * padding_ratio))
+    visible_left, visible_top, visible_right, visible_bottom = bounds
+    focus_left, focus_top, focus_right, focus_bottom = focus_bounds or bounds
+    center_x = (focus_left + focus_right) / 2
+    center_y = (focus_top + focus_bottom) / 2
+    half_width = max(center_x - visible_left, visible_right - center_x)
+    half_height = max(center_y - visible_top, visible_bottom - center_y)
+    padding = max(
+        2,
+        round(max(focus_right - focus_left, focus_bottom - focus_top) * padding_ratio),
+    )
     return image.crop(
         (
-            left - padding,
-            top - padding,
-            right + padding,
-            bottom + padding,
+            math.floor(center_x - half_width - padding),
+            math.floor(center_y - half_height - padding),
+            math.ceil(center_x + half_width + padding),
+            math.ceil(center_y + half_height + padding),
         )
     )
+
+
+def _shp_frame_metadata(sprite: ShpFile) -> list[dict[str, object]]:
+    shadow_pairs = {
+        frame_index: shadow_frame
+        for frame_index in range(len(sprite.frames) // 2)
+        if (shadow_frame := sprite.paired_shadow_frame(frame_index)) is not None
+    }
+    frames = []
+    for frame in sprite.frames:
+        content_bounds = sprite.content_bounds(frame.index)
+        frames.append(
+            {
+                "index": frame.index,
+                "x": frame.x,
+                "y": frame.y,
+                "width": frame.width,
+                "height": frame.height,
+                "compression": frame.compression,
+                "content_bounds": (
+                    {
+                        "x": content_bounds[0],
+                        "y": content_bounds[1],
+                        "width": content_bounds[2],
+                        "height": content_bounds[3],
+                    }
+                    if content_bounds is not None
+                    else None
+                ),
+                "paired_shadow_frame": shadow_pairs.get(frame.index),
+            }
+        )
+    return frames
 
 
 def _browser_audio(
@@ -1001,17 +1050,7 @@ def _inspect_asset(asset: dict[str, object], data: bytes) -> dict[str, object]:
             "width": sprite.width,
             "height": sprite.height,
             "frame_count": len(sprite.frames),
-            "frames": [
-                {
-                    "index": frame.index,
-                    "x": frame.x,
-                    "y": frame.y,
-                    "width": frame.width,
-                    "height": frame.height,
-                    "compression": frame.compression,
-                }
-                for frame in sprite.frames
-            ],
+            "frames": _shp_frame_metadata(sprite),
         }
     if asset_format == "pal":
         parse_palette(data)

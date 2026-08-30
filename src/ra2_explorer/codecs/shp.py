@@ -65,6 +65,37 @@ class ShpFile:
             f"SHP frame {frame_index} uses compression {frame.compression}"
         )
 
+    def content_bounds(self, frame_index: int) -> tuple[int, int, int, int] | None:
+        """Return the non-transparent frame bounds on the logical SHP canvas."""
+        try:
+            frame = self.frames[frame_index]
+        except IndexError as error:
+            raise IndexError("SHP frame index is out of range") from error
+        if frame.empty:
+            return None
+        pixels = self.pixels(frame_index)
+        left = frame.width
+        top = frame.height
+        right = -1
+        bottom = -1
+        for offset, palette_index in enumerate(pixels):
+            if not palette_index:
+                continue
+            x = offset % frame.width
+            y = offset // frame.width
+            left = min(left, x)
+            top = min(top, y)
+            right = max(right, x)
+            bottom = max(bottom, y)
+        if right < left or bottom < top:
+            return None
+        return (
+            frame.x + left,
+            frame.y + top,
+            right - left + 1,
+            bottom - top + 1,
+        )
+
     def _decode_scanlines(self, frame: ShpFrame, *, compressed: bool) -> bytes:
         output = bytearray(frame.width * frame.height)
         cursor = frame.data_offset

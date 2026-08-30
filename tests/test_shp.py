@@ -66,6 +66,8 @@ def test_shp_detects_and_composites_second_half_shadow_frames() -> None:
     shadow[5 * width + 4] = 1
     sprite = parse_shp(_encode_shp(width, height, [bytes(body), bytes(shadow)]))
 
+    assert sprite.content_bounds(0) == (3, 2, 1, 1)
+    assert sprite.content_bounds(1) == (4, 5, 1, 1)
     assert sprite.paired_shadow_frame(0) == 1
     assert sprite.paired_shadow_frame(1) is None
 

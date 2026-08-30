@@ -77,7 +77,10 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
 
     metadata = client.get(f"/api/assets/{sprite['id']}/shp")
     assert metadata.status_code == 200
-    assert metadata.json()["frame_count"] == 6
+    shp_metadata = metadata.json()
+    assert shp_metadata["frame_count"] == 6
+    assert shp_metadata["frames"][0]["content_bounds"] is not None
+    assert "paired_shadow_frame" in shp_metadata["frames"][0]
 
     preview = client.get(
         f"/api/assets/{sprite['id']}/preview.png",

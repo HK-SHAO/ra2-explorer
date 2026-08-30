@@ -918,21 +918,25 @@ class SemanticLibrary:
         facing: int,
         player_color: str | None,
         scale: int,
-    ) -> tuple[GameEntity, Image.Image]:
+    ) -> tuple[GameEntity, Image.Image, tuple[int, int, int, int] | None]:
         entity = self.catalog(source_id).get(entity_id)
         body = entity.component("body")
         if body is None:
             raise InvalidFormatError("该单位没有可渲染的主体资产")
         if body["format"] == "vxl":
             parts = self._voxel_parts(entity)
-            return entity, render_vxl_composite(
-                parts,
-                palette=palette,
-                frame=frame,
-                facing=facing,
-                player_color=player_color,
-                vpl=self.voxel_lighting(source_id),
-                scale=scale,
+            return (
+                entity,
+                render_vxl_composite(
+                    parts,
+                    palette=palette,
+                    frame=frame,
+                    facing=facing,
+                    player_color=player_color,
+                    vpl=self.voxel_lighting(source_id),
+                    scale=scale,
+                ),
+                None,
             )
         sprite = self._parse_asset(body, parse_shp)
         if not sprite.frames:
@@ -949,13 +953,27 @@ class SemanticLibrary:
             if sequence_frame is not None and sequence_frame < len(sprite.frames)
             else visible_frames[frame % len(visible_frames)]
         )
-        return entity, sprite.render(
-            source_frame,
-            active_palette,
-            scale=scale,
-            shadow_frame=(
-                sprite.paired_shadow_frame(source_frame)
-                if entity.kind == "building"
+        focus_bounds = sprite.content_bounds(source_frame)
+        return (
+            entity,
+            sprite.render(
+                source_frame,
+                active_palette,
+                scale=scale,
+                shadow_frame=(
+                    sprite.paired_shadow_frame(source_frame)
+                    if entity.kind == "building"
+                    else None
+                ),
+            ),
+            (
+                (
+                    focus_bounds[0] * scale,
+                    focus_bounds[1] * scale,
+                    (focus_bounds[0] + focus_bounds[2]) * scale,
+                    (focus_bounds[1] + focus_bounds[3]) * scale,
+                )
+                if focus_bounds is not None
                 else None
             ),
         )
