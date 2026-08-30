@@ -653,6 +653,14 @@ function readBrowsingLocation(): Partial<BrowsingLocation> {
   }
 }
 
+function entitySelectionKey(sourceId: string, kind: EntityKind) {
+  return `${sourceId}:${kind}`;
+}
+
+function assetSelectionKey(sourceId: string, category: string) {
+  return `${sourceId}:${category}`;
+}
+
 function readStoredNumber(key: string, fallback: number, minimum: number, maximum: number) {
   const parsed = Number.parseInt(window.localStorage.getItem(key) || "", 10);
   return Number.isFinite(parsed) ? Math.min(maximum, Math.max(minimum, parsed)) : fallback;
@@ -856,6 +864,16 @@ function categoryCount(stats: Stats, formats: string[]) {
 
 function ExplorerApp() {
   const [rememberedLocation] = useState(readBrowsingLocation);
+  const entitySelectionsRef = useRef(new Map<string, string>(
+    rememberedLocation.sourceId && rememberedLocation.entityKind && rememberedLocation.selectedEntityId
+      ? [[entitySelectionKey(rememberedLocation.sourceId, rememberedLocation.entityKind), rememberedLocation.selectedEntityId]]
+      : [],
+  ));
+  const assetSelectionsRef = useRef(new Map<string, string>(
+    rememberedLocation.sourceId && rememberedLocation.assetCategory && rememberedLocation.selectedAssetId
+      ? [[assetSelectionKey(rememberedLocation.sourceId, rememberedLocation.assetCategory), rememberedLocation.selectedAssetId]]
+      : [],
+  ));
   const [view, setView] = useState<"assets" | "entities">(
     rememberedLocation.view === "assets" ? "assets" : "entities",
   );
@@ -1178,6 +1196,7 @@ function ExplorerApp() {
     setEntitySearchScope("current");
     setEntityKind(kind);
     setEntityUsage("");
+    setSelectedEntityId(entitySelectionsRef.current.get(entitySelectionKey(sourceId, kind)) || "");
   }
 
   function selectAssetCategory(category: string) {
@@ -1186,6 +1205,19 @@ function ExplorerApp() {
     setAssetFormatTag("");
     setMediaGroup("");
     setMediaEventType("");
+    setSelectedId(assetSelectionsRef.current.get(assetSelectionKey(sourceId, category)) || "");
+    setPlayingMediaId("");
+  }
+
+  function selectEntityCard(id: string) {
+    const entity = visibleEntities.find((item) => item.id === id);
+    if (entity) entitySelectionsRef.current.set(entitySelectionKey(sourceId, entity.kind), id);
+    setSelectedEntityId(id);
+  }
+
+  function selectAssetCard(id: string) {
+    assetSelectionsRef.current.set(assetSelectionKey(sourceId, selectedCategoryId), id);
+    setSelectedId(id);
   }
 
   function updateAutomaticUpdateCheck(next: boolean) {
@@ -1242,7 +1274,7 @@ function ExplorerApp() {
   useEffect(() => {
     if (view !== "entities" || entityLoading) return;
     if (!visibleEntities.some((entity) => entity.id === selectedEntityId)) {
-      setSelectedEntityId(visibleEntities[0]?.id || "");
+      setSelectedEntityId("");
     }
   }, [view, entityLoading, visibleEntities, selectedEntityId]);
 
@@ -1329,15 +1361,10 @@ function ExplorerApp() {
           if (cancelled) return;
           setAssets(page.items);
           setTotal(page.total);
-          setSelectedId((current) =>
-            page.items.some((asset) => asset.id === current)
-              ? current
-              : page.items.find((asset) => asset.format === "vxl")?.id
-                || page.items.find((asset) => asset.format === "bag_audio")?.id
-                || page.items.find((asset) => asset.format === "shp")?.id
-                || page.items[0]?.id
-                || "",
-          );
+          const remembered = assetSelectionsRef.current.get(assetSelectionKey(sourceId, selectedCategoryId)) || "";
+          setSelectedId((current) => page.items.some((asset) => asset.id === current)
+            ? current
+            : page.items.some((asset) => asset.id === remembered) ? remembered : "");
         })
         .catch((reason: Error) => !cancelled && setError(reason.message))
         .finally(() => !cancelled && setAssetPageLoading(false));
@@ -1346,7 +1373,7 @@ function ExplorerApp() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [sourceId, sourceRevision, assetQuery, assetFormatKey, assetSort, view, isMediaCategory]);
+  }, [sourceId, sourceRevision, selectedCategoryId, assetQuery, assetFormatKey, assetSort, view, isMediaCategory]);
 
   useEffect(() => {
     if (!sourceId || view !== "assets" || !isMediaCategory) return;
@@ -1373,9 +1400,10 @@ function ExplorerApp() {
           setMediaGroups(page.groups);
           setMediaKindCounts(page.kinds);
           setMediaEventTypes(page.event_types || []);
+          const remembered = assetSelectionsRef.current.get(assetSelectionKey(sourceId, selectedCategoryId)) || "";
           setSelectedId((current) => page.items.some((item) => item.asset.id === current)
             ? current
-            : page.items[0]?.asset.id || "");
+            : page.items.some((item) => item.asset.id === remembered) ? remembered : "");
         })
         .catch((reason: Error) => !cancelled && setError(reason.message))
         .finally(() => !cancelled && setMediaLoading(false));
@@ -1384,7 +1412,7 @@ function ExplorerApp() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [sourceId, sourceRevision, assetQuery, mediaKind, mediaGroup, mediaEventType, mediaSort, gameLanguage, view, isMediaCategory]);
+  }, [sourceId, sourceRevision, selectedCategoryId, assetQuery, mediaKind, mediaGroup, mediaEventType, mediaSort, gameLanguage, view, isMediaCategory]);
 
   useEffect(() => {
     if (!sourceId || view !== "entities") return;
@@ -1407,11 +1435,12 @@ function ExplorerApp() {
           setEntityKinds(page.kinds);
           setEntityUsages(page.usages);
           setEntitySides(page.sides);
-          setSelectedEntityId((current) =>
-            page.items.some((entity) => entity.id === current)
-              ? current
-              : page.items.find((entity) => entity.renderable)?.id || page.items[0]?.id || "",
-          );
+          const remembered = entityKind
+            ? entitySelectionsRef.current.get(entitySelectionKey(sourceId, entityKind)) || ""
+            : "";
+          setSelectedEntityId((current) => page.items.some((entity) => entity.id === current)
+            ? current
+            : page.items.some((entity) => entity.id === remembered) ? remembered : "");
         })
         .catch((reason: Error) => !cancelled && setError(reason.message))
         .finally(() => !cancelled && setEntityLoading(false));
@@ -1717,7 +1746,7 @@ function ExplorerApp() {
               window.localStorage.setItem("ra2exp-media-grouped-v1", String(next));
             }}
             selectedId={selectedId}
-            onSelect={(id) => { setSelectedId(id); setPlayingMediaId((current) => current === id ? "" : id); }}
+              onSelect={(id) => { selectAssetCard(id); setPlayingMediaId((current) => current === id ? "" : id); }}
             playingId={playingMediaId}
             sort={mediaSort}
             setSort={setMediaSort}
@@ -1747,13 +1776,13 @@ function ExplorerApp() {
             </div>
             <div ref={assetListScroll.ref} className={`asset-list ${layout === "grid" ? "asset-grid" : "list-columns"}`} tabIndex={0} aria-label="资产列表" onScroll={(event) => { assetListScroll.remember(event); const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void loadMoreAssets(); }}>
               {layout === "list" ? assets.map((asset) => (
-                <button key={asset.id} className={`asset-row ${selectedId === asset.id ? "selected" : ""}`} onClick={() => setSelectedId(asset.id)}>
+                <button key={asset.id} className={`asset-row ${selectedId === asset.id ? "selected" : ""}`} onClick={() => selectAssetCard(asset.id)}>
                   <span className={`file-icon format-${asset.format}`}><Icon name={assetIcon(asset.format)} /></span>
                   <span className="asset-main"><strong>{assetDisplayName(asset)}</strong><small>{formatLabels[asset.format] || asset.format.toUpperCase()}</small></span>
                   <span className="asset-size">{formatBytes(asset.size)}</span>
                   <Icon name="chevron" size={15} />
                 </button>
-              )) : assets.map((asset) => <AssetGridCard key={asset.id} asset={asset} selected={selectedId === asset.id} onSelect={setSelectedId} />)}
+              )) : assets.map((asset) => <AssetGridCard key={asset.id} asset={asset} selected={selectedId === asset.id} onSelect={selectAssetCard} />)}
               {assets.length < total && <button className="load-more" disabled={assetPageLoading} onClick={() => void loadMoreAssets()}>{assetPageLoading ? "正在载入…" : `载入更多（剩余 ${(total - assets.length).toLocaleString("zh-CN")}）`}</button>}
               {assetPageLoading && assets.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在载入资产…</strong></div>}
               {!assetPageLoading && assets.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的资产</strong><button onClick={() => { setAssetQuery(""); setAssetFormatTag(""); }}>清除筛选</button></div>}
@@ -1802,7 +1831,7 @@ function ExplorerApp() {
               buildableFirst={entityBuildableFirst}
               setBuildableFirst={updateEntityBuildableFirst}
               selectedId={selectedEntityId}
-              setSelectedId={setSelectedEntityId}
+              setSelectedId={selectEntityCard}
               sourceId={sourceId}
               sourceRevision={sourceRevision}
               sides={entitySideFacets}
