@@ -21,7 +21,7 @@ ra2md.mix
 thememd.mix
 ```
 
-其中 `movmd03.mix` 与 `thememd.mix` 在这份安装中是五字节 CD class marker，扫描器会识别并计数，但不会误报为损坏归档。归档内还解析出 `local.mix`、`LOCALMD.MIX` 等嵌套归档，总计 48 个归档记录。
+其中 `movmd03.mix` 与 `thememd.mix` 在这份安装中是五字节 CD class marker，扫描器会识别并计数，但不会误报为损坏归档。归档内还解析出 `local.mix`、`LOCALMD.MIX` 等嵌套归档，总计 64 个归档记录；资产列表中另有 48 项可继续作为 MIX 资源查看。
 
 建立单位、事件和文本关系时，真正作为配置输入的文件如下；后出现的资料片/扩展条目按优先级覆盖基础条目：
 

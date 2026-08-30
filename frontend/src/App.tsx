@@ -36,9 +36,11 @@ import {
   MediaSample,
   MediaSort,
   PlayerColor,
+  ResourcePack,
   Source,
   Stats,
   TextAsset,
+  UpdateInfo,
 } from "./api";
 
 const VoxelViewer = lazy(async () => ({ default: (await import("./VoxelViewer")).VoxelViewer }));
@@ -588,6 +590,16 @@ function assetDisplayName(asset: Pick<Asset, "display_name" | "format">) {
   return audioFormats.includes(asset.format) ? audioDisplayName(asset.display_name) : asset.display_name;
 }
 
+function libraryDisplayName(value: string) {
+  return /^ra2md(?:-官方安装)?$/i.test(value.trim())
+    ? "红色警戒 2 与尤里的复仇"
+    : value;
+}
+
+function sourceDisplayName(source: Source) {
+  return libraryDisplayName(source.name);
+}
+
 function ruleColumnSpan(label: string, value: string) {
   const width = [...`${label}${value}`].reduce(
     (total, character) => total + (character.charCodeAt(0) > 255 ? 2 : 1),
@@ -690,6 +702,10 @@ function storedPreviewAngle(): PreviewAngle {
     : DEFAULT_PREVIEW_ANGLE;
 }
 
+function storedAutomaticUpdateCheck() {
+  return window.localStorage.getItem("ra2exp-auto-update-check-v1") === "true";
+}
+
 function categoryCount(stats: Stats, formats: string[]) {
   const selected = new Set(formats);
   return stats.formats.reduce(
@@ -776,8 +792,15 @@ function ExplorerApp() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [addOpen, setAddOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [resourcePacks, setResourcePacks] = useState<ResourcePack[]>([]);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateError, setUpdateError] = useState("");
+  const [automaticUpdateCheck, setAutomaticUpdateCheck] = useState(
+    storedAutomaticUpdateCheck,
+  );
+  const updateRequestRef = useRef(false);
   const sidebarCollapsedRef = useRef(
     window.localStorage.getItem("ra2exp-sidebar-collapsed") === "true",
   );
@@ -985,13 +1008,45 @@ function ExplorerApp() {
     setMediaEventType("");
   }
 
-  function openAddSource() {
-    setAddOpen(true);
-    if (discoveryLoaded) return;
-    setDiscoveryLoaded(true);
-    api.discovery()
-      .then(setDiscovery)
-      .catch(() => setDiscovery({ candidates: [], checked_locations: [], official_sources: [] }));
+  function updateAutomaticUpdateCheck(next: boolean) {
+    setAutomaticUpdateCheck(next);
+    window.localStorage.setItem("ra2exp-auto-update-check-v1", String(next));
+    if (next && !updateInfo) void checkLatestUpdate();
+  }
+
+  async function refreshResourcePacks() {
+    try {
+      setResourcePacks(await api.resourcePacks());
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "无法读取本机资源包");
+    }
+  }
+
+  async function checkLatestUpdate() {
+    if (updateRequestRef.current) return;
+    updateRequestRef.current = true;
+    setUpdateChecking(true);
+    setUpdateError("");
+    try {
+      setUpdateInfo(await api.latestUpdate());
+    } catch (reason) {
+      setUpdateError(reason instanceof Error ? reason.message : "检查更新失败");
+    } finally {
+      updateRequestRef.current = false;
+      setUpdateChecking(false);
+    }
+  }
+
+  function openSettings() {
+    setSettingsOpen(true);
+    void refreshResourcePacks();
+    if (!discoveryLoaded) {
+      setDiscoveryLoaded(true);
+      api.discovery()
+        .then(setDiscovery)
+        .catch(() => setDiscovery({ candidates: [], checked_locations: [], official_sources: [] }));
+    }
+    if (automaticUpdateCheck && !updateInfo && !updateChecking) void checkLatestUpdate();
   }
 
   useEffect(() => {
@@ -1032,6 +1087,10 @@ function ExplorerApp() {
       })
       .catch((reason: Error) => setError(reason.message))
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (storedAutomaticUpdateCheck()) void checkLatestUpdate();
   }, []);
 
   useEffect(() => {
@@ -1282,8 +1341,38 @@ function ExplorerApp() {
       const source = await action();
       await refreshSources(source.id);
       setNotice(message);
+      return true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "操作失败");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function importResourcePack(file: File) {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api.importResourcePack(file);
+      await refreshSources(result.source.id);
+      setNotice(`已导入 ${result.installed_files.toLocaleString("zh-CN")} 个派生产物`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "资源包导入失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function exportResourcePack(selectedSourceId: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api.exportResourcePack(selectedSourceId);
+      await refreshResourcePacks();
+      setNotice(`${result.filename} 已保存到本机`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "资源包导出失败");
     } finally {
       setBusy(false);
     }
@@ -1340,15 +1429,7 @@ function ExplorerApp() {
   return (
     <div className="app-shell">
       {sources.length === 0 ? (
-        <EmptyLibrary
-          busy={busy}
-          discoveries={discovery.candidates}
-          onAdd={openAddSource}
-          onImport={(installation) => runAction(
-            () => api.addSource(installation.path, installation.name),
-            `${installation.edition} 已导入`,
-          )}
-        />
+        <EmptyLibrary onOpenSettings={openSettings} />
       ) : (
         <main ref={workspaceRef} className={`workspace detail-${detailPlacement} ${sidebarCollapsedRef.current ? "sidebar-collapsed" : ""}`} style={workspaceStyle}>
           <aside className="source-panel panel">
@@ -1400,7 +1481,7 @@ function ExplorerApp() {
                 </button>
               ))}
             </nav>
-            <button className="sidebar-settings" type="button" onClick={() => setSettingsOpen(true)} title="显示设置"><Icon name="settings" /><span>显示设置</span></button>
+            <button className="sidebar-settings" type="button" onClick={openSettings} title={updateInfo?.update_available ? "设置 · 有可用更新" : "设置"}><Icon name="settings" /><span>设置</span>{updateInfo?.update_available && <i aria-label="有可用更新" />}</button>
           </aside>
 
           {view === "assets" ? <>{isMediaCategory ? <MediaListPanel
@@ -1523,31 +1604,50 @@ function ExplorerApp() {
         </main>
       )}
 
-      {addOpen && <AddSourceDialog discoveries={discovery.candidates} busy={busy} onClose={() => setAddOpen(false)} onSubmit={async (path, name) => { await runAction(() => api.addSource(path, name), "资源目录已导入"); setAddOpen(false); }} />}
-      {settingsOpen && <FormatSettingsDialog formats={stats.formats} enabled={enabledFormats} onChange={updateEnabledFormats} detailPlacement={detailPlacement} onDetailPlacementChange={updateDetailPlacement} gameLanguage={gameLanguage} onGameLanguageChange={updateGameLanguage} previewAngle={previewAngle} onPreviewAngleChange={updatePreviewAngle} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsDialog
+        formats={stats.formats}
+        enabled={enabledFormats}
+        onChange={updateEnabledFormats}
+        detailPlacement={detailPlacement}
+        onDetailPlacementChange={updateDetailPlacement}
+        gameLanguage={gameLanguage}
+        onGameLanguageChange={updateGameLanguage}
+        previewAngle={previewAngle}
+        onPreviewAngleChange={updatePreviewAngle}
+        sources={sources}
+        selectedSourceId={sourceId}
+        discoveries={discovery.candidates}
+        resourcePacks={resourcePacks}
+        busy={busy}
+        onAddSource={async (path, name) => {
+          await runAction(() => api.addSource(path, name), "游戏目录已解析");
+        }}
+        onScanSource={async (id) => {
+          await runAction(() => api.scanSource(id), "资料库已重新扫描");
+        }}
+        onImportResourcePack={importResourcePack}
+        onExportResourcePack={exportResourcePack}
+        automaticUpdateCheck={automaticUpdateCheck}
+        onAutomaticUpdateCheckChange={updateAutomaticUpdateCheck}
+        updateInfo={updateInfo}
+        updateChecking={updateChecking}
+        updateError={updateError}
+        onCheckUpdate={checkLatestUpdate}
+        onClose={() => setSettingsOpen(false)}
+      />}
       {error && <div className="toast error" role="alert"><Icon name="info" /><span>{error}</span><button onClick={() => setError("")} aria-label="关闭"><Icon name="close" size={15} /></button></div>}
       {notice && <div className="toast success" role="status"><span className="check">✓</span><span>{notice}</span></div>}
     </div>
   );
 }
 
-function EmptyLibrary({ busy, discoveries, onAdd, onImport }: {
-  busy: boolean;
-  discoveries: GameInstallation[];
-  onAdd: () => void;
-  onImport: (installation: GameInstallation) => void;
-}) {
+function EmptyLibrary({ onOpenSettings }: { onOpenSettings: () => void }) {
   return (
     <main className="empty-library">
       <div className="empty-visual" aria-hidden="true"><div className="disc"><span /><i /><b /></div><div className="scan-line" /></div>
       <h1>导入 RA2 游戏目录</h1>
-      {discoveries.length > 0 && <div className="detected-installs">
-        {discoveries.slice(0, 2).map((installation) => <button key={installation.path} disabled={busy} onClick={() => onImport(installation)}>
-          <Icon name="folder" /><span><strong>{installation.edition}</strong><small>{installation.path}</small></span><em>导入</em>
-        </button>)}
-      </div>}
       <div className="empty-actions">
-        <button className="button primary large" onClick={onAdd}><Icon name="folder" />导入游戏目录</button>
+        <button className="button primary large" onClick={onOpenSettings}><Icon name="settings" />打开设置</button>
       </div>
     </main>
   );
@@ -3299,7 +3399,33 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   );
 }
 
-function FormatSettingsDialog({ formats, enabled, onChange, detailPlacement, onDetailPlacementChange, gameLanguage, onGameLanguageChange, previewAngle, onPreviewAngleChange, onClose }: {
+function SettingsDialog({
+  formats,
+  enabled,
+  onChange,
+  detailPlacement,
+  onDetailPlacementChange,
+  gameLanguage,
+  onGameLanguageChange,
+  previewAngle,
+  onPreviewAngleChange,
+  sources,
+  selectedSourceId,
+  discoveries,
+  resourcePacks,
+  busy,
+  onAddSource,
+  onScanSource,
+  onImportResourcePack,
+  onExportResourcePack,
+  automaticUpdateCheck,
+  onAutomaticUpdateCheckChange,
+  updateInfo,
+  updateChecking,
+  updateError,
+  onCheckUpdate,
+  onClose,
+}: {
   formats: Stats["formats"];
   enabled: string[];
   onChange: (formats: string[]) => void;
@@ -3309,68 +3435,41 @@ function FormatSettingsDialog({ formats, enabled, onChange, detailPlacement, onD
   onGameLanguageChange: (language: GameLanguage) => void;
   previewAngle: PreviewAngle;
   onPreviewAngleChange: (angle: PreviewAngle) => void;
+  sources: Source[];
+  selectedSourceId: string;
+  discoveries: GameInstallation[];
+  resourcePacks: ResourcePack[];
+  busy: boolean;
+  onAddSource: (path: string, name: string) => Promise<void>;
+  onScanSource: (sourceId: string) => Promise<void>;
+  onImportResourcePack: (file: File) => Promise<void>;
+  onExportResourcePack: (sourceId: string) => Promise<void>;
+  automaticUpdateCheck: boolean;
+  onAutomaticUpdateCheckChange: (enabled: boolean) => void;
+  updateInfo: UpdateInfo | null;
+  updateChecking: boolean;
+  updateError: string;
+  onCheckUpdate: () => Promise<void>;
   onClose: () => void;
 }) {
+  const [path, setPath] = useState("");
+  const [name, setName] = useState("");
+  const [packFile, setPackFile] = useState<File | null>(null);
   const enabledSet = new Set(enabled);
   const available = formats.map((item) => item.format);
+  const activeSource = sources.find((source) => source.id === selectedSourceId) || null;
   function toggle(formatName: string) {
     onChange(enabledSet.has(formatName)
       ? enabled.filter((item) => item !== formatName)
       : [...enabled, formatName]);
   }
-  useEffect(() => {
-    const close = (event: KeyboardEvent) => event.key === "Escape" && onClose();
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, [onClose]);
-  return (
-    <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="dialog format-settings" role="dialog" aria-modal="true" aria-labelledby="format-settings-title">
-        <div className="dialog-header"><div className="dialog-icon"><Icon name="settings" /></div><div><h2 id="format-settings-title">显示设置</h2></div><button type="button" onClick={onClose} aria-label="关闭"><Icon name="close" /></button></div>
-        <div className="display-settings">
-          <section className="display-setting-row">
-            <strong>详情布局</strong>
-            <div className="layout-choice" role="group" aria-label="详情区域布局">
-              <button type="button" className={detailPlacement === "bottom" ? "active" : ""} onClick={() => onDetailPlacementChange("bottom")}>上下</button>
-              <button type="button" className={detailPlacement === "right" ? "active" : ""} onClick={() => onDetailPlacementChange("right")}>左右</button>
-            </div>
-          </section>
-          <section className="display-setting-row">
-            <strong>游戏文本</strong>
-            <div className="layout-choice" role="group" aria-label="游戏文本语言">
-              <button type="button" className={gameLanguage === "zh-CN" ? "active" : ""} onClick={() => onGameLanguageChange("zh-CN")}>简体中文</button>
-              <button type="button" className={gameLanguage === "zh-TW" ? "active" : ""} onClick={() => onGameLanguageChange("zh-TW")}>繁體中文</button>
-            </div>
-          </section>
-          <section className="display-setting-row">
-            <strong>单位默认角度</strong>
-            <select className="display-setting-select" aria-label="单位默认预览角度" value={previewAngle} onChange={(event) => onPreviewAngleChange(normalizePreviewAngle(Number(event.target.value)))}>
-              {previewAngleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </section>
-        </div>
-        <div className="format-settings-actions">
-          <button type="button" onClick={() => onChange(available.filter((item) => defaultVisibleFormats.includes(item)))}>常用素材</button>
-          <button type="button" onClick={() => onChange(available)}>全部启用</button>
-        </div>
-        <div className="format-checks">
-          {formats.map((item) => <label key={item.format} className={enabledSet.has(item.format) ? "checked" : ""}>
-            <input type="checkbox" checked={enabledSet.has(item.format)} onChange={() => toggle(item.format)} />
-            <span className={`file-icon format-${item.format}`}><Icon name={assetIcon(item.format)} size={15} /></span>
-            <strong>{formatLabels[item.format] || item.format.toUpperCase()}</strong>
-            <em>{item.count.toLocaleString("zh-CN")}</em>
-          </label>)}
-        </div>
-        <div className="dialog-actions"><button type="button" className="button primary" onClick={onClose}>完成</button></div>
-      </section>
-    </div>
-  );
-}
-
-function AddSourceDialog({ discoveries, busy, onClose, onSubmit }: { discoveries: GameInstallation[]; busy: boolean; onClose: () => void; onSubmit: (path: string, name: string) => Promise<void> }) {
-  const [path, setPath] = useState("");
-  const [name, setName] = useState("");
-  function submit(event: FormEvent) { event.preventDefault(); if (path.trim()) void onSubmit(path.trim(), name.trim()); }
+  function submitSource(event: FormEvent) {
+    event.preventDefault();
+    if (path.trim()) void onAddSource(path.trim(), name.trim());
+  }
+  function scrollToSection(id: string) {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
   useEffect(() => {
     const close = (event: KeyboardEvent) => event.key === "Escape" && !busy && onClose();
     window.addEventListener("keydown", close);
@@ -3378,13 +3477,120 @@ function AddSourceDialog({ discoveries, busy, onClose, onSubmit }: { discoveries
   }, [busy, onClose]);
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
-      <form className="dialog" onSubmit={submit}>
-        <div className="dialog-header"><div className="dialog-icon"><Icon name="folder" /></div><div><h2>添加资源目录</h2></div><button type="button" onClick={onClose} disabled={busy} aria-label="关闭"><Icon name="close" /></button></div>
-        {discoveries.length > 0 && <div className="dialog-discoveries"><span>自动发现</span>{discoveries.map((installation) => <button type="button" key={installation.path} onClick={() => { setPath(installation.path); setName(installation.name); }}><Icon name="folder" size={15} /><span><strong>{installation.edition}</strong><small>{installation.provider} · {installation.path}</small></span><em>选择</em></button>)}</div>}
-        <label><span>目录路径 <b>必填</b></span><input autoFocus value={path} onChange={(event) => setPath(event.target.value)} placeholder="例如 D:\SteamLibrary\steamapps\common\Command & Conquer Red Alert II" /></label>
-        <label><span>显示名称 <em>可选</em></span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="例如 Steam 原版" /></label>
-        <div className="dialog-actions"><button type="button" className="button ghost" disabled={busy} onClick={onClose}>取消</button><button type="submit" className="button primary" disabled={busy || !path.trim()}>{busy ? "正在扫描…" : "添加并扫描"}</button></div>
-      </form>
+      <section className="dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div className="dialog-header settings-header"><div className="dialog-icon"><Icon name="settings" /></div><div><h2 id="settings-title">设置</h2></div><button type="button" onClick={onClose} disabled={busy} aria-label="关闭"><Icon name="close" /></button></div>
+        <div className="settings-layout">
+          <nav className="settings-nav" aria-label="设置分区">
+            <button type="button" onClick={() => scrollToSection("settings-display")}>显示</button>
+            <button type="button" onClick={() => scrollToSection("settings-formats")}>载入类型</button>
+            <button type="button" onClick={() => scrollToSection("settings-sources")}>游戏目录</button>
+            <button type="button" onClick={() => scrollToSection("settings-packs")}>资源包</button>
+            <button type="button" onClick={() => scrollToSection("settings-updates")}>应用更新</button>
+          </nav>
+          <div className="settings-content">
+            <section className="settings-section" id="settings-display">
+              <header><h3>显示</h3></header>
+              <div className="display-settings">
+                <div className="display-setting-row">
+                  <strong>详情布局</strong>
+                  <div className="layout-choice" role="group" aria-label="详情区域布局">
+                    <button type="button" className={detailPlacement === "bottom" ? "active" : ""} onClick={() => onDetailPlacementChange("bottom")}>上下</button>
+                    <button type="button" className={detailPlacement === "right" ? "active" : ""} onClick={() => onDetailPlacementChange("right")}>左右</button>
+                  </div>
+                </div>
+                <div className="display-setting-row">
+                  <strong>游戏文本</strong>
+                  <div className="layout-choice" role="group" aria-label="游戏文本语言">
+                    <button type="button" className={gameLanguage === "zh-CN" ? "active" : ""} onClick={() => onGameLanguageChange("zh-CN")}>简体中文</button>
+                    <button type="button" className={gameLanguage === "zh-TW" ? "active" : ""} onClick={() => onGameLanguageChange("zh-TW")}>繁體中文</button>
+                  </div>
+                </div>
+                <div className="display-setting-row">
+                  <strong>单位默认角度</strong>
+                  <select className="display-setting-select" aria-label="单位默认预览角度" value={previewAngle} onChange={(event) => onPreviewAngleChange(normalizePreviewAngle(Number(event.target.value)))}>
+                    {previewAngleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </div>
+              </div>
+            </section>
+
+            <section className="settings-section" id="settings-formats">
+              <header><h3>载入类型</h3><span>{enabled.length} / {formats.length}</span></header>
+              <div className="format-settings-actions">
+                <button type="button" onClick={() => onChange(available.filter((item) => defaultVisibleFormats.includes(item)))}>常用素材</button>
+                <button type="button" onClick={() => onChange(available)}>全部启用</button>
+              </div>
+              {formats.length > 0 ? <div className="format-checks">
+                {formats.map((item) => <label key={item.format} className={enabledSet.has(item.format) ? "checked" : ""}>
+                  <input type="checkbox" checked={enabledSet.has(item.format)} onChange={() => toggle(item.format)} />
+                  <span className={`file-icon format-${item.format}`}><Icon name={assetIcon(item.format)} size={15} /></span>
+                  <strong>{formatLabels[item.format] || item.format.toUpperCase()}</strong>
+                  <em>{item.count.toLocaleString("zh-CN")}</em>
+                </label>)}
+              </div> : <div className="settings-empty">导入游戏目录或资源包后即可选择载入类型。</div>}
+            </section>
+
+            <section className="settings-section" id="settings-sources">
+              <header><h3>游戏目录</h3><span>{sources.length}</span></header>
+              {sources.length > 0 && <div className="settings-source-list">
+                {sources.map((source) => {
+                  const fromPack = source.root_path.startsWith("resource-pack://");
+                  return <article key={source.id} className={source.id === selectedSourceId ? "active" : ""}>
+                    <span className="file-icon"><Icon name={fromPack ? "archive" : "folder"} size={16} /></span>
+                    <div><strong>{sourceDisplayName(source)}</strong><small>{fromPack ? "派生资源包" : "原版游戏目录"} · {source.asset_count.toLocaleString("zh-CN")} 项</small></div>
+                    {!fromPack && <button type="button" disabled={busy} onClick={() => void onScanSource(source.id)}>重新扫描</button>}
+                  </article>;
+                })}
+              </div>}
+              {discoveries.length > 0 && <div className="settings-discoveries">
+                {discoveries.map((installation) => <button type="button" key={installation.path} disabled={busy} onClick={() => { setPath(installation.path); setName(installation.name); }}>
+                  <Icon name="folder" size={16} /><span><strong>{installation.edition}</strong><small>{installation.provider} · {installation.path}</small></span><em>选择</em>
+                </button>)}
+              </div>}
+              <form className="settings-source-form" onSubmit={submitSource}>
+                <label><span>原版游戏目录</span><input value={path} onChange={(event) => setPath(event.target.value)} placeholder="例如 D:\Games\Red Alert 2" /></label>
+                <label><span>资料库名称</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="可选" /></label>
+                <button type="submit" className="button primary" disabled={busy || !path.trim()}>{busy ? "正在处理…" : "解析目录"}</button>
+              </form>
+            </section>
+
+            <section className="settings-section" id="settings-packs">
+              <header><h3>派生资源包</h3><span>.ra2pack</span></header>
+              <div className="resource-pack-actions">
+                <div className="resource-pack-import">
+                  <input id="resource-pack-file" type="file" accept=".ra2pack,application/zip" onChange={(event) => setPackFile(event.target.files?.[0] || null)} />
+                  <label htmlFor="resource-pack-file" className="button ghost"><Icon name="folder" />选择资源包</label>
+                  <span title={packFile?.name}>{packFile?.name || "尚未选择文件"}</span>
+                  <button type="button" className="button primary" disabled={busy || !packFile} onClick={() => packFile && void onImportResourcePack(packFile)}>导入</button>
+                </div>
+                <button type="button" className="button ghost resource-pack-export" disabled={busy || !activeSource} onClick={() => activeSource && void onExportResourcePack(activeSource.id)}><Icon name="download" />导出当前资料库</button>
+              </div>
+              {resourcePacks.length > 0 ? <div className="resource-pack-list">
+                {resourcePacks.map((pack) => <article key={pack.filename}>
+                  <Icon name="archive" size={17} /><div><strong>{libraryDisplayName(pack.source_name)}</strong><small>{pack.filename} · {formatBytes(pack.size)}</small></div><a className="button ghost" href={pack.download_url} download><Icon name="download" />下载</a>
+                </article>)}
+              </div> : <div className="settings-empty">尚未在本机导出派生资源包。</div>}
+            </section>
+
+            <section className="settings-section" id="settings-updates">
+              <header><h3>应用更新</h3>{updateInfo && <span>当前 {updateInfo.current_version}</span>}</header>
+              <label className="settings-toggle"><input type="checkbox" checked={automaticUpdateCheck} onChange={(event) => onAutomaticUpdateCheckChange(event.target.checked)} /><span><strong>应用启动时检查更新</strong><small>仅在启用后访问 GitHub，不会自动下载或安装。</small></span></label>
+              <div className="update-actions">
+                <button type="button" className="button ghost" disabled={updateChecking} onClick={() => void onCheckUpdate()}>{updateChecking ? "正在检查…" : "检查更新"}</button>
+                {updateInfo?.update_available && updateInfo.asset && <a className="button primary" href={updateInfo.asset.download_url} target="_blank" rel="noreferrer"><Icon name="download" />下载 {updateInfo.latest_version}</a>}
+                {updateInfo && <a className="button ghost" href={updateInfo.release_url} target="_blank" rel="noreferrer">发行说明</a>}
+              </div>
+              {updateError && <div className="settings-message error" role="alert">{updateError}</div>}
+              {updateInfo && <div className={`settings-message ${updateInfo.update_available ? "available" : "current"}`}>
+                <strong>{updateInfo.update_available ? `发现 ${updateInfo.latest_version}` : "已经是最新版本"}</strong>
+                {updateInfo.asset && <span>{formatBytes(updateInfo.asset.size)}{updateInfo.asset.digest ? ` · ${updateInfo.asset.digest}` : ""}</span>}
+                {updateInfo.notes && <p>{updateInfo.notes}</p>}
+              </div>}
+            </section>
+          </div>
+        </div>
+        <div className="dialog-actions settings-footer"><button type="button" className="button primary" disabled={busy} onClick={onClose}>完成</button></div>
+      </section>
     </div>
   );
 }

@@ -124,6 +124,41 @@ export interface DiscoveryResult {
   official_sources: Array<{ provider: string; url: string }>;
 }
 
+export interface ResourcePack {
+  filename: string;
+  size: number;
+  created_at?: string | null;
+  source_id: string;
+  source_name: string;
+  asset_count: number;
+  artifact_files?: number;
+  artifact_bytes?: number;
+  download_url: string;
+}
+
+export interface ResourcePackImportResult {
+  source: Source;
+  imported: boolean;
+  installed_files: number;
+  reused_files: number;
+  installed_bytes: number;
+}
+
+export interface UpdateInfo {
+  current_version: string;
+  latest_version: string;
+  update_available: boolean;
+  release_url: string;
+  published_at: string | null;
+  notes: string;
+  asset: {
+    name: string;
+    size: number;
+    digest: string | null;
+    download_url: string;
+  } | null;
+}
+
 export type EntityKind = "vehicle" | "infantry" | "aircraft" | "building";
 export type EntityUsage = "buildable" | "hero" | "tech" | "civilian" | "scenario";
 export type GameLanguage = "zh-CN" | "zh-TW";
@@ -403,6 +438,23 @@ export const api = {
       body: JSON.stringify({ path, name: name || null }),
     }),
   scanSource: (id: string) => request<Source>(`/api/sources/${id}/scan`, { method: "POST" }),
+  resourcePacks: () => request<ResourcePack[]>("/api/resource-packs"),
+  exportResourcePack: (sourceId: string) =>
+    request<ResourcePack>("/api/resource-packs/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_id: sourceId }),
+    }),
+  importResourcePack: (file: File) =>
+    request<ResourcePackImportResult>(
+      `/api/resource-packs/import?filename=${encodeURIComponent(file.name)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: file,
+      },
+    ),
+  latestUpdate: () => request<UpdateInfo>("/api/updates/latest"),
   assets: (
     sourceId: string,
     query: string,
