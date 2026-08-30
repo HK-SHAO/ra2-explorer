@@ -2031,6 +2031,35 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
   );
 }
 
+function entitySuggestionScore(entity: EntitySummary, query: string) {
+  const raw = query.trim().toLocaleLowerCase();
+  const compact = [...raw].filter((character) => /[\p{L}\p{N}]/u.test(character)).join("");
+  if (!compact) return Number.POSITIVE_INFINITY;
+  const primary = [entity.display_name, entity.internal_name, entity.id, entity.image]
+    .map((value) => value.toLocaleLowerCase());
+  const aliases = [
+    entity.search_aliases?.pinyin_compact || "",
+    entity.search_aliases?.pinyin_initials || "",
+  ].map((value) => value.toLocaleLowerCase());
+  if (primary.some((value) => value === raw)) return 0;
+  if (primary.some((value) => value.startsWith(raw))) return 1;
+  if (aliases.some((value) => value.startsWith(compact))) return 2;
+  if (primary.some((value) => value.includes(raw))) return 3;
+  if (aliases.some((value) => value.includes(compact))) return 4;
+  const fuzzyValues = [...primary, ...aliases]
+    .map((value) => [...value].filter((character) => /[\p{L}\p{N}]/u.test(character)).join(""));
+  return fuzzyValues.some((value) => compact.length >= 2 && value.length <= Math.max(64, compact.length * 8) && (() => {
+    let cursor = -1;
+    const positions: number[] = [];
+    for (const character of compact) {
+      cursor = value.indexOf(character, cursor + 1);
+      if (cursor < 0) return false;
+      positions.push(cursor);
+    }
+    return positions.at(-1)! - positions[0] + 1 <= Math.max(compact.length * 2, compact.length + 2);
+  })()) ? 5 : Number.POSITIVE_INFINITY;
+}
+
 function EntityListPanel({ entities, total, loading, query, setQuery, searchScope, setSearchScope, searchKinds, setSearchKinds, searchUsages, setSearchUsages, sort, setSort, buildableFirst, setBuildableFirst, selectedId, setSelectedId, sourceId, sides, selectedSide, setSelectedSide, layout, setLayout, previewAngle, scrollKey }: {
   entities: EntitySummary[];
   total: number;
@@ -2059,6 +2088,41 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
   scrollKey: string;
 }) {
   const listScroll = useRememberedScroll(scrollKey, entities.length);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [suggestionIndex, setSuggestionIndex] = useState(0);
+  const suggestions = useMemo(() => entities
+    .map((entity, index) => ({ entity, index, score: entitySuggestionScore(entity, query) }))
+    .filter((item) => Number.isFinite(item.score) || (!loading && Boolean(query.trim())))
+    .sort((left, right) => left.score - right.score || left.index - right.index)
+    .slice(0, 8)
+    .map((item) => item.entity), [entities, loading, query]);
+  const suggestionsVisible = searchOpen && Boolean(query.trim()) && suggestions.length > 0;
+  useEffect(() => setSuggestionIndex(0), [query, suggestions[0]?.id]);
+
+  function selectSuggestion(entity: EntitySummary) {
+    setQuery(entity.display_name);
+    setSelectedId(entity.id);
+    setSearchOpen(false);
+  }
+
+  function handleSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setSearchOpen(false);
+      return;
+    }
+    if (!suggestions.length || !["ArrowDown", "ArrowUp", "Enter"].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === "ArrowDown") {
+      setSearchOpen(true);
+      setSuggestionIndex((current) => (current + 1) % suggestions.length);
+    } else if (event.key === "ArrowUp") {
+      setSearchOpen(true);
+      setSuggestionIndex((current) => (current - 1 + suggestions.length) % suggestions.length);
+    } else {
+      selectSuggestion(suggestions[Math.min(suggestionIndex, suggestions.length - 1)]);
+    }
+  }
+
   function toggleSearchKind(kind: EntityKind, checked: boolean) {
     const next = entityKindOrder.filter((value) => value === kind ? checked : searchKinds.includes(value));
     if (next.length > 0) setSearchKinds(next);
@@ -2070,14 +2134,27 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
   return (
     <section className="asset-panel entity-panel panel">
       <div className="asset-toolbar">
-        <div className="search-box entity-search-box" role="search"><Icon name="search" /><select value={searchScope} onChange={(event) => setSearchScope(event.target.value as EntitySearchScope)} aria-label="单位搜索范围" title="单位搜索范围"><option value="global">全局</option><option value="current">当前</option></select><span className="search-scope-divider" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchScope === "global" ? "搜索全部单位，支持模糊匹配…" : "搜索当前分类…"} aria-label="搜索单位" />{query && <button type="button" onClick={() => setQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</div>
-        {searchScope === "global" && <details className="entity-search-filter">
-          <summary><Icon name="filter" size={15} /><span>筛选</span><em>{searchKinds.length + searchUsages.length}/9</em></summary>
-          <div className="entity-search-filter-popover">
-            <section><header><strong>单位类型</strong><button type="button" onClick={() => setSearchKinds([...entityKindOrder])}>全选</button></header>{entityKindOrder.map((kind) => <label key={kind}><input type="checkbox" checked={searchKinds.includes(kind)} onChange={(event) => toggleSearchKind(kind, event.target.checked)} /><Icon name={entityKindIcons[kind]} size={15} /><span>{entityKindLabels[kind]}</span></label>)}</section>
-            <section><header><strong>单位用途</strong><button type="button" onClick={() => setSearchUsages([...entityUsageOrder])}>全选</button></header>{entityUsageOrder.map((usage) => <label key={usage}><input type="checkbox" checked={searchUsages.includes(usage)} onChange={(event) => toggleSearchUsage(usage, event.target.checked)} /><span>{entitySearchUsageLabels[usage]}</span></label>)}</section>
+        <div className="entity-search-cluster" role="search">
+          <div className="entity-search-input">
+            <div className="search-box entity-search-box"><Icon name="search" /><input value={query} onFocus={() => setSearchOpen(true)} onBlur={() => setSearchOpen(false)} onKeyDown={handleSearchKeyDown} onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }} placeholder={searchScope === "global" ? "搜索全部单位、英文或拼音…" : "搜索当前分类、英文或拼音…"} aria-label="搜索单位" role="combobox" aria-autocomplete="list" aria-expanded={suggestionsVisible} aria-controls="entity-search-suggestions" aria-activedescendant={suggestionsVisible ? `entity-suggestion-${suggestions[suggestionIndex]?.id}` : undefined} />{query && <button type="button" onClick={() => { setQuery(""); setSearchOpen(false); }} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</div>
+            {suggestionsVisible && <div className="entity-search-suggestions" id="entity-search-suggestions" role="listbox" aria-label="单位搜索建议" onMouseDown={(event) => event.preventDefault()}>
+              {suggestions.map((entity, index) => <button id={`entity-suggestion-${entity.id}`} type="button" role="option" aria-selected={index === suggestionIndex} className={index === suggestionIndex ? "active" : ""} key={entity.id} onMouseEnter={() => setSuggestionIndex(index)} onClick={() => selectSuggestion(entity)}><span><strong>{entity.display_name}</strong><small>{entity.internal_name}</small></span>{entity.search_aliases && <em>{entity.search_aliases.pinyin} · {entity.search_aliases.pinyin_initials}</em>}</button>)}
+            </div>}
           </div>
-        </details>}
+          <div className="entity-search-options">
+            <div className="entity-search-scope" role="group" aria-label="单位搜索范围">
+              <button type="button" className={searchScope === "global" ? "active" : ""} aria-pressed={searchScope === "global"} onClick={() => setSearchScope("global")}>全局</button>
+              <button type="button" className={searchScope === "current" ? "active" : ""} aria-pressed={searchScope === "current"} onClick={() => setSearchScope("current")}>当前</button>
+            </div>
+            {searchScope === "global" && <details className="entity-search-filter">
+              <summary><Icon name="filter" size={15} /><span>筛选</span><em>{searchKinds.length + searchUsages.length}/9</em></summary>
+              <div className="entity-search-filter-popover">
+                <section><header><strong>单位类型</strong><button type="button" onClick={() => setSearchKinds([...entityKindOrder])}>全选</button></header>{entityKindOrder.map((kind) => <label key={kind}><input type="checkbox" checked={searchKinds.includes(kind)} onChange={(event) => toggleSearchKind(kind, event.target.checked)} /><Icon name={entityKindIcons[kind]} size={15} /><span>{entityKindLabels[kind]}</span></label>)}</section>
+                <section><header><strong>单位用途</strong><button type="button" onClick={() => setSearchUsages([...entityUsageOrder])}>全选</button></header>{entityUsageOrder.map((usage) => <label key={usage}><input type="checkbox" checked={searchUsages.includes(usage)} onChange={(event) => toggleSearchUsage(usage, event.target.checked)} /><span>{entitySearchUsageLabels[usage]}</span></label>)}</section>
+              </div>
+            </details>}
+          </div>
+        </div>
         <span className="result-count">显示 {entities.length} / {total}</span>
         <LayoutToggle layout={layout} onChange={setLayout} />
       </div>
