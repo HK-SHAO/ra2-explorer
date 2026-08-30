@@ -5,11 +5,14 @@ import shutil
 import zipfile
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from ra2_explorer.api import create_app
 from ra2_explorer.cli import build_parser
 from ra2_explorer.config import Settings
+from ra2_explorer.errors import Ra2ExplorerError
+from ra2_explorer.resource_pack import validate_resource_pack
 from tests.ra2_fixtures import FIXTURE_NAMES, create_fixture_installation
 
 
@@ -72,6 +75,9 @@ def test_resource_pack_reuses_browser_artifacts_without_game_files(tmp_path: Pat
     assert download.status_code == 200
 
     pack_path = original_settings.derived_root / "packages" / export_result["filename"]
+    validation = validate_resource_pack(pack_path)
+    assert validation["contains_game_files"] is False
+    assert validation["artifact_files"] == export_result["artifact_files"]
     with zipfile.ZipFile(pack_path) as archive:
         names = archive.namelist()
         assert "manifest.json" in names
@@ -130,6 +136,9 @@ def test_resource_pack_rejects_raw_game_payload(tmp_path: Path) -> None:
     pack_path = settings.derived_root / "packages" / exported["filename"]
     with zipfile.ZipFile(pack_path, "a") as archive:
         archive.writestr("game/ra2.mix", b"not allowed")
+
+    with pytest.raises(Ra2ExplorerError, match="未知文件"):
+        validate_resource_pack(pack_path)
 
     response = client.post(
         "/api/resource-packs/import",

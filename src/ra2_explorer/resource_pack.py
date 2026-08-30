@@ -200,6 +200,51 @@ def import_resource_pack(
     }
 
 
+def validate_resource_pack(pack_path: Path) -> dict[str, object]:
+    """Validate a derived-only pack without installing any of its payload."""
+    resolved_pack = pack_path.expanduser().resolve(strict=True)
+    if not resolved_pack.is_file():
+        raise Ra2ExplorerError("资源包文件不存在")
+    if resolved_pack.stat().st_size > MAX_RESOURCE_PACK_BYTES:
+        raise Ra2ExplorerError("资源包超过 2 GiB 限制")
+    try:
+        archive = zipfile.ZipFile(resolved_pack)
+    except (OSError, zipfile.BadZipFile) as error:
+        raise Ra2ExplorerError("资源包不是有效的 ZIP 文件") from error
+    with archive:
+        manifest = _read_json_entry(archive, "manifest.json")
+        snapshot = _read_json_entry(archive, "index.json")
+        source_id, artifact_prefix, semantic_snapshot = _validate_pack(
+            archive,
+            manifest,
+            snapshot,
+        )
+        catalog = deserialize_semantic_catalog(
+            _read_json_entry(archive, semantic_snapshot)
+        )
+        if catalog.source_id != source_id:
+            raise Ra2ExplorerError("资源包语义索引与资料库不匹配")
+        artifacts = [
+            info
+            for info in archive.infolist()
+            if not info.is_dir() and info.filename.startswith(f"{artifact_prefix}/")
+        ]
+        artifact_bytes = sum(info.file_size for info in artifacts)
+        if manifest.get("artifact_files") != len(artifacts):
+            raise Ra2ExplorerError("资源包产物数量与清单不匹配")
+        if manifest.get("artifact_bytes") != artifact_bytes:
+            raise Ra2ExplorerError("资源包产物大小与清单不匹配")
+        source = _mapping(manifest.get("source"))
+        return {
+            "source_id": source_id,
+            "asset_count": int(source.get("asset_count") or 0),
+            "artifact_files": len(artifacts),
+            "artifact_bytes": artifact_bytes,
+            "archive_bytes": resolved_pack.stat().st_size,
+            "contains_game_files": False,
+        }
+
+
 def list_resource_packs(derived: DerivedStore) -> list[dict[str, object]]:
     package_root = derived.root / "packages"
     if not package_root.is_dir():
@@ -382,4 +427,5 @@ __all__ = [
     "import_resource_pack",
     "list_resource_packs",
     "resource_pack_path",
+    "validate_resource_pack",
 ]
