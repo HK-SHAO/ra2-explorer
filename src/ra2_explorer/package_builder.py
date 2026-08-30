@@ -58,6 +58,7 @@ GAME_DATA_SUFFIXES = frozenset(
 DENIED_GAME_SUFFIXES = frozenset(
     {".bat", ".cmd", ".com", ".dll", ".exe", ".lnk", ".msi", ".pif", ".scr", ".sys"}
 )
+VENDORED_NATIVE_SUFFIXES = frozenset({".dll", ".pyd"})
 MARKER_FILE = ".ra2exp-distribution"
 DistributionMode = Literal["generic", "linked", "portable"]
 
@@ -358,6 +359,13 @@ def audit_distribution(
         if not file_path.is_file():
             continue
         if file_path.resolve() in allowed_private_files:
+            continue
+        # Native dependencies can retain paths from their upstream public CI
+        # builders (for example GitHub's runner home in pydantic-core). Those
+        # are not application data and matching them against this build
+        # machine creates false positives. Executables and all readable/app
+        # data remain covered; database roots are validated explicitly below.
+        if file_path.suffix.casefold() in VENDORED_NATIVE_SUFFIXES:
             continue
         if any(needle and _contains_bytes(file_path, needle) for needle in needles):
             raise Ra2ExplorerError(f"发行文件包含本机绝对路径：{file_path.name}")

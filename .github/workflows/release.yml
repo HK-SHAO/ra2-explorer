@@ -52,7 +52,7 @@ jobs:
         run: scripts\build_windows.cmd > release-build.log 2>&1
       - name: Upload failed build diagnostics
         if: steps.package.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-build-diagnostics
           path: release-build.log
@@ -65,7 +65,7 @@ jobs:
       - name: Create archive
         run: tar -a -c -f .outputs\RA2-Explorer-Web-x64.zip -C .outputs RA2-Explorer-Web
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: RA2-Explorer-Web-x64
           path: .outputs\RA2-Explorer-Web-x64.zip

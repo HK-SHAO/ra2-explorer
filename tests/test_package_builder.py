@@ -40,6 +40,19 @@ def test_distribution_audit_rejects_build_machine_paths(tmp_path: Path) -> None:
         audit_distribution(package, private_paths=(private_root,))
 
 
+def test_distribution_audit_ignores_upstream_paths_in_native_dependencies(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "RA2 Explorer.exe").write_bytes(b"launcher")
+    (package / "ra2exp.exe").write_bytes(b"cli")
+    public_ci_root = tmp_path / "runner-home"
+    (package / "third-party.pyd").write_bytes(str(public_ci_root.resolve()).encode())
+
+    audit_distribution(package, private_paths=(public_ci_root,))
+
+
 def test_distribution_audit_allows_only_linked_path_in_local_index(tmp_path: Path) -> None:
     package = tmp_path / "package"
     package.mkdir()
