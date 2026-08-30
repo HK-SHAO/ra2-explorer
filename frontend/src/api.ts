@@ -202,6 +202,10 @@ export interface EntitySummary {
   media_count: number;
   cost: string | null;
   strength: string | null;
+  tech_level?: string | null;
+  ai_base_planning_side?: string | null;
+  naval?: boolean;
+  considered_aircraft?: boolean;
   owner: string | null;
   primary: string | null;
   countries: string[];

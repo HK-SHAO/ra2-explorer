@@ -173,6 +173,10 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert entity_summaries["DemoVehicle"]["renderable"] is True
     assert entity_summaries["DemoVehicle"]["body_format"] == "vxl"
     assert entity_summaries["DemoVehicle"]["usage"] == "buildable"
+    assert entity_summaries["DemoVehicle"]["tech_level"] == "2"
+    assert entity_summaries["DemoVehicle"]["ai_base_planning_side"] == "0"
+    assert entity_summaries["DemoVehicle"]["naval"] is False
+    assert entity_summaries["DemoVehicle"]["considered_aircraft"] is False
     assert entity_summaries["DemoInfantry"]["usage"] == "buildable"
     assert entity_summaries["DemoInfantry"]["display_name"] == "测试步兵"
     assert entity_summaries["DemoVehicle"]["media_count"] > 0

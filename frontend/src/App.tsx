@@ -484,7 +484,7 @@ function assetIcon(format: string): IconName {
 
 type LayoutMode = "list" | "grid";
 type DetailPlacement = "right" | "bottom";
-type EntitySort = "name_asc" | "name_desc" | "cost_asc" | "cost_desc" | "strength_asc" | "strength_desc";
+type EntitySort = "cameo" | "faction" | "name_asc" | "name_desc" | "cost_asc" | "cost_desc" | "strength_asc" | "strength_desc";
 type PreviewAngle = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 const DEFAULT_PREVIEW_ANGLE: PreviewAngle = 1;
@@ -534,6 +534,7 @@ type BrowsingLocation = {
   entityQuery: string;
   assetSort: AssetSort;
   entitySort: EntitySort;
+  entityBuildableFirst: boolean;
   mediaSort: MediaSort;
 };
 
@@ -659,7 +660,13 @@ function useRememberedScroll<T extends HTMLElement = HTMLDivElement>(key: string
   return { ref, remember };
 }
 
-function sortEntities(entities: EntitySummary[], sort: EntitySort, language: GameLanguage) {
+function sortEntities(
+  entities: EntitySummary[],
+  sort: EntitySort,
+  language: GameLanguage,
+  buildableFirst: boolean,
+  selectedSide: string,
+) {
   const selected = [...entities];
   const numeric = (value: string | null) => {
     const parsed = Number.parseInt(value || "", 10);
@@ -678,7 +685,55 @@ function sortEntities(entities: EntitySummary[], sort: EntitySort, language: Gam
     if (rightValue === null) return -1;
     return ascending ? leftValue - rightValue : rightValue - leftValue;
   };
+  const knownSides = Object.keys(sideLabels);
+  const planningSide = (entity: EntitySummary) => {
+    const configured = numeric(entity.ai_base_planning_side ?? null);
+    if (configured !== null) return configured;
+    const effective = entity.sides
+      .map((side) => knownSides.indexOf(side))
+      .filter((index) => index >= 0);
+    return effective.length > 0 ? Math.min(...effective) : null;
+  };
+  const compareFactions = (left: EntitySummary, right: EntitySummary) => {
+    const leftSide = planningSide(left);
+    const rightSide = planningSide(right);
+    if (leftSide !== null || rightSide !== null) {
+      if (leftSide === null) return 1;
+      if (rightSide === null) return -1;
+      if (leftSide !== rightSide) return leftSide - rightSide;
+    }
+    const leftLabel = left.sides.map((side) => sideLabels[side] || side).join("、") || left.affiliation?.display_name || "";
+    const rightLabel = right.sides.map((side) => sideLabels[side] || side).join("、") || right.affiliation?.display_name || "";
+    return leftLabel.localeCompare(rightLabel, language, { numeric: true });
+  };
+  const compareCameos = (left: EntitySummary, right: EntitySummary) => {
+    const selectedPlanningSide = knownSides.indexOf(selectedSide);
+    if (selectedPlanningSide >= 0) {
+      const leftMatches = planningSide(left) === selectedPlanningSide ? 0 : 1;
+      const rightMatches = planningSide(right) === selectedPlanningSide ? 0 : 1;
+      if (leftMatches !== rightMatches) return leftMatches - rightMatches;
+    } else {
+      const faction = compareFactions(left, right);
+      if (faction) return faction;
+    }
+    if (["vehicle", "aircraft"].includes(left.kind) && ["vehicle", "aircraft"].includes(right.kind)) {
+      const naval = Number(Boolean(left.naval)) - Number(Boolean(right.naval));
+      if (naval) return naval;
+      const aircraft = Number(Boolean(left.considered_aircraft)) - Number(Boolean(right.considered_aircraft));
+      if (aircraft) return aircraft;
+    }
+    return compareNumbers(left.tech_level ?? null, right.tech_level ?? null, true)
+      || compareNumbers(left.cost, right.cost, true)
+      || compareNames(left, right);
+  };
   selected.sort((left, right) => {
+    if (buildableFirst) {
+      const leftBuildable = left.usage === "buildable" || left.usage === "hero" ? 0 : 1;
+      const rightBuildable = right.usage === "buildable" || right.usage === "hero" ? 0 : 1;
+      if (leftBuildable !== rightBuildable) return leftBuildable - rightBuildable;
+    }
+    if (sort === "cameo") return compareCameos(left, right);
+    if (sort === "faction") return compareFactions(left, right) || compareCameos(left, right);
     if (sort.startsWith("cost_")) return compareNumbers(left.cost, right.cost, sort === "cost_asc") || compareNames(left, right);
     if (sort.startsWith("strength_")) return compareNumbers(left.strength, right.strength, sort === "strength_asc") || compareNames(left, right);
     const compared = compareNames(left, right);
@@ -777,6 +832,7 @@ function ExplorerApp() {
   );
   const [entitySide, setEntitySide] = useState(rememberedLocation.entitySide || "");
   const [entitySort, setEntitySort] = useState<EntitySort>(rememberedLocation.entitySort || "name_asc");
+  const [entityBuildableFirst, setEntityBuildableFirst] = useState(rememberedLocation.entityBuildableFirst === true);
   const [selectedEntityId, setSelectedEntityId] = useState(rememberedLocation.selectedEntityId || "");
   const [selectedEntity, setSelectedEntity] = useState<GameEntity | null>(null);
   const [entityLoading, setEntityLoading] = useState(false);
@@ -873,8 +929,8 @@ function ExplorerApp() {
     });
   }, [entitySides, entitySide]);
   const visibleEntities = useMemo(
-    () => sortEntities(entities, entitySort, gameLanguage),
-    [entities, entitySort, gameLanguage],
+    () => sortEntities(entities, entitySort, gameLanguage, entityBuildableFirst, entitySide),
+    [entities, entitySort, gameLanguage, entityBuildableFirst, entitySide],
   );
   const compactAudioDetail = view === "assets" && isMediaCategory;
   const detailSize = detailPlacement === "bottom"
@@ -1006,13 +1062,14 @@ function ExplorerApp() {
       entityQuery,
       assetSort,
       entitySort,
+      entityBuildableFirst,
       mediaSort,
     };
     window.localStorage.setItem("ra2exp-browsing-location-v1", JSON.stringify(location));
   }, [
     loading, sourceId, view, assetCategory, assetFormatTag, mediaGroup, mediaEventType, entityKind, entityUsage,
     entitySide, selectedId, selectedEntityId, assetQuery, entityQuery, assetSort,
-    entitySort, mediaSort,
+    entitySort, entityBuildableFirst, mediaSort,
   ]);
 
   function selectEntityKind(kind: EntityKind) {
@@ -1641,6 +1698,8 @@ function ExplorerApp() {
               setQuery={setEntityQuery}
               sort={entitySort}
               setSort={setEntitySort}
+              buildableFirst={entityBuildableFirst}
+              setBuildableFirst={setEntityBuildableFirst}
               selectedId={selectedEntityId}
               setSelectedId={setSelectedEntityId}
               sourceId={sourceId}
@@ -1650,7 +1709,7 @@ function ExplorerApp() {
               layout={layout}
               setLayout={updateLayout}
               previewAngle={previewAngle}
-              scrollKey={`entities:${sourceId}:${entityKind}:${entityUsage}:${entitySide}:${entityQuery}:${entitySort}:${layout}`}
+              scrollKey={`entities:${sourceId}:${entityKind}:${entityUsage}:${entitySide}:${entityQuery}:${entitySort}:${entityBuildableFirst}:${layout}`}
             />
             <div className="workspace-resizer" role="separator" tabIndex={0} aria-label="调整详情区域大小" aria-orientation={detailPlacement === "bottom" ? "horizontal" : "vertical"} aria-valuenow={detailSize} onPointerDown={beginDetailResize} onKeyDown={resizeDetailWithKeyboard}><span /></div>
             <EntityDetailPanel
@@ -1875,7 +1934,7 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
   );
 }
 
-function EntityListPanel({ entities, total, loading, query, setQuery, sort, setSort, selectedId, setSelectedId, sourceId, sides, selectedSide, setSelectedSide, layout, setLayout, previewAngle, scrollKey }: {
+function EntityListPanel({ entities, total, loading, query, setQuery, sort, setSort, buildableFirst, setBuildableFirst, selectedId, setSelectedId, sourceId, sides, selectedSide, setSelectedSide, layout, setLayout, previewAngle, scrollKey }: {
   entities: EntitySummary[];
   total: number;
   loading: boolean;
@@ -1883,6 +1942,8 @@ function EntityListPanel({ entities, total, loading, query, setQuery, sort, setS
   setQuery: (value: string) => void;
   sort: EntitySort;
   setSort: (value: EntitySort) => void;
+  buildableFirst: boolean;
+  setBuildableFirst: (value: boolean) => void;
   selectedId: string;
   setSelectedId: (id: string) => void;
   sourceId: string;
@@ -1906,14 +1967,19 @@ function EntityListPanel({ entities, total, loading, query, setQuery, sort, setS
         <div className="tag-filter" role="group" aria-label="按阵营筛选">
           {sides.map((side) => <button key={side.id} className={selectedSide === side.id ? "active" : ""} onClick={() => setSelectedSide(selectedSide === side.id ? "" : side.id)}>{sideLabels[side.id] || side.id}<em>{side.count}</em></button>)}
         </div>
-        <label className="sort-control"><span>排序</span><select value={sort} onChange={(event) => setSort(event.target.value as EntitySort)}>
-          <option value="name_asc">名称 A–Z</option>
-          <option value="name_desc">名称 Z–A</option>
-          <option value="cost_asc">造价从低到高</option>
-          <option value="cost_desc">造价从高到低</option>
-          <option value="strength_asc">生命值从低到高</option>
-          <option value="strength_desc">生命值从高到低</option>
-        </select></label>
+        <div className="media-filter-actions entity-filter-actions">
+          <label className="group-toggle"><input type="checkbox" checked={buildableFirst} onChange={(event) => setBuildableFirst(event.target.checked)} /><span>可建造优先</span></label>
+          <label className="sort-control"><span>排序</span><select value={sort} onChange={(event) => setSort(event.target.value as EntitySort)}>
+            <option value="cameo">游戏建造栏</option>
+            <option value="faction">阵营</option>
+            <option value="name_asc">名称 A–Z</option>
+            <option value="name_desc">名称 Z–A</option>
+            <option value="cost_asc">造价从低到高</option>
+            <option value="cost_desc">造价从高到低</option>
+            <option value="strength_asc">生命值从低到高</option>
+            <option value="strength_desc">生命值从高到低</option>
+          </select></label>
+        </div>
       </div>
       <div ref={listScroll.ref} onScroll={listScroll.remember} className={`asset-list ${layout === "grid" ? "asset-grid entity-grid" : "list-columns"}`} tabIndex={0} aria-label="单位列表">
         {layout === "list" ? entities.map((entity) => (

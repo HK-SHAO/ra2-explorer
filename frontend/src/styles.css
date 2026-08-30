@@ -710,7 +710,7 @@ body { font-size: 14px; }
 
 @media (max-width: 1080px) {
   .workspace.detail-right { grid-template-columns: var(--sidebar-width) minmax(300px, 1fr) 6px minmax(300px, var(--detail-panel-size)); }
-  .media-filter-strip { align-items: stretch; flex-direction: column; }
+  .media-filter-strip, .entity-panel .filter-strip { align-items: stretch; flex-direction: column; }
   .media-filter-actions { justify-content: flex-end; }
 }
 

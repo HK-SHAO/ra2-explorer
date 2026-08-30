@@ -57,6 +57,8 @@ _RULE_FIELDS = {
     "elite_secondary": "elitesecondary",
     "turret": "turret",
     "naval": "naval",
+    "considered_aircraft": "consideredaircraft",
+    "ai_base_planning_side": "aibaseplanningside",
     "movement_zone": "movementzone",
     "required_houses": "requiredhouses",
     "forbidden_houses": "forbiddenhouses",
@@ -482,6 +484,10 @@ class GameEntity:
             "media_count": len(self.media),
             "cost": self.rules.get("cost"),
             "strength": self.rules.get("strength"),
+            "tech_level": self.rules.get("tech_level"),
+            "ai_base_planning_side": self.rules.get("ai_base_planning_side"),
+            "naval": _yes(self.rules.get("naval")),
+            "considered_aircraft": _yes(self.rules.get("considered_aircraft")),
             "owner": self.rules.get("owner"),
             "primary": self.rules.get("primary"),
         }
@@ -729,7 +735,7 @@ class SemanticLibrary:
             "metadata",
             source_id=source["id"],
             revision=source.get("scanned_at") or source["created_at"],
-            identity=("semantic-catalog-v1",),
+            identity=("semantic-catalog-v2",),
             extension="json",
         )
 
