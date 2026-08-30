@@ -126,7 +126,7 @@ scripts\build_windows.cmd --game-dir ".runtime\RA2MD"
 scripts\build_windows.cmd --game-dir ".runtime\RA2MD" --include-game-data
 ```
 
-带 `v*` 的 Git tag 会触发 `.github\workflows\release.yml`，运行测试、隐私扫描、参考数据同步、Windows 构建和 CLI smoke test；随后创建 GitHub Release，并把同一 ZIP、版本清单和 Docker Space 运行文件原子同步到 Hugging Face。手动运行 workflow 只生成可下载的 Actions artifact，不创建 Release。
+带 `v*` 的 Git tag 会触发 `.github\workflows\release.yml`，运行测试、隐私扫描、参考数据同步、Windows 构建和 CLI smoke test；随后创建 GitHub Release，并把同一 ZIP 和版本清单同步到 Hugging Face 文件镜像。Hugging Face Space 运行时当前保持暂停，不随版本发布更新。手动运行 workflow 只生成可下载的 Actions artifact，不创建 Release。
 
 首次部署 Space 前，维护者需要先上传一份通过白名单校验的派生资源包。凭据只从 `.secrets\local.env` 或进程环境读取，不得写入命令参数、日志或仓库。上传器会切成 4 MiB 内容寻址分片并小批提交，避免依赖受限网络中的 LFS/Xet 上传域；重复运行会跳过已有分片，从网络中断处继续：
 
@@ -134,12 +134,32 @@ scripts\build_windows.cmd --game-dir ".runtime\RA2MD" --include-game-data
 .venv\Scripts\python.exe scripts\publish_hf_release.py --resource-pack ".runtime\RA2MD-Ext\packages\PACKAGE.ra2pack"
 ```
 
-单独检查 Space 构建上下文时运行：
+只有未来明确恢复 Space 服务端托管时，才单独检查其构建上下文：
 
 ```bat
 .venv\Scripts\python.exe scripts\prepare_hf_space.py --overwrite
 ```
 
 输出位于被 Git 忽略的 `.outputs\huggingface-space`，只包含 Docker 配置、MIT 许可证、应用 wheel、编译后的前端和公开更新通道，不包含项目源码树、测试、开发文档或资源包副本。部署和恢复流程见 [Hugging Face 部署说明](HUGGINGFACE.md)。
+
+## GitHub Pages 精简版
+
+真实安装只需在单位、声音或渲染结果变化时重新导出：
+
+```bat
+.venv\Scripts\ra2exp.exe pages export SOURCE_ID --audio-bitrate 24k --workers 4 --overwrite
+.venv\Scripts\python.exe scripts\verify_pages_snapshot.py ".runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip"
+.venv\Scripts\python.exe scripts\publish_pages_snapshot.py ".runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip"
+```
+
+最后一条命令把通过审计的数据上传到固定 HF 发布目录，并把不可变 revision、字节数和 SHA-256 写入 `packaging\pages-data.json`。普通 UI 或性能修复不重新发布数据，只运行静态前端构建：
+
+```bat
+cd frontend
+npm run build:pages
+npm run preview:pages -- --host 127.0.0.1 --port 46131 --strictPort
+```
+
+`.github\workflows\pages.yml` 在 Windows runner 的 `cmd.exe` 中完成固定数据下载、解包前后审计、前端编译和 Pages 部署。完整边界、实测体积和一次性仓库设置见 [GitHub Pages 说明](GITHUB_PAGES.md)。
 
 更完整的模块、格式、缓存和 UI 边界见 [架构说明](ARCHITECTURE.md)，发行模式与体积预算见 [发行说明](DISTRIBUTION.md)。

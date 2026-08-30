@@ -1,67 +1,58 @@
 # 发行与体积说明
 
-## 结论
+## 发行形态
 
-RA2 Explorer 的主要发行物是本地 Web 应用，不使用 GitHub Pages，也不采用 Electron 或嵌入式 WebView。用户界面运行在现有 Edge/Chrome 中；随包附带的小型本地服务负责浏览器沙箱无法完成的任意安装目录读取、MIX 内存映射、SQLite 索引、音频解码和图像/体素渲染。
+RA2 Explorer 维护两种互补发行物：
 
-公共下载只包含程序和非游戏参考数据。用户首次打开时直接关联自己的官方安装，因此不需要再次下载或复制约 600 MiB 游戏归档。
+| 发行物 | 入口 | 数据来源 | 适用范围 |
+| --- | --- | --- | --- |
+| GitHub Pages 精简版 | <https://hansimov.github.io/ra2-explorer/> | 预生成的单位与声音派生快照 | 无需安装的在线体验 |
+| Windows 本地 Web 应用 | [GitHub Releases](https://github.com/Hansimov/ra2-explorer/releases) | 用户自己的官方安装或 `.ra2pack` | 完整解析、地图、导出与离线使用 |
 
-本机另可导出 `.ra2pack` 来备份已生成的索引、关联、预览和转码媒体。该目录位于被 Git 与 Windows 发行构建排除的 `.runtime\RA2MD-Ext\packages`。经过授权并通过严格白名单校验的派生包可以单独存放在 Hugging Face Space 的 `resources/`，供在线只读容器构建；它不会进入主分支或 Windows ZIP。详见 [派生资源包说明](RESOURCE_PACKS.md)。
+两者都使用同一套 React 界面。Pages 在浏览器中读取静态目录和派生媒体；本地版使用现有 Edge/Chrome，加上负责 MIX 内存映射、SQLite 索引、音频解码和图像/体素渲染的小型本地 Python 服务。项目不附带 Electron、Chromium、WebView 或游戏程序。
 
-发行目录审计只允许两个启动程序、`_internal` 运行依赖、编译后的前端、MIT `LICENSE`、简短 `README.txt`、运行标记和可选 `.runtime`。源码、项目文档、测试、构建脚本、Git 元数据、Node 依赖、source map 与 Python/TypeScript 源文件都会使构建失败。更新发布与用户确认流程见 [应用更新说明](UPDATES.md)。
+## Windows 三种构建模式
 
-## 三种构建模式
-
-| 模式 | 命令 | 游戏数据 | 适用范围 | 用途 |
-| --- | --- | --- | --- | --- |
-| `generic` | `ra2exp package` | 不包含 | 任意电脑 | GitHub Release 与普通用户下载 |
-| `linked` | `ra2exp package --game-dir PATH` | 只读关联原路径 | 当前电脑 | 同一台电脑预建完整索引 |
-| `portable` | 再加 `--include-game-data` | 复制支持的数据格式 | 取决于素材授权 | 可移动的本地素材包 |
+| 模式 | 命令 | 游戏数据 | 用途 |
+| --- | --- | --- | --- |
+| `generic` | `ra2exp package` | 不包含 | GitHub Release 与普通用户下载 |
+| `linked` | `ra2exp package --game-dir PATH` | 只读关联原路径 | 当前电脑预建完整索引 |
+| `portable` | 再加 `--include-game-data` | 复制支持的数据格式 | 获得单独授权的本地场景 |
 
 `portable` 会排除 EXE、DLL、BAT、CMD、COM、MSI、SYS、SCR、LNK 和 PIF。它不会运行游戏程序，但仍可能包含受权利约束的素材，因此默认发布 workflow 永远不构建或上传该模式。
 
-## 实测体积与流量
+发行目录审计只允许两个启动程序、`_internal` 运行依赖、编译前端、MIT `LICENSE`、简短 `README.txt`、运行标记和可选 `.runtime`。源码、项目开发文档、测试、构建脚本、Git 元数据、Node 依赖、source map 与 TypeScript/Python 源文件都会使构建失败。
 
-以下数据来自 2026-08-30 的 Windows x64 / Python 3.13 构建：
+## 实测体积
+
+以下数据来自 2026-08-30 至 2026-08-31 的 Windows x64 / Python 3.13 构建：
 
 | 项目 | 字节 | 约合 |
 | --- | ---: | ---: |
 | 公共 `generic` 解压目录 | 49,651,217 | 47.3 MiB |
-| 公共 ZIP | 28,860,063 | 27.5 MiB |
+| 公共 Windows ZIP | 28,860,063 | 27.5 MiB |
 | 完整索引的 `linked` 目录 | 58,024,576 | 55.3 MiB |
 | 本机安装中可识别的数据 | 668,107,876 | 637.2 MiB |
 | 可选 `portable` 解压目录 | 726,161,486 | 692.5 MiB |
+| Pages 固定数据 ZIP | 88,881,603 | 84.8 MiB |
+| Pages 解包数据 | 148,210,866 | 141.3 MiB |
 
-因此普通用户的首次下载流量约为 27.5 MiB；1,000 次完整下载约为 26.9 GiB。游戏数据从本机读取，不产生网络流量。预览与转码缓存也只在本机按需生成。
+普通本地用户首次下载约 27.5 MiB；游戏数据从本机读取，不产生网络流量，也不会再次复制约 600 MiB MIX。Pages 访客不会下载数据 ZIP，而是按需请求当前目录、卡片、详情、模型和播放的声音。当前完整交互 smoke 会话实测约 0.88 MiB，完整遍历的理论上界约 141.3 MiB。具体构成和 GitHub 配额分析见 [GitHub Pages 精简版](GITHUB_PAGES.md)。
 
-在线 Space 的应用上下文约 1 MiB，另存一份当前约 178.1 MiB 的压缩派生资源包。资源包在 Space 镜像构建阶段解包到服务端，不会作为整包传给每个网页访客。浏览器首次打开只下载约 0.7 MiB 的前端生产文件，之后按用户实际查看的卡片、图片、音频或模型请求数据；启用高性能预载才会额外缓存当前单位分类的模型。Docker 镜像及构建流量由托管平台承担，不等于终端用户网页流量。
+GitHub Releases 的单个资产必须小于 2 GiB，单个 Release 最多 1,000 个资产；官方文档说明 Release 总大小和带宽没有额外限制。当前 Windows ZIP 远低于限制：[GitHub Releases 官方说明](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)。
 
-GitHub Releases 的单个资产必须小于 2 GiB，单个 Release 最多 1,000 个资产；官方文档同时说明 Release 的总大小和带宽没有额外限制。当前公共 ZIP 远低于单资产上限，适合通过 Release 分发：[GitHub Releases 官方说明](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)。
+## 大文件与版本隔离
 
-## 已实施的体积优化
+主分支不追踪游戏文件、`.ra2pack`、Pages 数据 ZIP 或 30,730 个静态派生文件。Pages 只追踪 `packaging/pages-data.json`，其中固定公开 HF 发布仓库、不可变 revision、文件路径、字节数和 SHA-256；代码更新继续复用同一数据快照。只有语义、模型、声音或预览实际变化时，才通过 `scripts\publish_pages_snapshot.py` 发布新快照并更新锁定清单。
 
-- 不附带游戏归档，默认只建立只读关联；
-- 不附带 Electron、Chromium、WebView、Playwright 或 FFmpeg；
-- PyInstaller 使用 one-folder，GUI 启动器与 CLI 共享 `_internal`；
-- OpenCC 只保留简繁检索需要的两套配置和九个词典文件，不附带开发头文件、静态库和三个工具 EXE；
-- Pillow 只收集 PCX、PNG 与绘制链实际需要的模块，不附带 AVIF、WebP、色彩管理和 Tk；
-- 普通资产读取不再向 `RA2MD-Ext` 重复写出 MIX 成员，显式解包才持久化；
-- 前端 Three.js 分块并由浏览器缓存，图片、模型、音频和视频预览按需生成。
-
-一次真实开发缓存清理中，仅删除冗余 `extracted` 副本就回收了 337,182,197 字节，同时保留 256,027,166 字节的模型、预览、音频、视频和元数据缓存。
+本机 `.ra2pack` 位于被 Git 与 Windows 公共构建排除的 `.runtime\RA2MD-Ext\packages`。格式白名单和可迁移能力边界见 [派生资源包说明](RESOURCE_PACKS.md)。
 
 ## 自动发布
 
-`.github\workflows\release.yml` 在 Windows runner 和 `cmd.exe` 中完成：
+`.github\workflows\release.yml` 在 Windows runner 和 `cmd.exe` 中完成测试、Ruff、隐私扫描、`generic` 构建、CLI smoke、ZIP、attestation 与 GitHub Release。tag 发布成功后，同一 Windows ZIP 和版本清单会同步到 Hugging Face 文件镜像；不会构建或启动 HF Space 运行时。
 
-1. 安装 Python、Node 与锁定的项目依赖；
-2. 同步固定来源的 MIX 文件名库和声音转录；
-3. 运行后端测试、Ruff、当前树与完整历史隐私扫描；
-4. 构建并审计 `generic` 本地 Web 应用；
-5. 运行打包后 `ra2exp.exe --help` smoke test；
-6. 生成 ZIP；tag 构建才发布 GitHub Release，手动构建只上传 Actions artifact；
-7. tag 发布完成后，把同一 ZIP、校验清单和最小 Docker Space 运行上下文同步到 Hugging Face。
+`.github\workflows\pages.yml` 下载固定的 Pages 数据 ZIP，先做 SHA-256、路径、文件白名单、统计和隐私审计，再编译静态前端、解包数据并通过官方 Pages actions 发布。前端代码更新不重新上传 Pages 大数据。
 
-发行目录审计会拒绝构建机工作区、用户目录、Python 安装路径和游戏目录泄露，也会拒绝便携游戏目录中的可执行文件。公共发布前仍建议为两个 EXE 进行 Authenticode 签名；没有代码签名时，Windows SmartScreen 可能显示未知发布者提示。
+公共发布前仍建议为两个 EXE 进行 Authenticode 签名；没有代码签名时，Windows SmartScreen 可能显示未知发布者提示。
 
 > EA has not endorsed and does not support this product.
