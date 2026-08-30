@@ -606,6 +606,7 @@ export const api = {
     if (options.effectFrame !== undefined) params.set("effect_frame", String(options.effectFrame));
     if (options.effectShadowFrame !== undefined) params.set("effect_shadow_frame", String(options.effectShadowFrame));
     if (options.effectPalette) params.set("effect_palette_kind", options.effectPalette);
+    if (options.revision) params.set("r", options.revision);
     return `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}/preview.png?${params}`;
   },
   entityModelUrl: (

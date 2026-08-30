@@ -45,11 +45,20 @@ import {
   isStaticSnapshot,
   staticPopoutUrl,
 } from "./api";
+import {
+  hasLoadedCardPreview,
+  pauseCardPreviewBackground,
+  preloadCardPreview,
+  preloadCardPreviewGroup,
+} from "./resourcePreload";
 
 let voxelViewerModulePromise: Promise<typeof import("./VoxelViewer")> | null = null;
 
 function loadVoxelViewerModule() {
-  voxelViewerModulePromise ||= import("./VoxelViewer");
+  voxelViewerModulePromise ||= import("./VoxelViewer").then((module) => {
+    module.configureVoxelPreload(true);
+    return module;
+  });
   return voxelViewerModulePromise;
 }
 
@@ -65,7 +74,7 @@ function VoxelPreview({ url, label, viewKey, previewAngle = DEFAULT_PREVIEW_ANGL
 }) {
   const finishPriorityRef = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
-    const finish = beginModelPreviewPriority();
+    const finish = pauseCardPreviewBackground();
     finishPriorityRef.current = finish;
     return () => {
       if (finishPriorityRef.current === finish) finishPriorityRef.current = null;
@@ -837,10 +846,6 @@ function storedAutomaticUpdateCheck() {
   return window.localStorage.getItem("ra2exp-auto-update-check-v1") === "true";
 }
 
-function storedPerformancePreload() {
-  return window.localStorage.getItem("ra2exp-performance-preload-v1") === "true";
-}
-
 function categoryCount(stats: Stats, formats: string[]) {
   const selected = new Set(formats);
   return stats.formats.reduce(
@@ -951,9 +956,6 @@ function ExplorerApp() {
   const [updateError, setUpdateError] = useState("");
   const [automaticUpdateCheck, setAutomaticUpdateCheck] = useState(
     storedAutomaticUpdateCheck,
-  );
-  const [performancePreload, setPerformancePreload] = useState(
-    storedPerformancePreload,
   );
   const updateRequestRef = useRef(false);
   const sidebarCollapsedRef = useRef(
@@ -1192,11 +1194,6 @@ function ExplorerApp() {
     if (next && !updateInfo) void checkLatestUpdate();
   }
 
-  function updatePerformancePreload(next: boolean) {
-    setPerformancePreload(next);
-    window.localStorage.setItem("ra2exp-performance-preload-v1", String(next));
-  }
-
   async function refreshResourcePacks() {
     try {
       setResourcePacks(await api.resourcePacks());
@@ -1278,15 +1275,6 @@ function ExplorerApp() {
   useEffect(() => {
     if (!isStaticSnapshot && storedAutomaticUpdateCheck()) void checkLatestUpdate();
   }, []);
-
-  useEffect(() => {
-    if (!performancePreload && !voxelViewerModulePromise) return;
-    let active = true;
-    void loadVoxelViewerModule().then((module) => {
-      if (active) module.configureVoxelPreload(performancePreload);
-    });
-    return () => { active = false; };
-  }, [performancePreload]);
 
   useEffect(() => {
     setSelected(null);
@@ -1438,14 +1426,20 @@ function ExplorerApp() {
   ]);
 
   useEffect(() => {
-    if (!performancePreload || view !== "entities" || !sourceId || !sourceRevision || entities.length === 0) return;
+    if (view !== "entities" || !sourceId || !sourceRevision || visibleEntities.length === 0) return;
+    const urls = visibleEntities
+      .filter((entity) => entity.renderable)
+      .map((entity) => entityCardPreviewUrl(entity, sourceId, previewAngle, sourceRevision));
+    const timer = window.setTimeout(() => preloadCardPreviewGroup(urls), 80);
+    return () => window.clearTimeout(timer);
+  }, [view, sourceId, sourceRevision, visibleEntities, previewAngle]);
+
+  useEffect(() => {
+    if (view !== "entities" || !sourceId || !sourceRevision || !selectedEntityId || entities.length === 0) return;
     const controller = new AbortController();
     const selectedIndex = Math.max(0, entities.findIndex((entity) => entity.id === selectedEntityId));
     const nearbyIndexes = [selectedIndex, selectedIndex + 1, selectedIndex - 1, selectedIndex + 2, selectedIndex - 2];
-    const ordered = [
-      ...nearbyIndexes.map((index) => entities[index]).filter(Boolean),
-      ...entities,
-    ];
+    const ordered = nearbyIndexes.map((index) => entities[index]).filter(Boolean);
     const seen = new Set<string>();
     const urls = ordered
       .filter((entity) => entity.voxel && entity.renderable && !seen.has(entity.id) && seen.add(entity.id))
@@ -1457,7 +1451,7 @@ function ExplorerApp() {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [performancePreload, view, sourceId, sourceRevision, entities, selectedEntityId]);
+  }, [view, sourceId, sourceRevision, entities, selectedEntityId]);
 
   useEffect(() => {
     if (!sourceId || !selectedEntityId || view !== "entities") {
@@ -1810,6 +1804,7 @@ function ExplorerApp() {
               selectedId={selectedEntityId}
               setSelectedId={setSelectedEntityId}
               sourceId={sourceId}
+              sourceRevision={sourceRevision}
               sides={entitySideFacets}
               selectedSide={entitySide}
               setSelectedSide={setEntitySide}
@@ -1845,8 +1840,6 @@ function ExplorerApp() {
         onGameLanguageChange={updateGameLanguage}
         previewAngle={previewAngle}
         onPreviewAngleChange={updatePreviewAngle}
-        performancePreload={performancePreload}
-        onPerformancePreloadChange={updatePerformancePreload}
         sources={sources}
         selectedSourceId={sourceId}
         discoveries={discovery.candidates}
@@ -2070,7 +2063,7 @@ function entitySuggestionScore(entity: EntitySummary, query: string) {
   })()) ? 5 : Number.POSITIVE_INFINITY;
 }
 
-function EntityListPanel({ entities, total, loading, query, setQuery, searchScope, setSearchScope, searchKinds, setSearchKinds, searchUsages, setSearchUsages, sort, setSort, buildableFirst, setBuildableFirst, selectedId, setSelectedId, sourceId, sides, selectedSide, setSelectedSide, layout, setLayout, previewAngle, scrollKey }: {
+function EntityListPanel({ entities, total, loading, query, setQuery, searchScope, setSearchScope, searchKinds, setSearchKinds, searchUsages, setSearchUsages, sort, setSort, buildableFirst, setBuildableFirst, selectedId, setSelectedId, sourceId, sourceRevision, sides, selectedSide, setSelectedSide, layout, setLayout, previewAngle, scrollKey }: {
   entities: EntitySummary[];
   total: number;
   loading: boolean;
@@ -2089,6 +2082,7 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
   selectedId: string;
   setSelectedId: (id: string) => void;
   sourceId: string;
+  sourceRevision: string;
   sides: Array<{ id: string; count: number }>;
   selectedSide: string;
   setSelectedSide: (value: string) => void;
@@ -2195,7 +2189,7 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
             <span className="entity-stats"><strong>{entity.cost ? `$${entity.cost}` : "—"}</strong><small>{entity.strength ? `${entity.strength} HP` : entity.renderable ? `${entity.component_count} 个组件` : entityBodyStatusLabel(entity)}</small></span>
             <Icon name="chevron" size={15} />
           </button>
-        )) : entities.map((entity) => <EntityGridCard key={entity.id} entity={entity} sourceId={sourceId} previewAngle={previewAngle} selected={selectedId === entity.id} onSelect={setSelectedId} />)}
+        )) : entities.map((entity) => <EntityGridCard key={entity.id} entity={entity} sourceId={sourceId} sourceRevision={sourceRevision} previewAngle={previewAngle} selected={selectedId === entity.id} onSelect={setSelectedId} />)}
         {loading && entities.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在解析规则实体…</strong></div>}
         {!loading && entities.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的单位</strong><button onClick={() => { setQuery(""); setSelectedSide(""); setSearchKinds([...entityKindOrder]); setSearchUsages([...entityUsageOrder]); }}>清除筛选</button></div>}
       </div>
@@ -2203,91 +2197,53 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
   );
 }
 
-function EntityGridCard({ entity, sourceId, previewAngle, selected, onSelect }: { entity: EntitySummary; sourceId: string; previewAngle: PreviewAngle; selected: boolean; onSelect: (id: string) => void }) {
+function EntityGridCard({ entity, sourceId, sourceRevision, previewAngle, selected, onSelect }: { entity: EntitySummary; sourceId: string; sourceRevision: string; previewAngle: PreviewAngle; selected: boolean; onSelect: (id: string) => void }) {
   return (
     <button className={`asset-card entity-card ${selected ? "selected" : ""}`} onClick={() => onSelect(entity.id)}>
-      <EntityCardPreview entity={entity} sourceId={sourceId} previewAngle={previewAngle} />
+      <EntityCardPreview entity={entity} sourceId={sourceId} sourceRevision={sourceRevision} previewAngle={previewAngle} />
       <span className="asset-card-copy"><strong title={entity.display_name}>{entity.display_name}</strong></span>
     </button>
   );
 }
 
-type CardPreviewJob = {
-  active: boolean;
-  done: boolean;
-  weight: number;
-  start: () => void;
-};
-
-const cardPreviewQueue: CardPreviewJob[] = [];
-const cardPreviewCapacity = 4;
-let activeCardPreviewWeight = 0;
-let modelPreviewPriorityDepth = 0;
-
-function beginModelPreviewPriority() {
-  modelPreviewPriorityDepth += 1;
-  let finished = false;
-  return () => {
-    if (finished) return;
-    finished = true;
-    modelPreviewPriorityDepth = Math.max(0, modelPreviewPriorityDepth - 1);
-    drainCardPreviewQueue();
-  };
-}
-
-function drainCardPreviewQueue() {
-  if (modelPreviewPriorityDepth > 0) return;
-  while (cardPreviewQueue.length > 0) {
-    const nextIndex = cardPreviewQueue.findIndex(
-      (job) => job.done || activeCardPreviewWeight + job.weight <= cardPreviewCapacity,
-    );
-    if (nextIndex < 0) return;
-    const [job] = cardPreviewQueue.splice(nextIndex, 1);
-    if (job.done) continue;
-    job.active = true;
-    activeCardPreviewWeight += job.weight;
-    job.start();
-  }
-}
-
-function scheduleCardPreview(start: () => void, weight: number) {
-  const job: CardPreviewJob = { active: false, done: false, weight, start };
-  cardPreviewQueue.push(job);
-  drainCardPreviewQueue();
-  return () => {
-    if (job.done) return;
-    job.done = true;
-    if (job.active) activeCardPreviewWeight = Math.max(0, activeCardPreviewWeight - job.weight);
-    drainCardPreviewQueue();
-  };
-}
-
-function EntityCardPreview({ entity, sourceId, previewAngle }: { entity: EntitySummary; sourceId: string; previewAngle: PreviewAngle }) {
-  const previewRef = useRef<HTMLSpanElement>(null);
-  const finishRef = useRef<(() => void) | null>(null);
-  const [requested, setRequested] = useState(false);
+function entityCardPreviewUrl(entity: EntitySummary, sourceId: string, previewAngle: PreviewAngle, sourceRevision: string) {
   const staticFacing = entity.body_format === "shp" && entity.kind === "infantry"
     ? entityFacingForPreviewAngle(entity.body_format, previewAngle)
     : 0;
-  const previewFacing = isStaticSnapshot
+  const facing = isStaticSnapshot
     ? staticFacing
     : entityFacingForPreviewAngle(entity.body_format, previewAngle);
+  return api.entityPreviewUrl(sourceId, entity.id, {
+    facing,
+    scale: 2,
+    thumbnail: true,
+    revision: sourceRevision,
+  });
+}
+
+function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle }: { entity: EntitySummary; sourceId: string; sourceRevision: string; previewAngle: PreviewAngle }) {
+  const previewRef = useRef<HTMLSpanElement>(null);
   const url = entity.renderable
-    ? api.entityPreviewUrl(sourceId, entity.id, { facing: previewFacing, scale: 2, thumbnail: true })
+    ? entityCardPreviewUrl(entity, sourceId, previewAngle, sourceRevision)
     : "";
+  const [readyUrl, setReadyUrl] = useState(() => hasLoadedCardPreview(url) ? url : "");
 
   useEffect(() => {
-    setRequested(false);
-    finishRef.current?.();
-    finishRef.current = null;
-    if (!url) return;
+    if (!url) {
+      setReadyUrl("");
+      return;
+    }
+    if (hasLoadedCardPreview(url)) {
+      setReadyUrl(url);
+      return;
+    }
     let disposed = false;
     let observer: IntersectionObserver | null = null;
     const request = () => {
-      if (disposed || finishRef.current) return;
-      finishRef.current = scheduleCardPreview(() => {
-        if (!disposed) setRequested(true);
-      }, entity.body_format === "vxl" ? 2 : 1);
+      if (disposed) return;
+      void preloadCardPreview(url, "foreground").then((loaded) => {
+        if (!disposed && loaded) setReadyUrl(url);
+      });
     };
     if ("IntersectionObserver" in window && previewRef.current) {
       observer = new IntersectionObserver((entries) => {
@@ -2302,19 +2258,12 @@ function EntityCardPreview({ entity, sourceId, previewAngle }: { entity: EntityS
     return () => {
       disposed = true;
       observer?.disconnect();
-      finishRef.current?.();
-      finishRef.current = null;
     };
   }, [url]);
 
-  function finish() {
-    finishRef.current?.();
-    finishRef.current = null;
-  }
-
   return <span ref={previewRef} className={`asset-card-preview entity-card-preview format-${entity.body_format || "unknown"} ${entity.renderable ? "ready" : "missing"}`}>
     {entity.renderable
-      ? requested && <img decoding="async" fetchPriority="low" src={url} alt="" onLoad={finish} onError={(event) => { finish(); event.currentTarget.hidden = true; }} />
+      ? readyUrl && <img decoding="async" fetchPriority="low" src={readyUrl} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
       : <Icon name="unit" size={34} />}
     {entity.affiliation && <span className={`entity-affiliation-badge affiliation-${entity.affiliation.kind} affiliation-${affiliationClassId(entity.affiliation.id)}`} title={entity.affiliation.display_name}>
       {entity.affiliation.display_name}
@@ -3900,8 +3849,6 @@ function SettingsDialog({
   onGameLanguageChange,
   previewAngle,
   onPreviewAngleChange,
-  performancePreload,
-  onPerformancePreloadChange,
   sources,
   selectedSourceId,
   discoveries,
@@ -3930,8 +3877,6 @@ function SettingsDialog({
   onGameLanguageChange: (language: GameLanguage) => void;
   previewAngle: PreviewAngle;
   onPreviewAngleChange: (angle: PreviewAngle) => void;
-  performancePreload: boolean;
-  onPerformancePreloadChange: (enabled: boolean) => void;
   sources: Source[];
   selectedSourceId: string;
   discoveries: GameInstallation[];
@@ -4013,7 +3958,6 @@ function SettingsDialog({
                     {previewAngleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
                 </div>
-                <label className="settings-toggle"><input type="checkbox" checked={performancePreload} onChange={(event) => onPerformancePreloadChange(event.target.checked)} /><span><strong>高性能预载</strong><small>缓存当前分类的模型，并在内存中保留当前及相邻单位。</small></span></label>
               </div>
             </section>
 
