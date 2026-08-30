@@ -21,6 +21,7 @@ from ra2_explorer.semantic import (
     _effective_entity_countries,
     _entity_animation_role,
     _entity_usage,
+    _shp_unit_body_playbacks,
 )
 from tests.ra2_fixtures import (
     FIXTURE_NAMES,
@@ -412,6 +413,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
         "start_frame": 0,
         "frame_count": 2,
         "facing_step": 1,
+        "frame_step": 1,
         "rate_ms": None,
         "loop_start": None,
         "loop_end": None,
@@ -898,6 +900,26 @@ def test_entity_animation_fields_follow_art_semantics() -> None:
     assert _entity_animation_role("bibshape") is None
     assert _entity_animation_role("animactive") is None
     assert _entity_animation_role("activeanimdamaged") is None
+
+
+def test_non_voxel_unit_frames_follow_walk_and_firing_configuration() -> None:
+    playbacks = _shp_unit_body_playbacks(
+        {"walkframes": "6", "firingframes": "4"}
+    )
+
+    assert [event for event, _playback, _field in playbacks] == [
+        "ready",
+        "walk",
+        "fire",
+    ]
+    assert playbacks[0][1].start_frame == 0
+    assert playbacks[0][1].facing_step == 1
+    assert playbacks[1][1].start_frame == 8
+    assert playbacks[1][1].frame_count == 6
+    assert playbacks[1][1].frame_step == 8
+    assert playbacks[2][1].start_frame == 56
+    assert playbacks[2][1].frame_count == 4
+    assert playbacks[2][1].frame_step == 8
 
 
 def test_default_building_layers_follow_operation_associations() -> None:

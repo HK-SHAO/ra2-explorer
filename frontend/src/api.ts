@@ -275,6 +275,7 @@ export interface AnimationPlayback {
   start_frame: number;
   frame_count: number | null;
   facing_step: number;
+  frame_step: number;
   rate_ms: number | null;
   loop_start: number | null;
   loop_end: number | null;

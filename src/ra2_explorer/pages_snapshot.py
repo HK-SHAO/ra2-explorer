@@ -50,6 +50,7 @@ class _AnimationVariant:
     start_frame: int
     frame_count: int | None
     facing_step: int
+    frame_step: int
     shadow: bool
 
 
@@ -342,6 +343,7 @@ def _asset_usages(
                             else None
                         ),
                         facing_step=int(playback.get("facing_step") or 0),
+                        frame_step=max(1, int(playback.get("frame_step") or 1)),
                         shadow=bool(playback.get("shadow")),
                     )
                 )
@@ -668,6 +670,7 @@ def _animation_tasks(
 def _animation_frame_requests(
     usage: _AssetUsage,
     frame_count: int,
+    paired_shadows: dict[int, int] | None = None,
 ) -> set[tuple[str, int, int | None]]:
     requested: set[tuple[str, int, int | None]] = set()
     for variant in usage.variants:
@@ -680,14 +683,16 @@ def _animation_frame_requests(
             if count is None:
                 count = max(1, content_total - start)
             frames = [
-                frame
-                for frame in range(start, start + max(1, count))
-                if frame < content_total
+                start + index * max(1, variant.frame_step)
+                for index in range(max(1, count))
+                if start + index * max(1, variant.frame_step) < content_total
             ]
             if not frames:
                 frames = [min(max(0, start), max(0, content_total - 1))]
             for frame in frames:
-                shadow_frame = frame + frame_count // 2 if variant.shadow else None
+                shadow_frame = (paired_shadows or {}).get(frame)
+                if shadow_frame is None and variant.shadow:
+                    shadow_frame = frame + frame_count // 2
                 if shadow_frame is not None and shadow_frame >= frame_count:
                     shadow_frame = None
                 requested.add((variant.palette, frame, shadow_frame))
@@ -715,8 +720,13 @@ def _export_shp_animation_previews(
         sprite = parse_shp(data)
         frame_count = max(1, int(metadata.get(asset_id, {}).get("frame_count") or 1))
         palettes: dict[str, object] = {}
+        paired_shadows = {
+            int(frame["index"]): int(frame["paired_shadow_frame"])
+            for frame in metadata.get(asset_id, {}).get("frames", [])
+            if frame.get("paired_shadow_frame") is not None
+        }
         for palette, frame, shadow_frame in sorted(
-            _animation_frame_requests(usage, frame_count),
+            _animation_frame_requests(usage, frame_count, paired_shadows),
             key=lambda item: (item[0], item[1], item[2] if item[2] is not None else -1),
         ):
             output = (

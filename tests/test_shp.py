@@ -9,6 +9,7 @@ from ra2_explorer.codecs.mix import parse_mix, ra2_mix_hash
 from ra2_explorer.codecs.pal import parse_palette
 from ra2_explorer.codecs.shp import parse_shp
 from ra2_explorer.errors import InvalidFormatError
+from ra2_explorer.semantic import _shp_content_frames
 from tests.ra2_fixtures import _encode_shp, create_fixture_installation
 
 
@@ -70,6 +71,7 @@ def test_shp_detects_and_composites_second_half_shadow_frames() -> None:
     assert sprite.content_bounds(1) == (4, 5, 1, 1)
     assert sprite.paired_shadow_frame(0) == 1
     assert sprite.paired_shadow_frame(1) is None
+    assert _shp_content_frames(sprite, (0, 1)) == (0,)
 
     rendered = sprite.render(0, shadow_frame=1)
     assert rendered.getpixel((3, 2))[3] == 255

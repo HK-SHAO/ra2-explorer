@@ -424,7 +424,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if body is None:
             raise HTTPException(status_code=409, detail="该单位没有可渲染的主体资产")
         player_color = _validated_player_color(player_color)
-        renderer_version = "shp-layers-v3" if body["format"] == "shp" else "vpl-body-v3"
+        renderer_version = "shp-layers-v4" if body["format"] == "shp" else "vpl-body-v3"
         artifact_path = _source_artifact_path(
             services,
             "previews",

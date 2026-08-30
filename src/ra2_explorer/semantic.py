@@ -36,7 +36,7 @@ from ra2_explorer.storage import Database
 
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
 ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
-SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v2",)
+SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v3",)
 _TYPE_SECTIONS = {
     "vehicle": "VehicleTypes",
     "infantry": "InfantryTypes",
@@ -80,6 +80,8 @@ _ART_FIELDS = {
     "foundation": "foundation",
     "facings": "facings",
     "sequence": "sequence",
+    "walk_frames": "walkframes",
+    "firing_frames": "firingframes",
 }
 _AUDIO_RULE_FIELDS = {
     "select": "voiceselect",
@@ -335,6 +337,7 @@ class AnimationPlayback:
     start_frame: int = 0
     frame_count: int | None = None
     facing_step: int = 0
+    frame_step: int = 1
     rate_ms: int | None = None
     loop_start: int | None = None
     loop_end: int | None = None
@@ -347,6 +350,7 @@ class AnimationPlayback:
             "start_frame": self.start_frame,
             "frame_count": self.frame_count,
             "facing_step": self.facing_step,
+            "frame_step": self.frame_step,
             "rate_ms": self.rate_ms,
             "loop_start": self.loop_start,
             "loop_end": self.loop_end,
@@ -547,6 +551,7 @@ def deserialize_semantic_catalog(payload: dict[str, object]) -> SemanticCatalog:
             start_frame=int(values.get("start_frame") or 0),
             frame_count=_optional_int(values.get("frame_count")),
             facing_step=int(values.get("facing_step") or 0),
+            frame_step=max(1, int(values.get("frame_step") or 1)),
             rate_ms=_optional_int(values.get("rate_ms")),
             loop_start=_optional_int(values.get("loop_start")),
             loop_end=_optional_int(values.get("loop_end")),
@@ -1208,11 +1213,7 @@ class SemanticLibrary:
                 source_frame,
                 active_palette,
                 scale=scale,
-                shadow_frame=(
-                    sprite.paired_shadow_frame(source_frame)
-                    if entity.kind == "building"
-                    else None
-                ),
+                shadow_frame=sprite.paired_shadow_frame(source_frame),
             ),
             (
                 (
@@ -1291,7 +1292,7 @@ class SemanticLibrary:
                 "metadata",
                 source_id=source["id"],
                 revision=source.get("scanned_at") or source["created_at"],
-                identity=(entity.id, "entity-preview-info-v1"),
+                identity=(entity.id, "entity-preview-info-v2"),
                 extension="json",
             )
             if self.reader.derived is not None
@@ -1397,14 +1398,7 @@ class SemanticLibrary:
         sprite: ShpFile,
     ) -> tuple[int, ...]:
         visible = self._visible_shp_frames(asset, sprite)
-        if entity.kind != "building":
-            return visible
-        shadow_frames = {
-            shadow
-            for frame in range(len(sprite.frames) // 2)
-            if (shadow := sprite.paired_shadow_frame(frame)) is not None
-        }
-        return tuple(frame for frame in visible if frame not in shadow_frames)
+        return _shp_content_frames(sprite, visible)
 
     def _parse_asset(
         self,
@@ -2217,7 +2211,11 @@ def _body_sequence_preview_frame(
         return None
     frame_count = max(1, playback.frame_count or 1)
     facing_offset = (facing % 8) * playback.facing_step if playback.facing_step else 0
-    return playback.start_frame + facing_offset + frame % frame_count
+    return (
+        playback.start_frame
+        + facing_offset
+        + (frame % frame_count) * max(1, playback.frame_step)
+    )
 
 
 def _merge_duplicate_body_sequences(
@@ -2242,6 +2240,7 @@ def _merge_duplicate_body_sequences(
             playback.start_frame,
             playback.frame_count,
             playback.facing_step,
+            playback.frame_step,
             playback.rate_ms,
             playback.loop_start,
             playback.loop_end,
@@ -2504,6 +2503,27 @@ def _resolve_media(
                     rule_field=f"Sequence.{event}",
                 )
             )
+    elif body_asset and body_asset.get("format") == "shp":
+        for event, playback, rule_field in _shp_unit_body_playbacks(entity_art):
+            add(
+                MediaAssociation(
+                    "animation",
+                    "body_sequence",
+                    event,
+                    entity_id,
+                    (
+                        MediaSample(
+                            str(body_asset["display_name"]),
+                            None,
+                            body_asset,
+                            animation=playback,
+                            palette="unit",
+                        ),
+                    ),
+                    role="body",
+                    rule_field=rule_field,
+                )
+            )
     return _merge_duplicate_body_sequences(associations)
 
 
@@ -2616,6 +2636,71 @@ def _sequence_playback(value: str) -> AnimationPlayback | None:
         facing_step=max(0, facing_step),
         direction=parts[3] if len(parts) > 3 and parts[3] else None,
     )
+
+
+def _shp_unit_body_playbacks(
+    art: dict[str, str],
+) -> tuple[tuple[str, AnimationPlayback, str], ...]:
+    """Map Westwood's interleaved SHP unit frames to configured actions.
+
+    Non-voxel vehicles such as the Terror Drone, Dolphin, and Giant Squid store
+    eight facings for each animation step. ``WalkFrames`` and ``FiringFrames``
+    define the action lengths; the initial eight frames are the standing pose.
+    """
+    walk_frames = max(0, _integer(art.get("walkframes"), 0) or 0)
+    firing_frames = max(0, _integer(art.get("firingframes"), 0) or 0)
+    if walk_frames == 0 and firing_frames == 0:
+        return ()
+
+    playbacks: list[tuple[str, AnimationPlayback, str]] = [
+        (
+            "ready",
+            AnimationPlayback(frame_count=1, facing_step=1),
+            "ArtType.Facings",
+        )
+    ]
+    next_frame = 8
+    if walk_frames:
+        playbacks.append(
+            (
+                "walk",
+                AnimationPlayback(
+                    start_frame=next_frame,
+                    frame_count=walk_frames,
+                    facing_step=1,
+                    frame_step=8,
+                ),
+                "ArtType.WalkFrames",
+            )
+        )
+        next_frame += walk_frames * 8
+    if firing_frames:
+        playbacks.append(
+            (
+                "fire",
+                AnimationPlayback(
+                    start_frame=next_frame,
+                    frame_count=firing_frames,
+                    facing_step=1,
+                    frame_step=8,
+                ),
+                "ArtType.FiringFrames",
+            )
+        )
+    return tuple(playbacks)
+
+
+def _shp_content_frames(
+    sprite: ShpFile,
+    visible_frames: tuple[int, ...],
+) -> tuple[int, ...]:
+    """Exclude second-half palette-index-1 shadows from playable SHP frames."""
+    shadow_frames = {
+        shadow
+        for frame in range(len(sprite.frames) // 2)
+        if (shadow := sprite.paired_shadow_frame(frame)) is not None
+    }
+    return tuple(frame for frame in visible_frames if frame not in shadow_frames)
 
 
 def _type_values(section: dict[str, str]) -> list[str]:

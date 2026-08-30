@@ -365,6 +365,7 @@ const animationEventLabels: Record<string, string> = {
   panic: "惊慌奔跑",
   fly: "飞行",
   hover: "悬停",
+  fire: "开火",
   firefly: "空中开火",
   tumble: "失控翻滚",
   airdeathstart: "空中阵亡",
@@ -2363,7 +2364,8 @@ function animationSourceFramesFromTotal(sample: MediaSample | undefined, totalFr
   const contentTotal = playback.shadow ? Math.floor(total / 2) : total;
   const start = playback.start_frame + (playback.facing_step > 0 ? facing * playback.facing_step : 0);
   const count = playback.frame_count ?? Math.max(1, contentTotal - start);
-  const frames = Array.from({ length: Math.max(1, count) }, (_, index) => start + index)
+  const frameStep = Math.max(1, playback.frame_step || 1);
+  const frames = Array.from({ length: Math.max(1, count) }, (_, index) => start + index * frameStep)
     .filter((frame) => contentTotal === 0 || frame < contentTotal);
   return frames.length > 0 ? frames : [Math.min(Math.max(0, start), Math.max(0, contentTotal - 1))];
 }
@@ -2373,6 +2375,8 @@ function animationSourceFrames(sample: MediaSample | undefined, metadata: AssetM
 }
 
 function animationShadowFrame(sample: MediaSample | undefined, metadata: AssetMetadata | null, sourceFrame: number) {
+  const paired = metadata?.frames?.[sourceFrame]?.paired_shadow_frame;
+  if (paired !== null && paired !== undefined) return paired;
   if (!sample?.animation?.shadow || !metadata?.frame_count) return undefined;
   const candidate = sourceFrame + Math.floor(metadata.frame_count / 2);
   return candidate < metadata.frame_count ? candidate : undefined;
@@ -3101,21 +3105,17 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   const effectBodyFrames = effectBodySample
     ? animationSourceFramesFromTotal(effectBodySample, entity?.preview.source_frame_count || 0, facing)
     : [];
-  const activeAnimationShadowFrames = activeAnimation?.sample.animation?.shadow && animationMetadata?.frame_count
-    ? activeAnimationFrames
-      .map((sourceFrame) => sourceFrame + Math.floor(animationMetadata.frame_count! / 2))
-      .filter((sourceFrame) => sourceFrame < animationMetadata.frame_count!)
-    : [];
+  const activeAnimationShadowFrames = activeAnimationFrames
+    .map((sourceFrame) => animationShadowFrame(activeAnimation?.sample, animationMetadata, sourceFrame))
+    .filter((sourceFrame): sourceFrame is number => sourceFrame !== undefined);
   const activeAnimationFrameFit = sequenceFrameFit(
     animationMetadata,
     activeAnimationFrames,
     activeAnimationShadowFrames,
   );
-  const effectBodyShadowFrames = effectBodySample?.animation?.shadow && effectBodyMetadata?.frame_count
-    ? effectBodyFrames
-      .map((sourceFrame) => sourceFrame + Math.floor(effectBodyMetadata.frame_count! / 2))
-      .filter((sourceFrame) => sourceFrame < effectBodyMetadata.frame_count!)
-    : [];
+  const effectBodyShadowFrames = effectBodyFrames
+    .map((sourceFrame) => animationShadowFrame(effectBodySample || undefined, effectBodyMetadata, sourceFrame))
+    .filter((sourceFrame): sourceFrame is number => sourceFrame !== undefined);
   const effectBodyFrameFit = sequenceFrameFit(effectBodyMetadata, effectBodyFrames, effectBodyShadowFrames);
   const defaultBodyAssociation = preferredBodySequence(bodyAnimationAssociations);
   const defaultBodySample = defaultBodyAssociation?.samples.find((sample) => sample.asset) || null;
@@ -3125,16 +3125,13 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   const entityBodyFrameFit = sequenceFrameFit(
     bodyMetadata,
     bodyFrameIndices,
-    entityKind === "building" ? undefined : [],
   );
   const defaultOperationFrameFits = defaultOperationSamples.map((sample) => {
     const metadata = sample.asset ? operationMetadata[sample.asset.id] : null;
     const frames = animationSourceFrames(sample, metadata, facing);
-    const shadows = sample.animation?.shadow && metadata?.frame_count
-      ? frames
-        .map((sourceFrame) => sourceFrame + Math.floor(metadata.frame_count! / 2))
-        .filter((sourceFrame) => sourceFrame < metadata.frame_count!)
-      : [];
+    const shadows = frames
+      .map((sourceFrame) => animationShadowFrame(sample, metadata, sourceFrame))
+      .filter((sourceFrame): sourceFrame is number => sourceFrame !== undefined);
     return sequenceFrameFit(metadata, frames, shadows);
   });
   const operationMetadataReady = defaultOperationSamples.every(
@@ -3369,8 +3366,10 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   const soundCount = soundAssociations.reduce((count, association) => count + association.samples.length, 0);
   const hasBodySequences = bodyAnimationAssociations.length > 0;
   const hasRawBodyAnimation = entity.kind !== "building" && frameCount > 1 && !hasBodySequences;
-  const rawBodyAnimationTitle = "主体 HVA 时间轴";
-  const rawBodyAnimationMeta = `${frameCount} 帧 · HVA 逐帧变换`;
+  const rawBodyAnimationTitle = entity.voxel ? "模型姿态" : "未分组主体帧";
+  const rawBodyAnimationMeta = entity.voxel
+    ? `${frameCount} 帧 · HVA 逐帧变换`
+    : `${frameCount} 帧 · 未找到事件映射`;
   const animationGroups: Record<EntityAnimationTab, MediaAssociation[]> = {
     body: bodyAnimationAssociations,
     construction: constructionAnimationAssociations,

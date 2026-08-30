@@ -92,6 +92,7 @@ def test_animation_frame_requests_exports_only_configured_direction_ranges() -> 
                     start_frame=0,
                     frame_count=2,
                     facing_step=2,
+                    frame_step=1,
                     shadow=True,
                 )
             }
@@ -105,6 +106,34 @@ def test_animation_frame_requests_exports_only_configured_direction_ranges() -> 
     assert ("unit", 0, 16) in requests
     assert ("unit", 15, 31) in requests
     assert ("unit", 16, None) not in requests
+
+
+def test_animation_frame_requests_support_interleaved_unit_actions() -> None:
+    usage = _AssetUsage(
+        asset={"id": "drone", "format": "shp"},
+        variants=frozenset(
+            {
+                _AnimationVariant(
+                    palette="unit",
+                    start_frame=8,
+                    frame_count=2,
+                    facing_step=1,
+                    frame_step=8,
+                    shadow=False,
+                )
+            }
+        ),
+    )
+    paired_shadows = {frame: frame + 32 for frame in range(8, 24)}
+
+    requests = _animation_frame_requests(usage, 64, paired_shadows)
+
+    assert ("unit", 8, 40) in requests
+    assert ("unit", 16, 48) in requests
+    assert ("unit", 9, 41) in requests
+    assert ("unit", 17, 49) in requests
+    assert ("unit", 24, 56) not in requests
+    assert ("unit", 8, None) in requests
 
 
 def test_snapshot_identity_excludes_local_display_values() -> None:
