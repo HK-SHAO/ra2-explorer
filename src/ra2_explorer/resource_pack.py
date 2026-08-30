@@ -13,7 +13,11 @@ from typing import Any
 from ra2_explorer import __version__
 from ra2_explorer.derived import DERIVED_SCHEMA_VERSION, DerivedStore
 from ra2_explorer.errors import Ra2ExplorerError
-from ra2_explorer.semantic import SemanticLibrary, deserialize_semantic_catalog
+from ra2_explorer.semantic import (
+    SEMANTIC_CATALOG_CACHE_IDENTITY,
+    SemanticLibrary,
+    deserialize_semantic_catalog,
+)
 from ra2_explorer.storage import Database
 
 RESOURCE_PACK_SCHEMA = 1
@@ -50,7 +54,7 @@ def create_resource_pack(
         "metadata",
         source_id=source_id,
         revision=revision,
-        identity=("semantic-catalog-v1",),
+        identity=SEMANTIC_CATALOG_CACHE_IDENTITY,
         extension="json",
     )
     if not catalog_path.is_file():

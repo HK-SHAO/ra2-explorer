@@ -35,6 +35,7 @@ from ra2_explorer.storage import Database
 
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
 ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
+SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v2",)
 _TYPE_SECTIONS = {
     "vehicle": "VehicleTypes",
     "infantry": "InfantryTypes",
@@ -735,7 +736,7 @@ class SemanticLibrary:
             "metadata",
             source_id=source["id"],
             revision=source.get("scanned_at") or source["created_at"],
-            identity=("semantic-catalog-v2",),
+            identity=SEMANTIC_CATALOG_CACHE_IDENTITY,
             extension="json",
         )
 
@@ -3031,6 +3032,7 @@ def _media_kind_for_asset(
 __all__ = [
     "ENTITY_KINDS",
     "ENTITY_USAGES",
+    "SEMANTIC_CATALOG_CACHE_IDENTITY",
     "EntityComponent",
     "EntityDependency",
     "GameEntity",
