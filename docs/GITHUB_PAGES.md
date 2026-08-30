@@ -10,22 +10,22 @@ Pages 不运行 Python、FastAPI 或 SQLite。发布前由本地解析器把真�
 
 ## 数据边界与实测体积
 
-当前固定快照 `ra2md-slim-ea7811b00fa5` 包含：
+当前固定快照 `ra2md-slim-0c56a01b33e8` 包含：
 
 | 内容 | 数量或字节 | 约合 |
 | --- | ---: | ---: |
 | 单位 | 559 | — |
 | 声音 | 3,322 | — |
 | 发布文件 | 28,967 | — |
-| 解包后的 Pages 数据 | 144,037,918 字节 | 137.4 MiB |
-| 固定数据 ZIP | 79,221,500 字节 | 75.6 MiB |
-| ZIP SHA-256 | `58402e1a53b0305ce028cb48ad973f8e4478aac3a6c326ffd258d76738f3c9e9` | — |
+| 解包后的 Pages 数据 | 144,037,066 字节 | 137.4 MiB |
+| 固定数据 ZIP | 79,220,842 字节 | 75.6 MiB |
+| ZIP SHA-256 | `1c8f7b715a50af8930b604d573896a7bb4b881c1789a8eb53b8955c13132687c` | — |
 
 解包数据按用途分布如下：
 
 | 目录 | 字节 | 用途 |
 | --- | ---: | --- |
-| `previews` | 39,581,782 | 单位、主体动作与建筑图层 WebP |
+| `previews` | 39,580,930 | 单位、主体动作与建筑图层 WebP |
 | `models` | 41,886,903 | 可交互 VXL/HVA 场景 JSON |
 | `audio` | 24,774,611 | Opus 声音 |
 | `assets` | 19,228,101 | 资产元数据和关联 |
@@ -38,7 +38,7 @@ GitHub 官方给出的 Pages 限制包括：发布站点最大 1 GB、每月 100
 
 ## 为什么大数据不进入主分支
 
-主分支只追踪前端、导出器、审计脚本和不足 1 KiB 的 `packaging/pages-data.json`。75.6 MiB ZIP 存放在现有的公开 Hugging Face 发布仓库 `rockstarengine/ra2-explorer-release` 的 `pages-data/pages-data-v1/`，并由提交 `e9c0739a519750ad4bba50423b858f9e19a6aa14` 固定。这个仓库的 Space 运行时保持暂停；文件下载不启动容器，也不消耗 CPU Basic 配额。
+主分支只追踪前端、导出器、审计脚本和不足 1 KiB 的 `packaging/pages-data.json`。75.6 MiB ZIP 存放在现有的公开 Hugging Face 发布仓库 `rockstarengine/ra2-explorer-release` 的 `pages-data/pages-data-v1/`，并由提交 `7851b064f7bff9362174b98e33bc0b4a194dd6f2` 固定。这个仓库的 Space 运行时保持暂停；文件下载不启动容器，也不消耗 CPU Basic 配额。
 
 Pages workflow 默认从 `https://hf-mirror.com` 下载，网络失败才回退 `https://huggingface.co`。下载后必须依次通过固定字节数、SHA-256、ZIP 路径安全、文件类型白名单、原始游戏格式禁令、清单计数和隐私扫描，之后才允许解包进站点 artifact。代码版本更新不会重新上传数据；只有解析结果、模型或声音实际变化时才发布新快照并更新锁定清单。
 
