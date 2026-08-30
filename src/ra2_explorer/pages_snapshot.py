@@ -267,13 +267,24 @@ def _asset_usages(
             if asset:
                 referenced[str(asset["id"])] = asset
         for association in entity.get("media", []):
+            association_kind = association.get("kind")
+            if association_kind == "animation":
+                role = association.get("role")
+                slot = association.get("slot")
+                is_body = role == "body" or slot == "body_sequence"
+                is_building_layer = entity.get("kind") == "building" and role in {
+                    "construction",
+                    "operation",
+                }
+                if not is_body and not is_building_layer:
+                    continue
             for sample in association.get("samples", []):
                 asset = sample.get("asset")
                 if not asset:
                     continue
                 asset_id = str(asset["id"])
                 referenced[asset_id] = asset
-                if association.get("kind") != "animation":
+                if association_kind != "animation":
                     continue
                 current = animation.setdefault(
                     asset_id,

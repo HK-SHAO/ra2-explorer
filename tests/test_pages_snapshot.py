@@ -8,11 +8,55 @@ from ra2_explorer.errors import Ra2ExplorerError
 from ra2_explorer.pages_snapshot import (
     _animation_frame_requests,
     _AnimationVariant,
+    _asset_usages,
     _AssetUsage,
     _directory_stats,
     _safe_filename,
     _snapshot_identity,
 )
+
+
+def test_pages_asset_usages_exclude_incomplete_combat_effects() -> None:
+    body_asset = {"id": "body", "format": "shp"}
+    weapon_asset = {"id": "weapon", "format": "shp"}
+    building_asset = {"id": "active", "format": "shp"}
+    entities = [
+        {
+            "kind": "infantry",
+            "components": [],
+            "media": [
+                {
+                    "kind": "animation",
+                    "role": "body",
+                    "slot": "body_sequence",
+                    "samples": [{"asset": body_asset}],
+                },
+                {
+                    "kind": "animation",
+                    "role": "weapon",
+                    "slot": "primary",
+                    "samples": [{"asset": weapon_asset}],
+                },
+            ],
+        },
+        {
+            "kind": "building",
+            "components": [],
+            "media": [
+                {
+                    "kind": "animation",
+                    "role": "operation",
+                    "slot": "active_anim",
+                    "samples": [{"asset": building_asset}],
+                },
+            ],
+        },
+    ]
+
+    referenced, usages, _audio_ids = _asset_usages({"items": []}, entities)
+
+    assert set(referenced) == {"body", "active"}
+    assert set(usages) == {"body", "active"}
 
 
 def test_animation_frame_requests_exports_only_configured_direction_ranges() -> None:

@@ -2296,6 +2296,17 @@ function animationAssociationTab(kind: EntityKind, association: MediaAssociation
   return animationRoleTab(kind, association.role, association.slot);
 }
 
+function isPlayableEntityAnimation(kind: EntityKind, association: MediaAssociation) {
+  if (association.kind !== "animation") return false;
+  if (association.role === "body" || association.slot === "body_sequence") return true;
+  return kind === "building" && (association.role === "construction" || association.role === "operation");
+}
+
+function entityHasPlayableAnimation(entity: GameEntity) {
+  return (entity.kind !== "building" && entity.preview.frame_count > 1)
+    || entity.media.some((association) => isPlayableEntityAnimation(entity.kind, association));
+}
+
 function animationAssociationCount(association: MediaAssociation) {
   if (association.selection) return 1;
   const directional = association.samples.filter((sample) => sample.animation?.direction);
@@ -2306,12 +2317,12 @@ function animationAssociationCount(association: MediaAssociation) {
 
 function defaultEntityAnimationTab(entity: GameEntity | null): EntityAnimationTab {
   if (!entity) return "body";
-  const associations = entity.media.filter((association) => association.kind === "animation");
+  const associations = entity.media.filter((association) => isPlayableEntityAnimation(entity.kind, association));
   const order: EntityAnimationTab[] = entity.kind === "building"
-    ? ["construction", "operation", "weapon", "impact", "destruction", "debris"]
-    : ["body", "weapon", "impact", "destruction", "debris"];
+    ? ["construction", "operation", "body"]
+    : ["body"];
   return order.find((tab) => associations.some((association) => animationAssociationTab(entity.kind, association) === tab))
-    || (entity.kind !== "building" && entity.preview.frame_count > 1 ? "body" : "weapon");
+    || "body";
 }
 
 function animationFireFlh(art: Record<string, string>, slot: string) {
@@ -2891,7 +2902,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   const [previewFailed, setPreviewFailed] = useState(false);
   const frameCount = Math.max(1, entity?.preview.frame_count || 1);
   const animationAssociations = useMemo(
-    () => entity?.media.filter((association) => association.kind === "animation") || [],
+    () => entity?.media.filter((association) => isPlayableEntityAnimation(entity.kind, association)) || [],
     [entity],
   );
   const entityKind = entity?.kind || "vehicle";
@@ -3014,7 +3025,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
     setAnimationTab(defaultEntityAnimationTab(entity));
     setDetailTab(entity?.media.some((association) => association.kind !== "animation")
       ? "sound"
-      : entity?.media.some((association) => association.kind === "animation")
+      : entity && entityHasPlayableAnimation(entity)
         ? "animation"
         : "data");
   }, [entity?.id]);
