@@ -305,6 +305,10 @@ const mediaSlotLabels: Record<string, string> = {
   roofdeployinganim: "屋顶展开",
   underroofdooranim: "屋顶门",
   bibshape: "地基",
+  taunt: "多人嘲讽",
+  ambient: "场景播报",
+  explosion: "爆炸",
+  interface: "界面与过场",
 };
 
 function numberedWeaponSlotLabel(slot: string) {
@@ -391,11 +395,14 @@ const mediaGroupLabels: Record<string, string> = {
   unit_voice: "单位语音",
   eva_voice: "EVA 播报",
   mission_voice: "任务对白",
+  taunt_voice: "多人嘲讽",
+  ambient_voice: "场景播报",
   other_voice: "其他语音",
   combat_sound: "战斗音效",
   unit_sound: "单位动作",
   ambient_sound: "环境音效",
   notification_sound: "提示音效",
+  interface_sound: "界面与过场",
   other_sound: "其他音效",
   unclassified: "未关联音频",
 };

@@ -236,6 +236,37 @@ _EVA_UNIT_STATIC_TEXT = {
 }
 _MEDIA_EVENT_DESCRIPTIONS = {
     "eva_psychicrevealready": "心灵揭示就绪提示音",
+    "explosion05": "爆炸音效 05",
+    "explosion10": "爆炸音效 10",
+}
+_TAUNT_AFFILIATIONS = {
+    "am": ("Americans", "GDI"),
+    "br": ("British", "GDI"),
+    "cu": ("Confederation", "Nod"),
+    "fr": ("French", "GDI"),
+    "ge": ("Germans", "GDI"),
+    "ir": ("Arabs", "Nod"),
+    "ko": ("Alliance", "GDI"),
+    "li": ("Africans", "Nod"),
+    "ru": ("Russians", "Nod"),
+    "yu": ("YuriCountry", "ThirdSide"),
+}
+_LEGACY_INTERFACE_AUDIO_DESCRIPTIONS = {
+    "bargraph": "战役结算图表音效",
+    "bestbox": "战役结算最佳成绩音效",
+    "clktarg": "战役界面目标点击音效",
+    "efficien": "战役结算效率音效",
+    "gsweep": "战役界面扫描音效",
+    "intro": "开场界面音频",
+    "maps": "地图界面音频",
+    "mouseoff": "界面指针离开音效",
+    "mouseon": "界面指针进入音效",
+    "nsweep": "战役界面扫描音效",
+    "text1": "界面文字音效 1",
+    "text2": "界面文字音效 2",
+    "text3": "界面文字音效 3",
+    "type": "界面打字音效",
+    "wipe": "界面切换音效",
 }
 _NULL_IMAGES = {"", "none", "null", "<none>"}
 
@@ -1512,6 +1543,51 @@ def _build_media_items(
                     if re.match(r"^[a-z]\d{2}[_-]p\d+", stem)
                     else "other_voice"
                 )
+            taunt_match = re.fullmatch(r"tau([a-z]{2})(\d{2})", stem)
+            if taunt_match:
+                state["groups"].add("taunt_voice")
+                state["slots"].add("taunt")
+                affiliation = _TAUNT_AFFILIATIONS.get(taunt_match.group(1))
+                if affiliation:
+                    country, side = affiliation
+                    state["countries"].add(country)
+                    state["sides"].add(side)
+            elif re.fullmatch(r"aprotr[1-5]", stem):
+                # RA2's SOUND.INI binds these samples to PropagandaTruck and
+                # RULES uses that event as an ambient sound. SOUNDMD comments
+                # the samples out, but the retail audio and transcript remain.
+                state["groups"].add("ambient_voice")
+                state["events"].add("PropagandaTruck")
+                state["slots"].add("ambient")
+
+    for state in states.values():
+        if state["voice"] or state["sound"]:
+            continue
+        asset = state["asset"]
+        stem = str(asset["display_name"]).rsplit(".", 1)[0].casefold()
+        virtual_path = str(asset.get("virtual_path") or "").casefold()
+        explosion_match = re.fullmatch(r"gexp(\d{2})a", stem)
+        if explosion_match:
+            event = f"Explosion{explosion_match.group(1)}"
+            state["sound"] = True
+            state["groups"].add("combat_sound")
+            state["events"].add(event)
+            state["slots"].add("explosion")
+            continue
+        description = _LEGACY_INTERFACE_AUDIO_DESCRIPTIONS.get(stem)
+        if (
+            description is not None
+            and asset["format"] == "aud"
+            and ("sidenc" in virtual_path or "local.mix" in virtual_path)
+        ):
+            # These retail AUD files live in SIDENC campaign-shell archives or
+            # LOCAL.MIX and are not SOUND.INI events. Preserve that distinction
+            # while still exposing their known interface/transition purpose.
+            state["sound"] = True
+            state["groups"].add("interface_sound")
+            state["events"].add(stem.upper())
+            state["slots"].add("interface")
+            state["texts"].add(description)
 
     items = []
     for state in states.values():

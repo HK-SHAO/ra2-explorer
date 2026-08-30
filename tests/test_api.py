@@ -13,6 +13,7 @@ from ra2_explorer.semantic import (
     GameEntity,
     MediaAssociation,
     MediaSample,
+    VoiceText,
     _art_animation_playback,
     _AssetIndex,
     _build_eva_events,
@@ -648,7 +649,12 @@ def test_unassociated_voice_keeps_catalog_transcript_in_asset_data(
         params={"source_id": source["id"], "q": "tauli02"},
     ).json()
     assert media["total"] == 1
-    asset = media["items"][0]["asset"]
+    item = media["items"][0]
+    assert item["groups"] == ["taunt_voice"]
+    assert item["slots"] == ["taunt"]
+    assert item["countries"] == ["Africans"]
+    assert item["sides"] == ["Nod"]
+    asset = item["asset"]
 
     associations = client.get(
         f"/api/assets/{asset['id']}/associations",
@@ -663,6 +669,53 @@ def test_unassociated_voice_keeps_catalog_transcript_in_asset_data(
         "original_texts": ["The order is given. Attack!"],
         "localized_texts": ["下达指令了：攻击！"],
     }
+
+
+def test_orphaned_retail_audio_keeps_evidence_based_categories() -> None:
+    def asset(name: str, asset_format: str, virtual_path: str) -> dict[str, object]:
+        return {
+            "id": name.casefold(),
+            "display_name": name,
+            "format": asset_format,
+            "virtual_path": virtual_path,
+            "size": 1024,
+            "storage_kind": "mix",
+        }
+
+    propaganda = asset(
+        "aprotr1.wav", "bag_audio", "language.mix/audio.mix::aprotr1.wav"
+    )
+    explosion = asset("gexp05a.wav", "bag_audio", "language.mix/audio.mix::gexp05a.wav")
+    interface = asset("BARGRAPH.AUD", "aud", "ra2.mix/SIDENC02.MIX::BARGRAPH.AUD")
+    unknown = asset("MYSTERY.AUD", "aud", "ra2.mix/local.mix::MYSTERY.AUD")
+
+    items = {
+        item["asset"]["display_name"]: item
+        for item in _build_media_items(
+            [propaganda, explosion, interface, unknown],
+            (),
+            {},
+            (),
+            {
+                "aprotr1": VoiceText(
+                    "TRANSCRIPT:aprotr1",
+                    "宣传广播",
+                    "Propaganda broadcast",
+                    "宣传广播",
+                )
+            },
+        )
+    }
+
+    assert items["aprotr1.wav"]["groups"] == ["ambient_voice"]
+    assert items["aprotr1.wav"]["events"] == ["PropagandaTruck"]
+    assert items["aprotr1.wav"]["slots"] == ["ambient"]
+    assert items["gexp05a.wav"]["groups"] == ["combat_sound"]
+    assert items["gexp05a.wav"]["events"] == ["Explosion05"]
+    assert items["gexp05a.wav"]["slots"] == ["explosion"]
+    assert items["BARGRAPH.AUD"]["groups"] == ["interface_sound"]
+    assert items["BARGRAPH.AUD"]["slots"] == ["interface"]
+    assert items["MYSTERY.AUD"]["kind"] == "unknown"
 
 
 def test_retail_class_markers_do_not_fail_a_source(tmp_path: Path) -> None:
