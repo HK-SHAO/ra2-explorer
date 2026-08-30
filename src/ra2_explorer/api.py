@@ -127,20 +127,27 @@ class Services:
         )
 
 
+def _require_local_mode(settings: Settings) -> None:
+    if settings.hosted:
+        raise HTTPException(status_code=403, detail="在线浏览为只读模式")
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     current_settings = settings or load_settings()
     services = Services(current_settings)
     app = FastAPI(
         title="RA2 Explorer API",
         version=__version__,
-        docs_url="/api/docs",
-        openapi_url="/api/openapi.json",
+        docs_url=None if current_settings.hosted else "/api/docs",
+        openapi_url=None if current_settings.hosted else "/api/openapi.json",
     )
     app.state.services = services
     app.add_middleware(GZipMiddleware, minimum_size=1_024)
     app.add_middleware(
         TrustedHostMiddleware,
-        allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"],
+        allowed_hosts=["*"] if current_settings.hosted else [
+            "127.0.0.1", "localhost", "[::1]", "testserver"
+        ],
     )
     app.add_middleware(
         CORSMiddleware,
@@ -165,6 +172,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "name": "ra2-explorer",
             "version": __version__,
             "pid": os.getpid(),
+            "mode": "hosted" if current_settings.hosted else "local",
         }
 
     @app.get("/api/updates/latest")
@@ -180,10 +188,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/discovery")
     async def discovery() -> dict[str, object]:
+        if current_settings.hosted:
+            return {"candidates": [], "checked_locations": [], "official_sources": []}
         return await run_in_threadpool(discover_installations)
 
     @app.post("/api/sources", status_code=201)
     async def add_source(payload: SourceRequest) -> dict[str, object]:
+        _require_local_mode(current_settings)
         return await run_in_threadpool(
             services.library.import_source,
             Path(payload.path),
@@ -192,10 +203,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/sources/{source_id}/scan")
     async def scan_source(source_id: str) -> dict[str, object]:
+        _require_local_mode(current_settings)
         return await run_in_threadpool(services.library.scan, source_id)
 
     @app.delete("/api/sources/{source_id}")
     def delete_source(source_id: str) -> dict[str, object]:
+        _require_local_mode(current_settings)
         return services.database.delete_source(source_id)
 
     @app.get("/api/resource-packs")
@@ -206,6 +219,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def export_resource_pack(
         payload: ResourcePackExportRequest,
     ) -> dict[str, object]:
+        _require_local_mode(current_settings)
         result = await run_in_threadpool(
             create_resource_pack,
             services.database,
@@ -221,6 +235,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         filename: str = Query(min_length=1, max_length=255),
     ) -> dict[str, object]:
+        _require_local_mode(current_settings)
         if Path(filename).name != filename:
             raise HTTPException(status_code=422, detail="资源包文件名无效")
         content_length = request.headers.get("content-length")
@@ -885,6 +900,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/reference-data/names/sync")
     async def sync_reference_data() -> dict[str, object]:
+        _require_local_mode(current_settings)
         manifest = await run_in_threadpool(sync_known_names, current_settings.known_names_path)
         services.reload_names()
         return manifest

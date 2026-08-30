@@ -20,6 +20,7 @@ class Settings:
     frontend_dir: Path
     known_names_path: Path
     derived_dir: Path | None = None
+    hosted: bool = False
 
     @property
     def derived_root(self) -> Path:
@@ -54,6 +55,8 @@ def load_settings(*, working_directory: Path | None = None) -> Settings:
         frontend_dir=frontend_dir,
         known_names_path=data_dir / "reference" / "known_names_ra2.txt",
         derived_dir=derived_dir,
+        hosted=os.environ.get("RA2_EXPLORER_HOSTED", "").strip().casefold()
+        in {"1", "true", "yes"},
     )
     settings.prepare()
     _migrate_legacy_database(data_dir / "ra2-explorer.db", settings.database_path)
