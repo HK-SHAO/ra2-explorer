@@ -38,7 +38,9 @@ from ra2_explorer.storage import Database
 
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
 ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
-SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v3",)
+UNAFFILIATED_SIDE = "unaffiliated"
+SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v4",)
+_PLANNING_SIDE_IDS = ("GDI", "Nod", "ThirdSide")
 _TYPE_SECTIONS = {
     "vehicle": "VehicleTypes",
     "infantry": "InfantryTypes",
@@ -817,13 +819,20 @@ class SemanticLibrary:
         elif usage:
             entities = [entity for entity in entities if entity.usage == usage]
         country_counts = Counter(country for entity in entities for country in entity.countries)
-        side_counts = Counter(entity_side for entity in entities for entity_side in entity.sides)
+        side_counts = Counter(
+            faction_id
+            for entity in entities
+            for faction_id in _entity_faction_ids(entity)
+        )
         if side:
             selected_side = side.casefold()
             entities = [
                 entity
                 for entity in entities
-                if any(entity_side.casefold() == selected_side for entity_side in entity.sides)
+                if any(
+                    faction_id.casefold() == selected_side
+                    for faction_id in _entity_faction_ids(entity)
+                )
             ]
         total = len(entities)
         selected = entities[offset : offset + limit]
@@ -1647,19 +1656,37 @@ def _entity_affiliation(
             "icon": icon,
         }
     if len(sides) == 1:
-        side_id = sides[0]
-        icon = _find_asset(
-            assets,
-            _SIDE_ICON_FILES.get(side_id.casefold(), ()),
-            ("pcx", "shp"),
-        )
-        return {
-            "kind": "side",
-            "id": side_id,
-            "display_name": _SIDE_DISPLAY_NAMES.get(side_id.casefold(), side_id),
-            "icon": icon,
-        }
+        return _side_affiliation(sides[0], assets)
+    planning_side = _integer(values.get("aibaseplanningside"))
+    if planning_side is not None and 0 <= planning_side < len(_PLANNING_SIDE_IDS):
+        return _side_affiliation(_PLANNING_SIDE_IDS[planning_side], assets)
     return None
+
+
+def _side_affiliation(side_id: str, assets: _AssetIndex) -> dict[str, Any]:
+    icon = _find_asset(
+        assets,
+        _SIDE_ICON_FILES.get(side_id.casefold(), ()),
+        ("pcx", "shp"),
+    )
+    return {
+        "kind": "side",
+        "id": side_id,
+        "display_name": _SIDE_DISPLAY_NAMES.get(side_id.casefold(), side_id),
+        "icon": icon,
+    }
+
+
+def _entity_faction_ids(entity: GameEntity) -> tuple[str, ...]:
+    affiliation = entity.affiliation
+    if affiliation is None:
+        return (UNAFFILIATED_SIDE,)
+    if affiliation.get("kind") == "side":
+        side_id = str(affiliation.get("id") or "").strip()
+        return (side_id,) if side_id else (UNAFFILIATED_SIDE,)
+    if affiliation.get("kind") == "country" and len(entity.sides) == 1:
+        return entity.sides
+    return (UNAFFILIATED_SIDE,)
 
 
 def _build_media_items(

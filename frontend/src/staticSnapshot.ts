@@ -135,6 +135,13 @@ function countBy<T>(items: T[], values: (item: T) => string[]) {
   return counts;
 }
 
+function entityFactionIds(item: EntityPage["items"][number]) {
+  if (!item.affiliation) return ["unaffiliated"];
+  if (item.affiliation.kind === "side" && item.affiliation.id) return [item.affiliation.id];
+  if (item.affiliation.kind === "country" && item.sides.length === 1) return item.sides;
+  return ["unaffiliated"];
+}
+
 async function manifest() {
   return await loadJson<StaticSnapshotManifest>("manifest.json");
 }
@@ -175,9 +182,9 @@ async function filterEntities(params: URLSearchParams): Promise<EntityPage> {
   if (usages.size) items = items.filter((item) => usages.has(item.usage));
   else if (usage) items = items.filter((item) => item.usage === usage);
   const countryCounts = countBy(items, (item) => item.countries);
-  const sideCounts = countBy(items, (item) => item.sides);
+  const sideCounts = countBy(items, entityFactionIds);
   const side = params.get("side")?.toLocaleLowerCase();
-  if (side) items = items.filter((item) => item.sides.some((value) => value.toLocaleLowerCase() === side));
+  if (side) items = items.filter((item) => entityFactionIds(item).some((value) => value.toLocaleLowerCase() === side));
   const offset = Math.max(0, Number(params.get("offset") || 0));
   const limit = Math.max(1, Number(params.get("limit") || 1000));
   return {

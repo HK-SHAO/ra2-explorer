@@ -195,6 +195,9 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert "voice" in entity_summaries["DemoVehicle"]["media_kinds"]
     assert entity_summaries["DemoVehicle"]["countries"] == ["Americans", "Russians"]
     assert entity_summaries["DemoVehicle"]["sides"] == ["GDI", "Nod"]
+    assert entity_summaries["DemoVehicle"]["affiliation"]["id"] == "GDI"
+    assert entity_summaries["DemoInfantry"]["affiliation"]["id"] == "Americans"
+    assert entity_page["sides"] == [{"id": "GDI", "count": 2}]
     assert {item["display_name"] for item in entity_page["countries"]} == {
         "United States",
         "Russia",
@@ -212,6 +215,14 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert allied_vehicles.status_code == 200
     assert allied_vehicles.json()["total"] == 1
     assert allied_vehicles.json()["items"][0]["id"] == "DemoVehicle"
+    assert client.get(
+        "/api/entities",
+        params={"source_id": source["id"], "kind": "vehicle", "side": "Nod"},
+    ).json()["total"] == 0
+    assert client.get(
+        "/api/entities",
+        params={"source_id": source["id"], "side": "unaffiliated"},
+    ).json()["total"] == 0
     empty_side = client.get(
         "/api/entities",
         params={"source_id": source["id"], "kind": "building", "side": "GDI"},

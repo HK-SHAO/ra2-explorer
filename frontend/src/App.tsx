@@ -428,9 +428,16 @@ const sideLabels: Record<string, string> = {
   GDI: "盟军",
   Nod: "苏军",
   ThirdSide: "尤里",
+  unaffiliated: "无阵营",
   Civilian: "平民",
   Mutant: "特殊",
 };
+
+const primarySideOrder = ["GDI", "Nod", "ThirdSide"];
+
+function affiliationClassId(value: string) {
+  return value.toLocaleLowerCase().replace(/[^a-z0-9_-]/g, "-");
+}
 
 const mapObjectLabels: Record<string, string> = {
   structure: "建筑",
@@ -734,14 +741,17 @@ function sortEntities(
     if (rightValue === null) return -1;
     return ascending ? leftValue - rightValue : rightValue - leftValue;
   };
-  const knownSides = Object.keys(sideLabels);
+  const knownSides = primarySideOrder;
   const planningSide = (entity: EntitySummary) => {
     const configured = numeric(entity.ai_base_planning_side ?? null);
-    if (configured !== null) return configured;
-    const effective = entity.sides
-      .map((side) => knownSides.indexOf(side))
-      .filter((index) => index >= 0);
-    return effective.length > 0 ? Math.min(...effective) : null;
+    if (configured !== null && configured >= 0 && configured < knownSides.length) return configured;
+    const affiliatedSide = entity.affiliation?.kind === "side"
+      ? entity.affiliation.id
+      : entity.affiliation?.kind === "country" && entity.sides.length === 1
+        ? entity.sides[0]
+        : "";
+    const index = knownSides.indexOf(affiliatedSide);
+    return index >= 0 ? index : null;
   };
   const compareFactions = (left: EntitySummary, right: EntitySummary) => {
     const leftSide = planningSide(left);
@@ -751,8 +761,8 @@ function sortEntities(
       if (rightSide === null) return -1;
       if (leftSide !== rightSide) return leftSide - rightSide;
     }
-    const leftLabel = left.sides.map((side) => sideLabels[side] || side).join("、") || left.affiliation?.display_name || "";
-    const rightLabel = right.sides.map((side) => sideLabels[side] || side).join("、") || right.affiliation?.display_name || "";
+    const leftLabel = left.affiliation?.display_name || sideLabels.unaffiliated;
+    const rightLabel = right.affiliation?.display_name || sideLabels.unaffiliated;
     return leftLabel.localeCompare(rightLabel, language, { numeric: true });
   };
   const compareCameos = (left: EntitySummary, right: EntitySummary) => {
@@ -2306,7 +2316,7 @@ function EntityCardPreview({ entity, sourceId, previewAngle }: { entity: EntityS
     {entity.renderable
       ? requested && <img decoding="async" fetchPriority="low" src={url} alt="" onLoad={finish} onError={(event) => { finish(); event.currentTarget.hidden = true; }} />
       : <Icon name="unit" size={34} />}
-    {entity.affiliation && <span className={`entity-affiliation-badge affiliation-${entity.affiliation.kind}`} title={entity.affiliation.display_name}>
+    {entity.affiliation && <span className={`entity-affiliation-badge affiliation-${entity.affiliation.kind} affiliation-${affiliationClassId(entity.affiliation.id)}`} title={entity.affiliation.display_name}>
       {entity.affiliation.display_name}
     </span>}
   </span>;
