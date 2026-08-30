@@ -43,7 +43,14 @@ import {
   UpdateInfo,
 } from "./api";
 
-const VoxelViewer = lazy(async () => ({ default: (await import("./VoxelViewer")).VoxelViewer }));
+let voxelViewerModulePromise: Promise<typeof import("./VoxelViewer")> | null = null;
+
+function loadVoxelViewerModule() {
+  voxelViewerModulePromise ||= import("./VoxelViewer");
+  return voxelViewerModulePromise;
+}
+
+const VoxelViewer = lazy(async () => ({ default: (await loadVoxelViewerModule()).VoxelViewer }));
 
 function VoxelPreview({ url, label, viewKey, previewAngle = DEFAULT_PREVIEW_ANGLE, onPreviewAngleChange }: {
   url: string;
@@ -706,6 +713,10 @@ function storedAutomaticUpdateCheck() {
   return window.localStorage.getItem("ra2exp-auto-update-check-v1") === "true";
 }
 
+function storedPerformancePreload() {
+  return window.localStorage.getItem("ra2exp-performance-preload-v1") === "true";
+}
+
 function categoryCount(stats: Stats, formats: string[]) {
   const selected = new Set(formats);
   return stats.formats.reduce(
@@ -800,6 +811,9 @@ function ExplorerApp() {
   const [updateError, setUpdateError] = useState("");
   const [automaticUpdateCheck, setAutomaticUpdateCheck] = useState(
     storedAutomaticUpdateCheck,
+  );
+  const [performancePreload, setPerformancePreload] = useState(
+    storedPerformancePreload,
   );
   const updateRequestRef = useRef(false);
   const sidebarCollapsedRef = useRef(
@@ -1015,6 +1029,11 @@ function ExplorerApp() {
     if (next && !updateInfo) void checkLatestUpdate();
   }
 
+  function updatePerformancePreload(next: boolean) {
+    setPerformancePreload(next);
+    window.localStorage.setItem("ra2exp-performance-preload-v1", String(next));
+  }
+
   async function refreshResourcePacks() {
     try {
       setResourcePacks(await api.resourcePacks());
@@ -1095,6 +1114,15 @@ function ExplorerApp() {
   useEffect(() => {
     if (storedAutomaticUpdateCheck()) void checkLatestUpdate();
   }, []);
+
+  useEffect(() => {
+    if (!performancePreload && !voxelViewerModulePromise) return;
+    let active = true;
+    void loadVoxelViewerModule().then((module) => {
+      if (active) module.configureVoxelPreload(performancePreload);
+    });
+    return () => { active = false; };
+  }, [performancePreload]);
 
   useEffect(() => {
     setSelected(null);
@@ -1210,7 +1238,6 @@ function ExplorerApp() {
     if (!sourceId || view !== "entities") return;
     let cancelled = false;
     setEntityLoading(true);
-    setEntities([]);
     const timer = window.setTimeout(() => {
       api.entities(sourceId, {
         query: entityQuery,
@@ -1240,6 +1267,28 @@ function ExplorerApp() {
       window.clearTimeout(timer);
     };
   }, [sourceId, sourceRevision, entityQuery, entityKind, entityUsage, entitySide, gameLanguage, view]);
+
+  useEffect(() => {
+    if (!performancePreload || view !== "entities" || !sourceId || !sourceRevision || entities.length === 0) return;
+    const controller = new AbortController();
+    const selectedIndex = Math.max(0, entities.findIndex((entity) => entity.id === selectedEntityId));
+    const nearbyIndexes = [selectedIndex, selectedIndex + 1, selectedIndex - 1, selectedIndex + 2, selectedIndex - 2];
+    const ordered = [
+      ...nearbyIndexes.map((index) => entities[index]).filter(Boolean),
+      ...entities,
+    ];
+    const seen = new Set<string>();
+    const urls = ordered
+      .filter((entity) => entity.voxel && entity.renderable && !seen.has(entity.id) && seen.add(entity.id))
+      .map((entity) => api.entityModelUrl(sourceId, entity.id, { revision: sourceRevision }));
+    const timer = window.setTimeout(() => {
+      void loadVoxelViewerModule().then((module) => module.preloadVoxelScenes(urls, controller.signal));
+    }, 180);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [performancePreload, view, sourceId, sourceRevision, entities, selectedEntityId]);
 
   useEffect(() => {
     if (!sourceId || !selectedEntityId || view !== "entities") {
@@ -1595,6 +1644,7 @@ function ExplorerApp() {
             <div className="workspace-resizer" role="separator" tabIndex={0} aria-label="调整详情区域大小" aria-orientation={detailPlacement === "bottom" ? "horizontal" : "vertical"} aria-valuenow={detailSize} onPointerDown={beginDetailResize} onKeyDown={resizeDetailWithKeyboard}><span /></div>
             <EntityDetailPanel
               sourceId={sourceId}
+              sourceRevision={sourceRevision}
               entity={selectedEntity}
               loading={entityDetailLoading}
               playerColors={playerColors}
@@ -1617,6 +1667,8 @@ function ExplorerApp() {
         onGameLanguageChange={updateGameLanguage}
         previewAngle={previewAngle}
         onPreviewAngleChange={updatePreviewAngle}
+        performancePreload={performancePreload}
+        onPerformancePreloadChange={updatePerformancePreload}
         sources={sources}
         selectedSourceId={sourceId}
         discoveries={discovery.candidates}
@@ -2669,8 +2721,9 @@ function mergeSoundAssociations(associations: MediaAssociation[]): DisplaySoundA
   return [...merged.values()];
 }
 
-function EntityDetailPanel({ sourceId, entity, loading, playerColors, defaultPreviewAngle, wide = false, onPopout, scrollKey = "" }: {
+function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, playerColors, defaultPreviewAngle, wide = false, onPopout, scrollKey = "" }: {
   sourceId: string;
+  sourceRevision?: string;
   entity: GameEntity | null;
   loading: boolean;
   playerColors: PlayerColor[];
@@ -3074,7 +3127,7 @@ function EntityDetailPanel({ sourceId, entity, loading, playerColors, defaultPre
                     {effectBodyPreviewUrl
                       ? <ImageViewport className="shp entity-composite-body" fitKey={`${entity.id}:${effectBodyAssociation?.event || "body"}`} frameFit={effectBodyFrameFit} src={effectBodyPreviewUrl} alt={`${entity.display_name} 主体动作`} building={entity.kind === "building"} />
                       : entity.voxel
-                        ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor })} label={entity.display_name} viewKey={`entity:${sourceId}:${entity.id}`} previewAngle={previewAngle} onPreviewAngleChange={setPreviewAngle} />
+                        ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor, revision: sourceRevision })} label={entity.display_name} viewKey={`entity:${sourceId}:${entity.id}`} previewAngle={previewAngle} onPreviewAngleChange={setPreviewAngle} />
                         : previewFailed
                           ? <div className="preview-stage shp"><div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div></div>
                           : <ImageViewport className="shp entity-composite-body" fitKey={entity.id} frameFit={entityPresentationFrameFit} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
@@ -3413,6 +3466,8 @@ function SettingsDialog({
   onGameLanguageChange,
   previewAngle,
   onPreviewAngleChange,
+  performancePreload,
+  onPerformancePreloadChange,
   sources,
   selectedSourceId,
   discoveries,
@@ -3440,6 +3495,8 @@ function SettingsDialog({
   onGameLanguageChange: (language: GameLanguage) => void;
   previewAngle: PreviewAngle;
   onPreviewAngleChange: (angle: PreviewAngle) => void;
+  performancePreload: boolean;
+  onPerformancePreloadChange: (enabled: boolean) => void;
   sources: Source[];
   selectedSourceId: string;
   discoveries: GameInstallation[];
@@ -3517,6 +3574,7 @@ function SettingsDialog({
                     {previewAngleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
                 </div>
+                <label className="settings-toggle"><input type="checkbox" checked={performancePreload} onChange={(event) => onPerformancePreloadChange(event.target.checked)} /><span><strong>高性能预载</strong><small>缓存当前分类的模型，并在内存中保留当前及相邻单位。</small></span></label>
               </div>
             </section>
 

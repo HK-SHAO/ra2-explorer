@@ -31,6 +31,35 @@ interface ViewerEngine {
 
 type PreviewAngle = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
+const MODEL_RESPONSE_CACHE = "ra2exp-model-scenes-v5";
+const MAX_MEMORY_SCENES = 12;
+const MAX_MEMORY_VOXELS = 180_000;
+const MAX_PERSISTENT_RESPONSES = 260;
+const sceneCache = new Map<string, VoxelSceneData>();
+const sceneRequests = new Map<string, Promise<VoxelSceneData>>();
+let cachedVoxelCount = 0;
+let modelPreloadEnabled = false;
+
+export function configureVoxelPreload(enabled: boolean) {
+  modelPreloadEnabled = enabled;
+  if (enabled) return;
+  sceneCache.clear();
+  sceneRequests.clear();
+  cachedVoxelCount = 0;
+  if ("caches" in window) void window.caches.delete(MODEL_RESPONSE_CACHE);
+}
+
+export async function preloadVoxelScenes(urls: string[], signal?: AbortSignal) {
+  if (!modelPreloadEnabled || signal?.aborted) return;
+  const uniqueUrls = Array.from(new Set(urls.filter(Boolean)));
+  const parsed = uniqueUrls.slice(0, 3);
+  await Promise.all(parsed.map((url) => requestVoxelScene(url, signal).catch(() => undefined)));
+  for (const url of uniqueUrls.slice(parsed.length)) {
+    if (signal?.aborted || !modelPreloadEnabled) return;
+    await cacheVoxelResponse(url, signal).catch(() => undefined);
+  }
+}
+
 export function VoxelViewer({ url, label, viewKey, previewAngle, onPreviewAngleChange, onLoadSettled }: {
   url: string;
   label: string;
@@ -188,30 +217,25 @@ export function VoxelViewer({ url, label, viewKey, previewAngle, onPreviewAngleC
 
   useEffect(() => {
     const controller = new AbortController();
+    let active = true;
     setLoading(true);
     setError("");
-    fetch(url, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) {
-          const body = (await response.json().catch(() => ({}))) as { detail?: string };
-          throw new Error(body.detail || `模型加载失败（${response.status}）`);
-        }
-        return response.json() as Promise<VoxelSceneData>;
-      })
+    requestVoxelScene(url, controller.signal)
       .then((scene) => {
-        if (![1, 2, 3, 4].includes(scene.version) || !Array.isArray(scene.voxels)) {
-          throw new Error("模型数据版本不受支持");
-        }
+        if (!active) return;
         setLoadedScene({ data: scene, viewKey });
       })
       .catch((reason: unknown) => {
-        if (controller.signal.aborted) return;
+        if (!active || controller.signal.aborted) return;
         setLoadedScene(null);
         setLoading(false);
         setError(reason instanceof Error ? reason.message : "模型加载失败");
         onLoadSettledRef.current?.();
       });
-    return () => controller.abort();
+    return () => {
+      active = false;
+      controller.abort();
+    };
   }, [url, viewKey]);
 
   useEffect(() => {
@@ -325,6 +349,92 @@ export function VoxelViewer({ url, label, viewKey, previewAngle, onPreviewAngleC
       {error && <div className="voxel-status error">{error}</div>}
     </div>
   );
+}
+
+async function requestVoxelScene(url: string, signal?: AbortSignal) {
+  if (modelPreloadEnabled) {
+    const cached = sceneCache.get(url);
+    if (cached) {
+      sceneCache.delete(url);
+      sceneCache.set(url, cached);
+      return cached;
+    }
+    let pending = sceneRequests.get(url);
+    if (!pending) {
+      pending = fetchVoxelScene(url).then((scene) => {
+        if (modelPreloadEnabled) cacheVoxelScene(url, scene);
+        return scene;
+      }).finally(() => sceneRequests.delete(url));
+      sceneRequests.set(url, pending);
+    }
+    const scene = await pending;
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    return scene;
+  }
+  return fetchVoxelScene(url, signal);
+}
+
+async function fetchVoxelScene(url: string, signal?: AbortSignal) {
+  const response = await modelResponse(url, signal);
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { detail?: string };
+    throw new Error(body.detail || `模型加载失败（${response.status}）`);
+  }
+  const scene = await response.json() as VoxelSceneData;
+  if (![1, 2, 3, 4].includes(scene.version) || !Array.isArray(scene.voxels)) {
+    throw new Error("模型数据版本不受支持");
+  }
+  return scene;
+}
+
+async function modelResponse(url: string, signal?: AbortSignal) {
+  if (!modelPreloadEnabled || !url.includes("r=") || !("caches" in window)) {
+    return fetch(url, { signal });
+  }
+  const cache = await window.caches.open(MODEL_RESPONSE_CACHE);
+  const cached = await cache.match(url);
+  if (cached) return cached;
+  const response = await fetch(url, { signal });
+  if (response.ok && modelPreloadEnabled) {
+    void cache.put(url, response.clone())
+      .then(() => prunePersistentCache(cache))
+      .catch(() => undefined);
+  }
+  return response;
+}
+
+async function cacheVoxelResponse(url: string, signal?: AbortSignal) {
+  if (!url.includes("r=") || !("caches" in window)) return;
+  const cache = await window.caches.open(MODEL_RESPONSE_CACHE);
+  if (await cache.match(url)) return;
+  const response = await fetch(url, { signal });
+  if (!response.ok || !modelPreloadEnabled || signal?.aborted) return;
+  await cache.put(url, response);
+  await prunePersistentCache(cache);
+}
+
+async function prunePersistentCache(cache: Cache) {
+  const keys = await cache.keys();
+  const excess = keys.length - MAX_PERSISTENT_RESPONSES;
+  if (excess > 0) await Promise.all(keys.slice(0, excess).map((key) => cache.delete(key)));
+}
+
+function cacheVoxelScene(url: string, scene: VoxelSceneData) {
+  const previous = sceneCache.get(url);
+  if (previous) cachedVoxelCount -= previous.voxels.length;
+  sceneCache.delete(url);
+  sceneCache.set(url, scene);
+  cachedVoxelCount += scene.voxels.length;
+  while (
+    sceneCache.size > 1
+    && (sceneCache.size > MAX_MEMORY_SCENES || cachedVoxelCount > MAX_MEMORY_VOXELS)
+  ) {
+    const oldestKey = sceneCache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    const oldest = sceneCache.get(oldestKey);
+    sceneCache.delete(oldestKey);
+    cachedVoxelCount -= oldest?.voxels.length || 0;
+  }
 }
 
 function unlitVoxelGeometry() {

@@ -409,6 +409,7 @@ export interface EntityPreviewOptions {
   effectFrame?: number;
   effectShadowFrame?: number;
   effectPalette?: "unit" | "animation";
+  revision?: string;
 }
 
 export interface ReferenceStatus {
@@ -581,6 +582,7 @@ export const api = {
     const params = new URLSearchParams({ frame: String(options.frame ?? 0), v: "5" });
     if (options.playerColor) params.set("player_color", options.playerColor);
     if (options.paletteId) params.set("palette_id", options.paletteId);
+    if (options.revision) params.set("r", options.revision);
     return `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}/model.json?${params}`;
   },
   assetModelUrl: (assetId: string, frame = 0, playerColor = "", paletteId = "") => {
