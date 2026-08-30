@@ -806,6 +806,7 @@ function ExplorerApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [resourcePacks, setResourcePacks] = useState<ResourcePack[]>([]);
   const [currentVersion, setCurrentVersion] = useState("");
+  const [hosted, setHosted] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateError, setUpdateError] = useState("");
@@ -1059,8 +1060,8 @@ function ExplorerApp() {
 
   function openSettings() {
     setSettingsOpen(true);
-    void refreshResourcePacks();
-    if (!discoveryLoaded) {
+    if (!hosted) void refreshResourcePacks();
+    if (!hosted && !discoveryLoaded) {
       setDiscoveryLoaded(true);
       api.discovery()
         .then(setDiscovery)
@@ -1106,6 +1107,7 @@ function ExplorerApp() {
           : nextSources[0]?.id || "");
         setPlayerColors(nextPlayerColors);
         setCurrentVersion(appInfo?.version || "");
+        setHosted(appInfo?.mode === "hosted");
       })
       .catch((reason: Error) => setError(reason.message))
       .finally(() => setLoading(false));
@@ -1658,6 +1660,7 @@ function ExplorerApp() {
       )}
 
       {settingsOpen && <SettingsDialog
+        hosted={hosted}
         formats={stats.formats}
         enabled={enabledFormats}
         onChange={updateEnabledFormats}
@@ -3457,6 +3460,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
 }
 
 function SettingsDialog({
+  hosted,
   formats,
   enabled,
   onChange,
@@ -3486,6 +3490,7 @@ function SettingsDialog({
   onCheckUpdate,
   onClose,
 }: {
+  hosted: boolean;
   formats: Stats["formats"];
   enabled: string[];
   onChange: (formats: string[]) => void;
@@ -3546,8 +3551,8 @@ function SettingsDialog({
           <nav className="settings-nav" aria-label="设置分区">
             <button type="button" onClick={() => scrollToSection("settings-display")}>显示</button>
             <button type="button" onClick={() => scrollToSection("settings-formats")}>载入类型</button>
-            <button type="button" onClick={() => scrollToSection("settings-sources")}>游戏目录</button>
-            <button type="button" onClick={() => scrollToSection("settings-packs")}>资源包</button>
+            {!hosted && <button type="button" onClick={() => scrollToSection("settings-sources")}>游戏目录</button>}
+            {!hosted && <button type="button" onClick={() => scrollToSection("settings-packs")}>资源包</button>}
             <button type="button" onClick={() => scrollToSection("settings-updates")}>应用更新</button>
           </nav>
           <div className="settings-content">
@@ -3594,7 +3599,7 @@ function SettingsDialog({
               </div> : <div className="settings-empty">导入游戏目录或资源包后即可选择载入类型。</div>}
             </section>
 
-            <section className="settings-section" id="settings-sources">
+            {!hosted && <section className="settings-section" id="settings-sources">
               <header><h3>游戏目录</h3><span>{sources.length}</span></header>
               {sources.length > 0 && <div className="settings-source-list">
                 {sources.map((source) => {
@@ -3616,9 +3621,9 @@ function SettingsDialog({
                 <label><span>资料库名称</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="可选" /></label>
                 <button type="submit" className="button primary" disabled={busy || !path.trim()}>{busy ? "正在处理…" : "解析目录"}</button>
               </form>
-            </section>
+            </section>}
 
-            <section className="settings-section" id="settings-packs">
+            {!hosted && <section className="settings-section" id="settings-packs">
               <header><h3>派生资源包</h3><span>.ra2pack</span></header>
               <div className="resource-pack-actions">
                 <div className="resource-pack-import">
@@ -3634,7 +3639,7 @@ function SettingsDialog({
                   <Icon name="archive" size={17} /><div><strong>{libraryDisplayName(pack.source_name)}</strong><small>{pack.filename} · {formatBytes(pack.size)}</small></div><a className="button ghost" href={pack.download_url} download><Icon name="download" />下载</a>
                 </article>)}
               </div> : <div className="settings-empty">尚未在本机导出派生资源包。</div>}
-            </section>
+            </section>}
 
             <section className="settings-section" id="settings-updates">
               <header><h3>应用更新</h3><span>当前 {currentVersion || updateInfo?.current_version || "—"}</span></header>
