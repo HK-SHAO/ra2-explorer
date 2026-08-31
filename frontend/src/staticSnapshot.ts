@@ -17,6 +17,10 @@ import type {
 
 export const isStaticSnapshot = import.meta.env.VITE_RA2EXP_STATIC_SNAPSHOT === "1";
 
+const externalSnapshotBase = (import.meta.env.VITE_RA2EXP_STATIC_CDN_BASE || "")
+  .trim()
+  .replace(/\/+$/, "");
+
 interface StaticAssetBundle {
   asset: Asset;
   metadata: AssetMetadata;
@@ -51,19 +55,41 @@ function publicUrl(path: string) {
   return `${base}${path.replace(/^\/+/, "")}`;
 }
 
-function snapshotUrl(path: string) {
+function localSnapshotUrl(path: string) {
   return publicUrl(`data/${path}`);
 }
 
+function isExternalSnapshotPath(path: string) {
+  const normalized = path.replace(/^\/+/, "");
+  return normalized === "manifest.json"
+    || normalized.startsWith("catalog/")
+    || normalized.startsWith("previews/entity-atlases/");
+}
+
+function snapshotUrl(path: string) {
+  const normalized = path.replace(/^\/+/, "");
+  return externalSnapshotBase && isExternalSnapshotPath(normalized)
+    ? `${externalSnapshotBase}/${normalized}`
+    : localSnapshotUrl(normalized);
+}
+
+async function fetchJson<T>(url: string) {
+  const response = await fetch(url, { cache: "force-cache" });
+  if (!response.ok) throw new Error(`静态资料载入失败（${response.status}）`);
+  return await response.json() as T;
+}
+
 function loadJson<T>(path: string): Promise<T> {
-  const url = snapshotUrl(path);
-  let pending = jsonCache.get(url) as Promise<T> | undefined;
+  let pending = jsonCache.get(path) as Promise<T> | undefined;
   if (!pending) {
-    pending = fetch(url, { cache: "force-cache" }).then(async (response) => {
-      if (!response.ok) throw new Error(`静态资料载入失败（${response.status}）`);
-      return await response.json() as T;
+    const primaryUrl = snapshotUrl(path);
+    const fallbackUrl = localSnapshotUrl(path);
+    pending = fetchJson<T>(primaryUrl).catch((primaryError: unknown) => {
+      if (primaryUrl === fallbackUrl) throw primaryError;
+      return fetchJson<T>(fallbackUrl);
     });
-    jsonCache.set(url, pending);
+    pending.catch(() => jsonCache.delete(path));
+    jsonCache.set(path, pending);
   }
   return pending;
 }
@@ -397,6 +423,10 @@ export function staticEntityPreviewUrl(
 
 export function staticEntityThumbnailAtlasUrl(path: string, facing: number) {
   return snapshotUrl(path.replace("{facing}", String(facing)));
+}
+
+export function staticEntityThumbnailAtlasFallbackUrl(path: string, facing: number) {
+  return localSnapshotUrl(path.replace("{facing}", String(facing)));
 }
 
 export function staticEntityModelUrl(entityId: string, frame = 0) {

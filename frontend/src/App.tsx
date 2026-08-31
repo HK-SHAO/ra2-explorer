@@ -3044,12 +3044,18 @@ function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle }: {
     ? Math.min(Math.max(0, requestedFacing), Math.max(0, atlas.facing_count - 1))
     : 0;
   const atlasUrl = atlas ? api.entityThumbnailAtlasUrl(atlas.path, atlasFacing) : "";
+  const atlasFallbackUrl = atlas ? api.entityThumbnailAtlasFallbackUrl(atlas.path, atlasFacing) : "";
+  const [readyAtlasUrl, setReadyAtlasUrl] = useState(atlasUrl);
   const atlasColumn = atlas ? atlas.index % atlas.columns : 0;
   const atlasRow = atlas ? Math.floor(atlas.index / atlas.columns) : 0;
   const url = entity.renderable && !atlas
     ? entityCardPreviewUrl(entity, sourceId, previewAngle, sourceRevision)
     : "";
   const [readyUrl, setReadyUrl] = useState(() => hasLoadedCardPreview(url) ? url : "");
+
+  useEffect(() => {
+    setReadyAtlasUrl(atlasUrl);
+  }, [atlasUrl]);
 
   useEffect(() => {
     if (!url) {
@@ -3090,9 +3096,11 @@ function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle }: {
         ? <span className="entity-thumbnail-atlas" aria-hidden="true" style={{
           width: atlas.cell_width,
           height: atlas.cell_height,
-          backgroundImage: `url("${atlasUrl}")`,
+          backgroundImage: `url("${readyAtlasUrl}")`,
           backgroundPosition: `${-atlasColumn * atlas.cell_width}px ${-atlasRow * atlas.cell_height}px`,
-        }} />
+        }}><img className="entity-thumbnail-atlas-probe" src={atlasUrl} alt="" aria-hidden="true" onError={() => {
+          if (atlasFallbackUrl && atlasFallbackUrl !== atlasUrl) setReadyAtlasUrl(atlasFallbackUrl);
+        }} /></span>
         : readyUrl && <img decoding="async" fetchPriority="low" src={readyUrl} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
       : <Icon name="unit" size={34} />}
     {entity.affiliation && <span className={`entity-affiliation-badge affiliation-${entity.affiliation.kind} affiliation-${affiliationClassId(entity.affiliation.id)}`} title={entity.affiliation.display_name}>

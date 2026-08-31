@@ -5,6 +5,7 @@ import {
   staticAudioUrl,
   staticEntityModelUrl,
   staticEntityPreviewUrl,
+  staticEntityThumbnailAtlasFallbackUrl,
   staticEntityThumbnailAtlasUrl,
   staticSnapshotRequest,
 } from "./staticSnapshot";
@@ -665,6 +666,9 @@ export const api = {
   },
   entityThumbnailAtlasUrl: (path: string, facing: number) => isStaticSnapshot
     ? staticEntityThumbnailAtlasUrl(path, facing)
+    : "",
+  entityThumbnailAtlasFallbackUrl: (path: string, facing: number) => isStaticSnapshot
+    ? staticEntityThumbnailAtlasFallbackUrl(path, facing)
     : "",
   entityModelUrl: (
     sourceId: string,

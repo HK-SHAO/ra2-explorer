@@ -1,10 +1,23 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
 function gitValue(args: string[]) {
   try {
     return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    return "";
+  }
+}
+
+function pagesCdnBase(mode: string, override: string | undefined) {
+  if (override?.trim()) return override.trim().replace(/\/+$/, "");
+  if (mode !== "pages") return "";
+  try {
+    const lockUrl = new URL("../packaging/pages-cdn.json", import.meta.url);
+    const lock = JSON.parse(readFileSync(lockUrl, "utf8")) as { base_url?: unknown };
+    return typeof lock.base_url === "string" ? lock.base_url.trim().replace(/\/+$/, "") : "";
   } catch {
     return "";
   }
@@ -25,6 +38,7 @@ export default defineConfig(({ mode }) => {
   const publicBase = env.RA2EXP_PUBLIC_BASE || "/";
   const normalizedBase = publicBase.endsWith("/") ? publicBase : `${publicBase}/`;
   const defaultAtlas = env.RA2EXP_DEFAULT_ATLAS?.replace(/^\/+/, "");
+  const staticCdnBase = pagesCdnBase(mode, env.RA2EXP_STATIC_CDN_BASE);
   const preloadPagesAtlas = {
     name: "preload-pages-unit-atlas",
     transformIndexHtml() {
@@ -35,7 +49,7 @@ export default defineConfig(({ mode }) => {
           rel: "preload",
           as: "image",
           type: "image/webp",
-          href: `${normalizedBase}data/${defaultAtlas}`,
+          href: staticCdnBase ? `${staticCdnBase}/${defaultAtlas}` : `${normalizedBase}data/${defaultAtlas}`,
         },
         injectTo: "head-prepend" as const,
       }];
@@ -52,6 +66,7 @@ export default defineConfig(({ mode }) => {
       "import.meta.env.VITE_RA2EXP_STABLE_AHEAD": JSON.stringify(env.VITE_RA2EXP_STABLE_AHEAD || stableAhead),
       "import.meta.env.VITE_RA2EXP_STABLE_BEHIND": JSON.stringify(env.VITE_RA2EXP_STABLE_BEHIND || stableBehind),
       "import.meta.env.VITE_RA2EXP_REPOSITORY_URL": JSON.stringify(repositoryUrl),
+      "import.meta.env.VITE_RA2EXP_STATIC_CDN_BASE": JSON.stringify(staticCdnBase),
     },
     build: {
       outDir: mode === "pages" ? "dist-pages" : "dist",
