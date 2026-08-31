@@ -22,6 +22,31 @@ class SnapshotPublishError(RuntimeError):
     pass
 
 
+def _configure_transfer_environment(*, platform: str | None = None) -> None:
+    """Prefer the reliable Windows uploader and keep non-interactive logs bounded."""
+    os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    if (platform or os.name) == "nt":
+        os.environ.pop("HF_XET_HIGH_PERFORMANCE", None)
+    else:
+        os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
+
+
+def _hub_error_detail(error: Exception) -> str:
+    response = getattr(error, "response", None)
+    status = getattr(response, "status_code", None)
+    request_id = getattr(error, "request_id", None)
+    server_message = str(getattr(error, "server_message", "") or "").strip()
+    parts = [type(error).__name__]
+    if status is not None:
+        parts.append(f"HTTP {status}")
+    if request_id:
+        parts.append(f"request {request_id}")
+    if server_message:
+        parts.append(server_message[:300].replace("\r", " ").replace("\n", " "))
+    return " · ".join(parts)
+
+
 def _load_env_file(path: Path) -> dict[str, str]:
     if not path.is_file():
         return {}
@@ -117,8 +142,7 @@ def publish_snapshot(
     auth_value: str,
     write_lock: Path | None,
 ) -> dict[str, object]:
-    os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
-    os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
+    _configure_transfer_environment()
     try:
         from huggingface_hub import CommitOperationAdd, HfApi
     except ImportError as error:
@@ -153,7 +177,7 @@ def publish_snapshot(
         )
     except Exception as error:
         raise SnapshotPublishError(
-            f"Hugging Face 发布失败：{type(error).__name__}"
+            f"Hugging Face 发布失败：{_hub_error_detail(error)}"
         ) from error
     if not commit.oid:
         raise SnapshotPublishError("Hugging Face 没有返回数据提交 ID")
