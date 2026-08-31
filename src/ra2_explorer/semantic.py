@@ -37,7 +37,7 @@ from ra2_explorer.storage import Database
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
 ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
 UNAFFILIATED_SIDE = "unaffiliated"
-SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v5",)
+SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v6",)
 _PLANNING_SIDE_IDS = ("GDI", "Nod", "ThirdSide")
 _TYPE_SECTIONS = {
     "vehicle": "VehicleTypes",

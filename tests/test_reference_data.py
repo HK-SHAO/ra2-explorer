@@ -78,6 +78,27 @@ def test_audio_transcript_can_load_supplement_without_workbook(tmp_path) -> None
     assert entries["s02_p01"]["original_text"] == "Destroy Einstein lab."
 
 
+def test_audio_transcript_merges_multiple_supplements(tmp_path) -> None:
+    mission_path = tmp_path / "mission.json"
+    mission_path.write_text(
+        '{"entries":{"A01_P01":{"original_text":"Mission briefing."}}}',
+        encoding="utf-8",
+    )
+    english_voice_path = tmp_path / "english-voice.json"
+    english_voice_path.write_text(
+        '{"entries":{"CEVAU06":{"original_text":"The V3 is a powerful long-range artillery weapon."}}}',
+        encoding="utf-8",
+    )
+
+    entries = load_audio_transcript(
+        tmp_path / "missing.xlsx",
+        supplement_paths=(mission_path, english_voice_path),
+    )
+
+    assert entries["a01_p01"]["original_text"] == "Mission briefing."
+    assert entries["cevau06"]["original_text"].startswith("The V3")
+
+
 def _audio_transcript_workbook() -> bytes:
     shared = ("File", "Line", "Unit", "Category", "Comments", "Faction")
     output = BytesIO()

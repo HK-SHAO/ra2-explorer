@@ -34,6 +34,10 @@ class Settings:
     def mission_audio_transcript_path(self) -> Path:
         return self.derived_root / "reference" / "mission-audio-transcript.json"
 
+    @property
+    def english_voice_transcript_path(self) -> Path:
+        return self.derived_root / "reference" / "english-voice-transcript.json"
+
     def prepare(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.derived_root.mkdir(parents=True, exist_ok=True)

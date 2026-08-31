@@ -114,7 +114,10 @@ class Services:
             self.reader,
             load_audio_transcript(
                 settings.audio_transcript_path,
-                supplement_paths=(settings.mission_audio_transcript_path,),
+                supplement_paths=(
+                    settings.mission_audio_transcript_path,
+                    settings.english_voice_transcript_path,
+                ),
             ),
         )
         self.video = VideoTranscoder(self.database, self.reader, self.derived)
