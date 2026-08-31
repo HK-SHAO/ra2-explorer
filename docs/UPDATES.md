@@ -10,11 +10,11 @@ RA2 Explorer 在 GitHub Releases 发布版本，并把同一安装包和签名�
 
 ## 维护者发布流程
 
-1. 完成功能与验证后同步更新 `pyproject.toml` 和 `src/ra2_explorer/__init__.py` 的版本号；
+1. 完成功能与验证后同步更新 `pyproject.toml`、`src/ra2_explorer/__init__.py`、`frontend/package.json` 和 lockfile 的版本号；
 2. 创建并推送对应的 `vX.Y.Z` Git tag；
 3. 在 GitHub 仓库配置 `HF_TOKEN_RELEASE` 和 `HF_SPACE_RELEASE_REPO` 两项 Actions secret；
 4. Release workflow 在 Windows 中重新测试、隐私扫描和构建 generic 本地 Web 应用；
-5. workflow 上传 ZIP、生成构建来源证明并创建 GitHub Release；GitHub Release 成功后，以同一 ZIP 生成固定路径、大小和 SHA-256 清单并同步到 Hugging Face；当前不会构建或启动 Space 运行时；
+5. workflow 上传 ZIP、生成构建来源证明并创建 GitHub Release；GitHub Release 成功后，以同一 ZIP 生成固定路径、大小和 SHA-256 清单并同步到 Hugging Face 文件仓库；
 6. 在仓库设置中为后续 Release 启用 immutability，锁定 tag 与资产。
 
 HF 同步始终通过官方写入端点完成，用户下载才使用 `https://hf-mirror.com`。版本 ZIP 与清单在同一提交中更新，不会先公布一个尚未上传完成的安装包。同步保留独立存放的 Pages 固定数据、历史完整资源分片与旧版 `releases/`。公共发行包只内嵌公开仓库标识和镜像地址，不包含 HF token、邮箱或本机配置。
