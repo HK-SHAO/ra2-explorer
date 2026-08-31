@@ -177,7 +177,7 @@ export interface UpdateInfo {
   release_url: string;
   published_at: string | null;
   notes: string;
-  provider: "huggingface" | "github";
+  provider: "github";
   asset: {
     name: string;
     size: number;

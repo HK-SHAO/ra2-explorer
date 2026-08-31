@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -112,23 +111,6 @@ def test_distribution_audit_rejects_internal_development_markdown(tmp_path: Path
 
     with pytest.raises(Ra2ExplorerError, match="开发文件"):
         audit_distribution(package)
-
-
-def test_distribution_audit_accepts_public_hf_update_channel(tmp_path: Path) -> None:
-    package = tmp_path / "package"
-    _minimal_distribution(package)
-    (package / "update-channel.json").write_text(
-        json.dumps(
-            {
-                "schema": 1,
-                "hf_space_repo": "example/ra2-explorer",
-                "hf_endpoint": "https://hf-mirror.com",
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    audit_distribution(package)
 
 
 def test_package_cli_requires_explicit_flag_to_copy_game_data() -> None:

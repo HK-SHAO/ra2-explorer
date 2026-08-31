@@ -4902,7 +4902,7 @@ function SettingsDialog({
               {updateError && <div className="settings-message error" role="alert">{updateError}</div>}
               {updateInfo && <div className={`settings-message ${updateInfo.update_available ? "available" : "current"}`}>
                 <strong>{updateInfo.update_available ? `发现 ${updateInfo.latest_version}` : "已经是最新版本"}</strong>
-                {updateInfo.asset && <span>{updateInfo.provider === "huggingface" ? "Hugging Face 镜像" : "GitHub 备用源"} · {formatBytes(updateInfo.asset.size)}{updateInfo.asset.digest ? ` · ${updateInfo.asset.digest}` : ""}</span>}
+                {updateInfo.asset && <span>GitHub Release · {formatBytes(updateInfo.asset.size)}{updateInfo.asset.digest ? ` · ${updateInfo.asset.digest}` : ""}</span>}
                 {updateInfo.notes && <p>{updateInfo.notes}</p>}
               </div>}
             </section>}

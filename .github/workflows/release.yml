@@ -14,10 +14,6 @@ permissions:
 jobs:
   windows-local-web-app:
     runs-on: windows-latest
-    env:
-      HF_RELEASE_CONFIGURED: ${{ secrets.HF_TOKEN_RELEASE != '' }}
-      HF_RELEASE_REPO_TYPE: dataset
-      HF_SPACE_RELEASE_REPO: rockstarengine/ra2-explorer-releases
     defaults:
       run:
         shell: cmd
@@ -55,8 +51,6 @@ jobs:
       - name: Build local web application
         id: package
         continue-on-error: true
-        env:
-          HF_ENDPOINT: https://hf-mirror.com
         run: scripts\build_windows.cmd > release-build.log 2>&1
       - name: Upload failed build diagnostics
         if: steps.package.outcome == 'failure'
@@ -87,17 +81,3 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create %GITHUB_REF_NAME% .outputs\RA2-Explorer-Web-x64.zip --verify-tag --generate-notes --title %GITHUB_REF_NAME%
-      - name: Read release notes
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release view %GITHUB_REF_NAME% --json body --jq .body > .outputs\release-notes.txt
-      - name: Synchronize Hugging Face release
-        if: startsWith(github.ref, 'refs/tags/') && env.HF_RELEASE_CONFIGURED == 'true'
-        env:
-          HF_ENDPOINT: https://hf-mirror.com
-          HF_TOKEN_RELEASE: ${{ secrets.HF_TOKEN_RELEASE }}
-        run: .venv\Scripts\python.exe scripts\publish_hf_release.py .outputs\RA2-Explorer-Web-x64.zip --version %GITHUB_REF_NAME% --notes-file .outputs\release-notes.txt --create-repository
-      - name: Report missing Hugging Face automation credentials
-        if: startsWith(github.ref, 'refs/tags/') && env.HF_RELEASE_CONFIGURED != 'true'
-        run: echo Hugging Face synchronization skipped because repository secrets are not configured.
