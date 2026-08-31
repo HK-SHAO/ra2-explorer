@@ -86,7 +86,10 @@ def test_audio_transcript_merges_multiple_supplements(tmp_path) -> None:
     )
     english_voice_path = tmp_path / "english-voice.json"
     english_voice_path.write_text(
-        '{"entries":{"CEVAU06":{"original_text":"The V3 is a powerful long-range artillery weapon."}}}',
+        (
+            '{"entries":{"CEVAU06":{"original_text":'
+            '"The V3 is a powerful long-range artillery weapon."}}}'
+        ),
         encoding="utf-8",
     )
 
