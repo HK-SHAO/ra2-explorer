@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import threading
 from functools import lru_cache
 from typing import Literal
@@ -65,8 +66,28 @@ def pinyin_search_match(query: str, *values: str | None) -> bool:
     return False
 
 
+def localized_mixed_search_match(query: str, *values: str | None) -> bool:
+    """Match every Chinese/Latin query segment across localized, English, ID, or pinyin values."""
+    terms = _search_terms(query)
+    searchable = tuple(value for value in values if value)
+    if not terms or not searchable:
+        return False
+    return all(
+        any(localized_fuzzy_search_match(term, value) for value in searchable)
+        or pinyin_search_match(term, *searchable)
+        for term in terms
+    )
+
+
 def _normalize_search_text(value: str) -> str:
     return "".join(character for character in value.casefold() if character.isalnum())
+
+
+def _search_terms(value: str) -> tuple[str, ...]:
+    return tuple(
+        match.group(0).casefold()
+        for match in re.finditer(r"[\u3400-\u9fff]+|[A-Za-z0-9]+", value)
+    )
 
 
 def _allows_fuzzy_match(value: str) -> bool:
@@ -119,6 +140,7 @@ __all__ = [
     "DEFAULT_GAME_LANGUAGE",
     "GameLanguage",
     "localized_fuzzy_search_match",
+    "localized_mixed_search_match",
     "localized_search_match",
     "localize_game_text",
     "pinyin_search_aliases",

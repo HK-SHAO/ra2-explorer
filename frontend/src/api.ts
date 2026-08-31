@@ -369,6 +369,10 @@ export interface MediaItem {
   countries: string[];
   sides: string[];
   description: string | null;
+  search_aliases?: {
+    pinyin_compact: string[];
+    pinyin_initials: string[];
+  };
 }
 
 export interface MediaPage {

@@ -1,6 +1,7 @@
 from ra2_explorer.localization import (
     localize_game_text,
     localized_fuzzy_search_match,
+    localized_mixed_search_match,
     localized_search_match,
     pinyin_search_aliases,
     pinyin_search_match,
@@ -31,3 +32,10 @@ def test_unit_names_expose_full_pinyin_and_initial_search_aliases() -> None:
     assert pinyin_search_match("cskjtb", "超时空军团兵")
     assert pinyin_search_match("hangmu", "航空母舰")
     assert not pinyin_search_match("hm", "航空发动机")
+
+
+def test_mixed_search_matches_each_script_segment_across_names_and_aliases() -> None:
+    assert localized_mixed_search_match("尤里 yuri", "尤里X", "Yuri Prime")
+    assert localized_mixed_search_match("航mu", "航空母舰")
+    assert localized_mixed_search_match("测试 bing", "測試步兵")
+    assert not localized_mixed_search_match("盟军 yuri", "尤里X", "Yuri Prime")

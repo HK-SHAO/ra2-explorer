@@ -84,6 +84,26 @@ function normalizeSearchText(value: string) {
   return [...value.toLocaleLowerCase()].filter((character) => /[\p{L}\p{N}]/u.test(character)).join("");
 }
 
+function searchQueryTokens(value: string) {
+  const tokens: string[] = [];
+  let current = "";
+  let currentKind: "han" | "other" | "" = "";
+  for (const character of value.toLocaleLowerCase()) {
+    if (!/[\p{L}\p{N}]/u.test(character)) {
+      if (current) tokens.push(current);
+      current = "";
+      currentKind = "";
+      continue;
+    }
+    const kind = /\p{Script=Han}/u.test(character) ? "han" : "other";
+    if (current && kind !== currentKind) tokens.push(current);
+    current = kind === currentKind ? `${current}${character}` : character;
+    currentKind = kind;
+  }
+  if (current) tokens.push(current);
+  return tokens;
+}
+
 function allowsFuzzyMatch(value: string) {
   return value.length >= (/\p{Script=Han}/u.test(value) ? 2 : 4);
 }
@@ -121,6 +141,39 @@ function fuzzyEntityMatch(query: string, item: EntityPage["items"][number] | und
     const haystack = normalizeSearchText(value);
     return haystack.length <= Math.max(64, needle.length * 8) && boundedSubsequence(needle, haystack);
   });
+}
+
+function entitySearchTokenMatch(token: string, item: EntityPage["items"][number] | undefined) {
+  return Boolean(item) && (searchText(item).includes(token) || fuzzyEntityMatch(token, item));
+}
+
+function mediaSearchValues(item: MediaItem) {
+  return [
+    item.asset.display_name,
+    item.description || "",
+    ...item.texts,
+    ...item.original_texts,
+    ...item.localized_texts,
+    ...item.events,
+    ...item.slots,
+    ...item.entities.flatMap((entity) => [entity.id, entity.display_name, entity.affiliation?.display_name || ""]),
+  ];
+}
+
+function mediaSearchTokenMatch(token: string, item: MediaItem | undefined) {
+  if (!item) return false;
+  if (searchText(item).includes(token)) return true;
+  const needle = normalizeSearchText(token);
+  if (allowsFuzzyMatch(needle) && mediaSearchValues(item).some((value) => {
+    const haystack = normalizeSearchText(value);
+    return haystack.length <= Math.max(64, needle.length * 8) && boundedSubsequence(needle, haystack);
+  })) return true;
+  if (!/^[a-z0-9]+$/i.test(needle) || needle.length < 2) return false;
+  return [
+    ...(item.search_aliases?.pinyin_compact || []),
+    ...(item.search_aliases?.pinyin_initials || []),
+  ].some((alias) => alias.includes(needle)
+    || (needle.length >= 4 && boundedSubsequence(needle, alias)));
 }
 
 function commaValues(params: URLSearchParams, key: string) {
@@ -167,14 +220,13 @@ async function filterEntities(params: URLSearchParams): Promise<EntityPage> {
   else if (kind) items = items.filter((item) => item.kind === kind);
   const query = params.get("q")?.trim().toLocaleLowerCase();
   if (query) {
+    const tokens = searchQueryTokens(query);
     const alternate = await entityCatalog(otherLanguage(language));
     const alternateById = new Map(alternate.items.map((item) => [item.id, item]));
-    items = items.filter((item) => (
-      searchText(item).includes(query)
-      || searchText(alternateById.get(item.id)).includes(query)
-      || fuzzyEntityMatch(query, item)
-      || fuzzyEntityMatch(query, alternateById.get(item.id))
-    ));
+    items = items.filter((item) => tokens.every((token) => (
+      entitySearchTokenMatch(token, item)
+      || entitySearchTokenMatch(token, alternateById.get(item.id))
+    )));
   }
   const usageCounts = countBy(items, (item) => [item.usage]);
   const usage = params.get("usage");
@@ -221,11 +273,13 @@ async function filterMedia(params: URLSearchParams): Promise<MediaPage> {
   if (group) items = items.filter((item) => item.groups.includes(group));
   const query = params.get("q")?.trim().toLocaleLowerCase();
   if (query) {
+    const tokens = searchQueryTokens(query);
     const alternate = await mediaCatalog(otherLanguage(language));
     const alternateById = new Map(alternate.items.map((item) => [item.asset.id, item]));
-    items = items.filter((item) => (
-      searchText(item).includes(query) || searchText(alternateById.get(item.asset.id)).includes(query)
-    ));
+    items = items.filter((item) => tokens.every((token) => (
+      mediaSearchTokenMatch(token, item)
+      || mediaSearchTokenMatch(token, alternateById.get(item.asset.id))
+    )));
   }
   const eventCounts = countBy(items, (item) => item.slots);
   const eventType = params.get("event_type");

@@ -29,10 +29,8 @@ from ra2_explorer.localization import (
     DEFAULT_GAME_LANGUAGE,
     GameLanguage,
     localize_game_text,
-    localized_fuzzy_search_match,
-    localized_search_match,
+    localized_mixed_search_match,
     pinyin_search_aliases,
-    pinyin_search_match,
 )
 from ra2_explorer.storage import Database
 
@@ -805,12 +803,12 @@ class SemanticLibrary:
             entities = [
                 entity
                 for entity in entities
-                if localized_search_match(query, _entity_search_text(entity))
-                or any(
-                    localized_fuzzy_search_match(query, value)
-                    for value in _entity_fuzzy_search_values(entity)
+                if localized_mixed_search_match(
+                    query,
+                    _entity_search_text(entity),
+                    *_entity_fuzzy_search_values(entity),
+                    *_entity_pinyin_search_values(entity),
                 )
-                or pinyin_search_match(query, *_entity_pinyin_search_values(entity))
             ]
         usage_counts = Counter(entity.usage for entity in entities)
         if usages:
@@ -895,7 +893,11 @@ class SemanticLibrary:
             items = [
                 item
                 for item in items
-                if localized_search_match(query, _media_search_text(item))
+                if localized_mixed_search_match(
+                    query,
+                    _media_search_text(item),
+                    *_media_pinyin_search_values(item),
+                )
             ]
         event_type_counts = Counter(
             str(slot)
@@ -3109,11 +3111,42 @@ def _media_search_text(item: dict[str, object]) -> str:
     ).casefold()
 
 
+def _media_pinyin_search_values(item: dict[str, object]) -> tuple[str, ...]:
+    entities = item["entities"]
+    return tuple(
+        str(value)
+        for value in (
+            item.get("description"),
+            *item["texts"],  # type: ignore[union-attr]
+            *item["localized_texts"],  # type: ignore[union-attr]
+            *(
+                entity["display_name"]
+                for entity in entities  # type: ignore[union-attr]
+            ),
+        )
+        if value
+    )
+
+
+def _media_search_aliases(item: dict[str, object]) -> dict[str, list[str]]:
+    compact: list[str] = []
+    initials: list[str] = []
+    for value in _media_pinyin_search_values(item):
+        aliases = pinyin_search_aliases(value)
+        if aliases is None:
+            continue
+        if aliases["pinyin_compact"] not in compact:
+            compact.append(aliases["pinyin_compact"])
+        if aliases["pinyin_initials"] not in initials:
+            initials.append(aliases["pinyin_initials"])
+    return {"pinyin_compact": compact, "pinyin_initials": initials}
+
+
 def _localized_media_item(
     item: dict[str, object], language: GameLanguage
 ) -> dict[str, object]:
     entities = item["entities"]
-    return {
+    localized = {
         **item,
         "description": localize_game_text(
             str(item["description"]) if item.get("description") is not None else None,
@@ -3132,6 +3165,7 @@ def _localized_media_item(
             for entity in entities  # type: ignore[union-attr]
         ],
     }
+    return {**localized, "search_aliases": _media_search_aliases(localized)}
 
 
 def _media_entity_affiliation_name(entity: dict[str, object]) -> str:

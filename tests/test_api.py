@@ -288,6 +288,13 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
         assert [item["id"] for item in pinyin_name_search.json()["items"]] == [
             "DemoInfantry"
         ]
+    mixed_name_search = client.get(
+        "/api/entities",
+        params={"source_id": source["id"], "q": "测试 bing"},
+    )
+    assert [item["id"] for item in mixed_name_search.json()["items"]] == [
+        "DemoInfantry"
+    ]
     assert client.get(
         "/api/entities",
         params={"source_id": source["id"], "language": "english"},
@@ -305,6 +312,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert media_items[0]["groups"] == ["unit_voice"]
     assert media_items[0]["original_texts"] == ["Ready for the test."]
     assert media_items[0]["localized_texts"] == ["准备测试。"]
+    assert "zhunbeiceshi" in media_items[0]["search_aliases"]["pinyin_compact"]
     assert {item["event_type"] for item in semantic_media.json()["event_types"]} >= {
         "select",
         "sound_event",
@@ -315,6 +323,10 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     )
     assert selected_media.status_code == 200
     assert selected_media.json()["total"] == 1
+    assert client.get(
+        "/api/media",
+        params={"source_id": source["id"], "kind": "voice", "q": "准备 ce shi"},
+    ).json()["total"] == 1
     assert client.get(
         "/api/media",
         params={"source_id": source["id"], "kind": "voice", "event_type": "move"},
