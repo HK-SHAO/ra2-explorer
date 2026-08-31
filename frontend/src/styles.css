@@ -602,6 +602,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .load-more:hover:not(:disabled) { border-color: #555a64; color: #eef0f2; }
 .load-more:disabled { opacity: .6; cursor: wait; }
 .entity-card-preview { height: 135px; }
+.entity-card { content-visibility: auto; contain-intrinsic-size: auto 174px; }
 .entity-card-preview.format-shp > img { padding: 8px 10px 15px; filter: drop-shadow(0 3px 5px rgba(0,0,0,.48)); }
 .entity-card-preview.missing { background: #15171b; }
 .entity-card .asset-card-copy { min-height: 38px; display: flex; align-items: center; justify-content: center; text-align: center; }

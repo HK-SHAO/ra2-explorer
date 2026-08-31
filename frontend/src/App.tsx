@@ -1110,12 +1110,17 @@ function ExplorerApp() {
   }
 
   function updateSidebarCollapsed(next: boolean) {
+    const resumeCardPreviews = pauseCardPreviewBackground();
     sidebarCollapsedRef.current = next;
     window.localStorage.setItem("ra2exp-sidebar-collapsed", String(next));
     const workspace = workspaceRef.current;
-    if (!workspace) return;
+    if (!workspace) {
+      resumeCardPreviews();
+      return;
+    }
     workspace.classList.toggle("sidebar-collapsed", next);
     workspace.style.setProperty("--sidebar-width", next ? "58px" : "224px");
+    window.requestAnimationFrame(() => window.requestAnimationFrame(resumeCardPreviews));
   }
 
   function clampDetailSize(value: number, placement: DetailPlacement, bounds: DOMRect, audioCompact = compactAudioDetail) {
@@ -1474,7 +1479,8 @@ function ExplorerApp() {
 
   useEffect(() => {
     if (view !== "assets" || !isMediaCategory || mediaItems.length === 0) return;
-    const urls = mediaItems.slice(0, 40).map((item) => api.mediaUrl(item.asset.id));
+    const preloadCount = isStaticSnapshot ? 12 : 4;
+    const urls = mediaItems.slice(0, preloadCount).map((item) => api.mediaUrl(item.asset.id));
     const timer = window.setTimeout(() => preloadAudioResourceGroup(urls), 80);
     return () => window.clearTimeout(timer);
   }, [view, isMediaCategory, mediaItems]);

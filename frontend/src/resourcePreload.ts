@@ -3,6 +3,7 @@ export type ResourcePriority = "foreground" | "background";
 interface ImageJob {
   url: string;
   priority: ResourcePriority;
+  batch: number;
   image: HTMLImageElement | null;
   resolve: (loaded: boolean) => void;
   promise: Promise<boolean>;
@@ -16,6 +17,7 @@ const retainedCardImageLimit = 96;
 const cardPreviewConcurrency = 6;
 let activeCardPreviews = 0;
 let backgroundPauseDepth = 0;
+let latestCardPreviewBatch = 0;
 
 function retainDecodedCard(url: string, image: HTMLImageElement) {
   retainedCardImages.delete(url);
@@ -58,7 +60,15 @@ function startCardPreview(job: ImageJob) {
 function drainCardPreviewQueue() {
   while (activeCardPreviews < cardPreviewConcurrency && cardPreviewQueue.length > 0) {
     const foregroundIndex = cardPreviewQueue.findIndex((job) => job.priority === "foreground");
-    const nextIndex = foregroundIndex >= 0 ? foregroundIndex : backgroundPauseDepth > 0 ? -1 : 0;
+    let nextIndex = foregroundIndex;
+    if (nextIndex < 0 && backgroundPauseDepth === 0) {
+      let newestBatch = -1;
+      for (let index = 0; index < cardPreviewQueue.length; index += 1) {
+        if (cardPreviewQueue[index].batch <= newestBatch) continue;
+        newestBatch = cardPreviewQueue[index].batch;
+        nextIndex = index;
+      }
+    }
     if (nextIndex < 0) return;
     const [job] = cardPreviewQueue.splice(nextIndex, 1);
     startCardPreview(job);
@@ -69,11 +79,12 @@ export function hasLoadedCardPreview(url: string) {
   return completedCardPreviews.has(url);
 }
 
-export function preloadCardPreview(url: string, priority: ResourcePriority = "background") {
+function enqueueCardPreview(url: string, priority: ResourcePriority, batch: number) {
   if (!url) return Promise.resolve(false);
   if (completedCardPreviews.has(url)) return Promise.resolve(true);
   const pending = pendingCardPreviews.get(url);
   if (pending) {
+    pending.batch = Math.max(pending.batch, batch);
     if (priority === "foreground" && pending.priority !== "foreground") {
       pending.priority = "foreground";
       if (pending.image) pending.image.fetchPriority = "high";
@@ -84,16 +95,21 @@ export function preloadCardPreview(url: string, priority: ResourcePriority = "ba
 
   let resolveJob: (loaded: boolean) => void = () => {};
   const promise = new Promise<boolean>((resolve) => { resolveJob = resolve; });
-  const job: ImageJob = { url, priority, image: null, resolve: resolveJob, promise };
+  const job: ImageJob = { url, priority, batch, image: null, resolve: resolveJob, promise };
   pendingCardPreviews.set(url, job);
   cardPreviewQueue.push(job);
   drainCardPreviewQueue();
   return promise;
 }
 
+export function preloadCardPreview(url: string, priority: ResourcePriority = "background") {
+  return enqueueCardPreview(url, priority, 0);
+}
+
 export function preloadCardPreviewGroup(urls: string[]) {
+  latestCardPreviewBatch += 1;
   for (const url of new Set(urls.filter(Boolean))) {
-    void preloadCardPreview(url, "background");
+    void enqueueCardPreview(url, "background", latestCardPreviewBatch);
   }
 }
 
