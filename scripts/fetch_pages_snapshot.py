@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import sys
+import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -18,6 +19,7 @@ EXPECTED_REPOSITORY = "Hansimov/ra2-explorer"
 CHUNK_SIZE = 1024 * 1024
 PROGRESS_BYTES = 8 * 1024 * 1024
 MAX_PARALLEL_DOWNLOADS = 4
+MAX_DOWNLOAD_ATTEMPTS = 4
 _PART_PATTERN = re.compile(r"^RA2-Explorer-Pages-Data\.zip\.part\d{2}$")
 
 
@@ -152,18 +154,37 @@ def _fetch_part(
         and _hash_file(destination) == expected_sha256
     ):
         return destination
-    _download_once(
-        _part_url(lock, part),
-        destination,
-        expected_bytes,
-        f"分片 {index}/{total}",
-    )
-    if destination.stat().st_size != expected_bytes:
-        raise SnapshotDownloadError(f"Pages 数据分片 {index} 大小不一致")
-    if _hash_file(destination) != expected_sha256:
-        destination.unlink(missing_ok=True)
-        raise SnapshotDownloadError(f"Pages 数据分片 {index} 摘要不一致")
-    return destination
+    url = _part_url(lock, part)
+    last_error: Exception | None = None
+    for attempt in range(1, MAX_DOWNLOAD_ATTEMPTS + 1):
+        try:
+            _download_once(
+                url,
+                destination,
+                expected_bytes,
+                f"分片 {index}/{total}",
+            )
+            if destination.stat().st_size != expected_bytes:
+                raise SnapshotDownloadError(f"Pages 数据分片 {index} 大小不一致")
+            if _hash_file(destination) != expected_sha256:
+                destination.unlink(missing_ok=True)
+                raise SnapshotDownloadError(f"Pages 数据分片 {index} 摘要不一致")
+            return destination
+        except (OSError, urllib.error.URLError, SnapshotDownloadError) as error:
+            last_error = error
+            if attempt == MAX_DOWNLOAD_ATTEMPTS:
+                break
+            delay = min(2 ** (attempt - 1), 8)
+            print(
+                f"[pages] 分片 {index}/{total} 下载失败，{delay} 秒后重试 "
+                f"({attempt}/{MAX_DOWNLOAD_ATTEMPTS})",
+                file=sys.stderr,
+                flush=True,
+            )
+            time.sleep(delay)
+    raise SnapshotDownloadError(
+        f"Pages 数据分片 {index} 下载失败：{type(last_error).__name__}"
+    ) from last_error
 
 
 def fetch_snapshot(lock_path: Path, output: Path) -> dict[str, object]:
