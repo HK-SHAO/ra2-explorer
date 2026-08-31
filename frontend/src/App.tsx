@@ -521,24 +521,41 @@ type PreviewAngle = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 const DEFAULT_PREVIEW_ANGLE: PreviewAngle = 1;
 const entitySortValues: EntitySort[] = ["cameo", "faction", "name_asc", "name_desc", "cost_asc", "cost_desc", "strength_asc", "strength_desc"];
 
-function staticBuildDescription(currentVersion: string) {
+function staticBuildInfo(currentVersion: string) {
   const tag = import.meta.env.VITE_RA2EXP_BUILD_TAG?.trim();
   const commit = import.meta.env.VITE_RA2EXP_BUILD_COMMIT?.trim();
   const timestamp = import.meta.env.VITE_RA2EXP_BUILD_TIME?.trim();
+  const stableTag = import.meta.env.VITE_RA2EXP_STABLE_TAG?.trim();
+  const ahead = Number.parseInt(import.meta.env.VITE_RA2EXP_STABLE_AHEAD || "", 10);
+  const behind = Number.parseInt(import.meta.env.VITE_RA2EXP_STABLE_BEHIND || "", 10);
+  const repositoryUrl = import.meta.env.VITE_RA2EXP_REPOSITORY_URL?.trim().replace(/\/$/, "");
   const revision = tag
     ? `稳定版 ${tag}`
     : commit
       ? `预览版 ${commit.slice(0, 8)}`
       : `本地版 v${currentVersion || "—"}`;
-  if (!timestamp) return revision;
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return revision;
-  const updated = new Intl.DateTimeFormat("zh-CN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    hour12: false,
-  }).format(date);
-  return `${revision} · 更新于 ${updated}`;
+  const commitUrl = commit && repositoryUrl ? `${repositoryUrl}/commit/${commit}` : "";
+  const stableDistance = stableTag && Number.isFinite(ahead) && Number.isFinite(behind)
+    ? ahead === 0 && behind === 0
+      ? `与最新稳定版 ${stableTag} 一致`
+      : ahead > 0 && behind === 0
+        ? `比最新稳定版 ${stableTag} 提前 ${ahead} 个提交`
+        : behind > 0 && ahead === 0
+          ? `比最新稳定版 ${stableTag} 落后 ${behind} 个提交`
+          : `与最新稳定版 ${stableTag} 分叉：提前 ${ahead}、落后 ${behind} 个提交`
+    : "";
+  let updated = "";
+  if (timestamp) {
+    const date = new Date(timestamp);
+    if (!Number.isNaN(date.getTime())) {
+      updated = new Intl.DateTimeFormat("zh-CN", {
+        dateStyle: "medium",
+        timeStyle: "short",
+        hour12: false,
+      }).format(date);
+    }
+  }
+  return { revision, commit, commitUrl, stableDistance, updated };
 }
 const previewAngleOptions: Array<{ value: PreviewAngle; label: string }> = [
   { value: 0, label: "正面" },
@@ -3974,6 +3991,7 @@ function SettingsDialog({
   const enabledSet = new Set(enabled);
   const available = formats.map((item) => item.format);
   const activeSource = sources.find((source) => source.id === selectedSourceId) || null;
+  const buildInfo = staticBuildInfo(currentVersion);
   function toggle(formatName: string) {
     onChange(enabledSet.has(formatName)
       ? enabled.filter((item) => item !== formatName)
@@ -4006,7 +4024,13 @@ function SettingsDialog({
           <div className="settings-content">
             {isStaticSnapshot && <div className="settings-build-info" role="status">
               <Icon name="info" size={17} />
-              <span><strong>精简网页版</strong><small>{staticBuildDescription(currentVersion)}</small></span>
+              <span><strong>精简网页版</strong><small className="settings-build-meta">
+                {buildInfo.commitUrl
+                  ? <a href={buildInfo.commitUrl} target="_blank" rel="noreferrer" title={buildInfo.commit}>{buildInfo.revision}</a>
+                  : <span>{buildInfo.revision}</span>}
+                {buildInfo.stableDistance && <span>· {buildInfo.stableDistance}</span>}
+                {buildInfo.updated && <span>· 更新于 {buildInfo.updated}</span>}
+              </small></span>
             </div>}
             <section className="settings-section" id="settings-display">
               <header><h3>显示</h3></header>

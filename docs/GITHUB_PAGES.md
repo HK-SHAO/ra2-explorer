@@ -72,7 +72,7 @@ npm run build:pages
 npm run preview:pages -- --host 127.0.0.1 --port 46131 --strictPort
 ```
 
-`.github\workflows\pages.yml` 在 `master` 的 Pages 前端、数据锁或部署脚本发生变化时运行，也支持手动触发。它使用官方 `configure-pages@v5`、`upload-pages-artifact@v4` 和 `deploy-pages@v4`；上传前会同时确认静态入口、前端 bundle 和数据清单存在，避免只发布数据目录。工作流会完整取回标签：当前提交正好对应 `v*` 标签时，设置正文顶部的信息栏显示稳定版标签；其他提交显示八位 commit，并始终显示该提交的更新时间。部署 job 具有 `pages: write` 与 `id-token: write`，并使用 `github-pages` environment。[GitHub 自定义 Pages workflow](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
+`.github\workflows\pages.yml` 在 `master` 的 Pages 前端、数据锁或部署脚本发生变化时运行，也会在推送 `v*` 稳定标签时重建，并支持手动触发。它使用官方 `configure-pages@v5`、`upload-pages-artifact@v4` 和 `deploy-pages@v4`；上传前会同时确认静态入口、前端 bundle 和数据清单存在，避免只发布数据目录。工作流会完整取回标签：当前提交正好对应 `v*` 标签时，设置正文顶部的信息栏显示稳定版标签；其他提交显示八位 commit。版本文字链接到对应的 GitHub commit，并显示该构建相对最新稳定标签提前或落后的提交数及提交时间。部署 job 具有 `pages: write` 与 `id-token: write`，并使用 `github-pages` environment。[GitHub 自定义 Pages workflow](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
 
 该工作流的 `run` shell 是 `cmd`。Runner 会把多行命令写入临时批处理，因此调用 `npm.cmd` 必须使用 `call npm ...` 返回父批处理；否则第一条 npm 命令成功后，后续构建命令不会执行。
 

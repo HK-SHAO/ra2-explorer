@@ -15,6 +15,13 @@ export default defineConfig(({ mode }) => {
   const buildCommit = env.VITE_RA2EXP_BUILD_COMMIT || gitValue(["rev-parse", "HEAD"]);
   const buildTag = env.VITE_RA2EXP_BUILD_TAG || gitValue(["describe", "--tags", "--exact-match", "--match", "v*", "HEAD"]);
   const buildTime = env.VITE_RA2EXP_BUILD_TIME || gitValue(["show", "-s", "--format=%cI", "HEAD"]);
+  const stableTag = env.VITE_RA2EXP_STABLE_TAG
+    || gitValue(["tag", "--list", "v*", "--sort=-v:refname"]).split(/\r?\n/, 1)[0]
+    || "";
+  const [stableBehind = "", stableAhead = ""] = stableTag
+    ? gitValue(["rev-list", "--left-right", "--count", `${stableTag}...HEAD`]).split(/\s+/)
+    : [];
+  const repositoryUrl = (env.VITE_RA2EXP_REPOSITORY_URL || "https://github.com/Hansimov/ra2-explorer").replace(/\/$/, "");
   return {
     base: env.RA2EXP_PUBLIC_BASE || "/",
     plugins: [react()],
@@ -22,6 +29,10 @@ export default defineConfig(({ mode }) => {
       "import.meta.env.VITE_RA2EXP_BUILD_COMMIT": JSON.stringify(buildCommit),
       "import.meta.env.VITE_RA2EXP_BUILD_TAG": JSON.stringify(buildTag),
       "import.meta.env.VITE_RA2EXP_BUILD_TIME": JSON.stringify(buildTime),
+      "import.meta.env.VITE_RA2EXP_STABLE_TAG": JSON.stringify(stableTag),
+      "import.meta.env.VITE_RA2EXP_STABLE_AHEAD": JSON.stringify(env.VITE_RA2EXP_STABLE_AHEAD || stableAhead),
+      "import.meta.env.VITE_RA2EXP_STABLE_BEHIND": JSON.stringify(env.VITE_RA2EXP_STABLE_BEHIND || stableBehind),
+      "import.meta.env.VITE_RA2EXP_REPOSITORY_URL": JSON.stringify(repositoryUrl),
     },
     build: {
       rollupOptions: {

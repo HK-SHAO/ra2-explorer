@@ -492,6 +492,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .settings-build-info span, .settings-build-info strong, .settings-build-info small { min-width: 0; display: block; }
 .settings-build-info strong { color: #d5d9df; font-size: 13px; }
 .settings-build-info small { margin-top: 3px; overflow: hidden; color: #858c97; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.settings-build-info .settings-build-meta { display: flex; flex-wrap: wrap; gap: 0 5px; white-space: normal; }
+.settings-build-info .settings-build-meta span, .settings-build-info .settings-build-meta a { display: inline; color: inherit; }
+.settings-build-info .settings-build-meta a { color: #9eafc3; text-decoration: none; }
+.settings-build-info .settings-build-meta a:hover { color: #d7e3f1; text-decoration: underline; }
 .settings-section { padding: 22px 0 2px; scroll-margin-top: 8px; }
 .settings-section + .settings-section { margin-top: 18px; border-top: 1px solid var(--line); }
 .settings-section > header { min-height: 28px; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
