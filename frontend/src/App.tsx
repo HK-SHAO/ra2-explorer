@@ -600,6 +600,7 @@ type BrowsingLocation = {
   entitySearchScope: EntitySearchScope;
   entitySearchKinds: EntityKind[];
   entitySearchUsages: EntityUsage[];
+  entitySearchSide: string;
   selectedAssetId: string;
   selectedEntityId: string;
   assetQuery: string;
@@ -664,6 +665,20 @@ function rememberedEntityUsages(value: unknown): EntityUsage[] {
 
 function entityUsageLabel(kind: EntityKind, usage: EntityUsage) {
   return entityUsageLabels[kind][usage] || usage;
+}
+
+function orderedSideFacets(facets: Array<{ id: string; count: number }>, selected: string) {
+  const result = [...facets];
+  if (selected && !result.some((side) => side.id === selected)) {
+    result.push({ id: selected, count: 0 });
+  }
+  return result.sort((left, right) => {
+    const known = Object.keys(sideLabels);
+    const leftIndex = known.indexOf(left.id);
+    const rightIndex = known.indexOf(right.id);
+    return (leftIndex < 0 ? 99 : leftIndex) - (rightIndex < 0 ? 99 : rightIndex)
+      || left.id.localeCompare(right.id);
+  });
 }
 
 function entityBodyStatusLabel(entity: EntitySummary) {
@@ -949,6 +964,9 @@ function ExplorerApp() {
   const [entitySearchUsages, setEntitySearchUsages] = useState<EntityUsage[]>(
     () => rememberedEntityUsages(rememberedLocation.entitySearchUsages),
   );
+  const [entitySearchSide, setEntitySearchSide] = useState(
+    rememberedLocation.entitySearchSide || "",
+  );
   const [entityUsage, setEntityUsage] = useState<EntityUsage | "">(
     entityUsageOrder.includes(rememberedLocation.entityUsage as EntityUsage)
       ? rememberedLocation.entityUsage as EntityUsage
@@ -1041,31 +1059,48 @@ function ExplorerApp() {
     ? [assetFormatTag]
     : categoryFormats;
   const assetFormatKey = assetFormats.join(",");
-  const entitySideFacets = useMemo(() => {
-    const facets = [...entitySides];
-    if (entitySide && !facets.some((side) => side.id === entitySide)) {
-      facets.push({ id: entitySide, count: 0 });
-    }
-    return facets.sort((left, right) => {
-      const known = Object.keys(sideLabels);
-      const leftIndex = known.indexOf(left.id);
-      const rightIndex = known.indexOf(right.id);
-      return (leftIndex < 0 ? 99 : leftIndex) - (rightIndex < 0 ? 99 : rightIndex)
-        || left.id.localeCompare(right.id);
-    });
-  }, [entitySides, entitySide]);
+  const entitySideFacets = useMemo(
+    () => orderedSideFacets(entitySides, entitySide),
+    [entitySides, entitySide],
+  );
+  const entitySearchSideFacets = useMemo(
+    () => orderedSideFacets(entitySides, entitySearchSide),
+    [entitySides, entitySearchSide],
+  );
+  const entitySearchActive = Boolean(entityQuery.trim());
   const visibleEntities = useMemo(
-    () => sortEntities(entities, entitySort, gameLanguage, entityBuildableFirst, entitySide),
-    [entities, entitySort, gameLanguage, entityBuildableFirst, entitySide],
+    () => sortEntities(
+      entities,
+      entitySort,
+      gameLanguage,
+      entityBuildableFirst,
+      entitySearchActive ? entitySearchSide : entitySide,
+    ),
+    [entities, entitySort, gameLanguage, entityBuildableFirst, entitySearchActive, entitySearchSide, entitySide],
   );
   const entitySearchKindKey = entitySearchKinds.join(",");
   const entitySearchUsageKey = entitySearchUsages.join(",");
-  const globalEntitySearchActive = entitySearchScope === "global" && (
-    Boolean(entityQuery.trim())
-    || entitySearchKinds.length !== entityKindOrder.length
-    || entitySearchUsages.length !== entityUsageOrder.length
-    || Boolean(entitySide)
+  const globalEntitySearchActive = entitySearchScope === "global" && entitySearchActive;
+  const currentEntitySearchActive = entitySearchScope === "current" && entitySearchActive;
+  const activeEntityKind = entityKind || "vehicle";
+  const validCurrentSearchUsages = entityUsageOrder.filter(
+    (usage) => Boolean(entityUsageLabels[activeEntityKind][usage]),
   );
+  const selectedCurrentSearchUsages = validCurrentSearchUsages.filter(
+    (usage) => entitySearchUsages.includes(usage),
+  );
+  const appliedCurrentSearchUsages = selectedCurrentSearchUsages.length > 0
+    ? selectedCurrentSearchUsages
+    : validCurrentSearchUsages;
+  const appliedEntityKind = globalEntitySearchActive ? "" : entityKind;
+  const appliedEntityKinds = globalEntitySearchActive ? entitySearchKinds : undefined;
+  const appliedEntityUsage = entitySearchActive ? "" : entityUsage;
+  const appliedEntityUsages = globalEntitySearchActive
+    ? entitySearchUsages
+    : currentEntitySearchActive ? appliedCurrentSearchUsages : undefined;
+  const appliedEntitySide = entitySearchActive ? entitySearchSide : entitySide;
+  const appliedEntityKindKey = appliedEntityKinds?.join(",") || "";
+  const appliedEntityUsageKey = appliedEntityUsages?.join(",") || "";
   const compactAudioDetail = view === "assets" && isMediaCategory;
   const detailSize = detailPlacement === "bottom"
     ? compactAudioDetail ? audioDetailBottomSize : detailBottomSize
@@ -1208,6 +1243,7 @@ function ExplorerApp() {
       entitySearchScope,
       entitySearchKinds,
       entitySearchUsages,
+      entitySearchSide,
       selectedAssetId: selectedId,
       selectedEntityId,
       assetQuery,
@@ -1220,7 +1256,7 @@ function ExplorerApp() {
     window.localStorage.setItem("ra2exp-browsing-location-v1", JSON.stringify(location));
   }, [
     loading, sourceId, view, assetCategory, assetFormatTag, mediaGroup, mediaEventType, entityKind, entityUsage,
-    entitySide, entitySearchScope, entitySearchKinds, entitySearchUsages, selectedId, selectedEntityId, assetQuery, entityQuery, assetSort,
+    entitySide, entitySearchScope, entitySearchKinds, entitySearchUsages, entitySearchSide, selectedId, selectedEntityId, assetQuery, entityQuery, assetSort,
     entitySort, entityBuildableFirst, mediaSort,
   ]);
 
@@ -1492,11 +1528,11 @@ function ExplorerApp() {
     const timer = window.setTimeout(() => {
       api.entities(sourceId, {
         query: entityQuery,
-        kind: globalEntitySearchActive ? "" : entityKind,
-        kinds: globalEntitySearchActive ? entitySearchKinds : undefined,
-        usage: globalEntitySearchActive ? "" : entityUsage,
-        usages: globalEntitySearchActive ? entitySearchUsages : undefined,
-        side: entitySide,
+        kind: appliedEntityKind,
+        kinds: appliedEntityKinds,
+        usage: appliedEntityUsage,
+        usages: appliedEntityUsages,
+        side: appliedEntitySide,
         language: gameLanguage,
       })
         .then((page) => {
@@ -1521,8 +1557,8 @@ function ExplorerApp() {
       window.clearTimeout(timer);
     };
   }, [
-    sourceId, sourceRevision, entityQuery, entityKind, entityUsage, entitySide, gameLanguage, view,
-    globalEntitySearchActive, entitySearchScope, entitySearchKindKey, entitySearchUsageKey,
+    sourceId, sourceRevision, entityQuery, appliedEntityKind, appliedEntityUsage, appliedEntitySide,
+    appliedEntityKindKey, appliedEntityUsageKey, gameLanguage, view,
   ]);
 
   useEffect(() => {
@@ -1896,8 +1932,6 @@ function ExplorerApp() {
               searchUsages={entitySearchUsages}
               setSearchUsages={setEntitySearchUsages}
               currentKind={entityKind || "vehicle"}
-              currentUsage={entityUsage}
-              setCurrentUsage={setEntityUsage}
               usageFacets={entityUsages}
               sort={entitySort}
               setSort={updateEntitySort}
@@ -1910,11 +1944,14 @@ function ExplorerApp() {
               sides={entitySideFacets}
               selectedSide={entitySide}
               setSelectedSide={setEntitySide}
+              searchSides={entitySearchSideFacets}
+              searchSide={entitySearchSide}
+              setSearchSide={setEntitySearchSide}
               layout={layout}
               setLayout={updateLayout}
               previewAngle={previewAngle}
               focusToken={entitySearchFocusToken}
-              scrollKey={`entities:${sourceId}:${entityKind}:${entityUsage}:${entitySide}:${entityQuery}:${entitySearchScope}:${entitySearchKindKey}:${entitySearchUsageKey}:${entitySort}:${entityBuildableFirst}:${layout}`}
+              scrollKey={`entities:${sourceId}:${entityKind}:${entityUsage}:${entitySide}:${entityQuery}:${entitySearchActive ? entitySearchScope : ""}:${entitySearchActive ? entitySearchKindKey : ""}:${entitySearchActive ? entitySearchUsageKey : ""}:${entitySearchActive ? entitySearchSide : ""}:${entitySort}:${entityBuildableFirst}:${layout}`}
             />
             <div className="workspace-resizer" role="separator" tabIndex={0} aria-label="调整详情区域大小" aria-orientation={detailPlacement === "bottom" ? "horizontal" : "vertical"} aria-valuenow={detailSize} onPointerDown={beginDetailResize} onKeyDown={resizeDetailWithKeyboard}><span /></div>
             <EntityDetailPanel
@@ -2166,7 +2203,7 @@ function entitySuggestionScore(entity: EntitySummary, query: string) {
   })()) ? 5 : Number.POSITIVE_INFINITY;
 }
 
-function EntityListPanel({ entities, total, loading, query, setQuery, searchScope, setSearchScope, searchKinds, setSearchKinds, searchUsages, setSearchUsages, currentKind, currentUsage, setCurrentUsage, usageFacets, sort, setSort, buildableFirst, setBuildableFirst, selectedId, setSelectedId, sourceId, sourceRevision, sides, selectedSide, setSelectedSide, layout, setLayout, previewAngle, focusToken, scrollKey }: {
+function EntityListPanel({ entities, total, loading, query, setQuery, searchScope, setSearchScope, searchKinds, setSearchKinds, searchUsages, setSearchUsages, currentKind, usageFacets, sort, setSort, buildableFirst, setBuildableFirst, selectedId, setSelectedId, sourceId, sourceRevision, sides, selectedSide, setSelectedSide, searchSides, searchSide, setSearchSide, layout, setLayout, previewAngle, focusToken, scrollKey }: {
   entities: EntitySummary[];
   total: number;
   loading: boolean;
@@ -2179,8 +2216,6 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
   searchUsages: EntityUsage[];
   setSearchUsages: (value: EntityUsage[]) => void;
   currentKind: EntityKind;
-  currentUsage: EntityUsage | "";
-  setCurrentUsage: (value: EntityUsage | "") => void;
   usageFacets: Array<{ usage: EntityUsage; count: number }>;
   sort: EntitySort;
   setSort: (value: EntitySort) => void;
@@ -2193,6 +2228,9 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
   sides: Array<{ id: string; count: number }>;
   selectedSide: string;
   setSelectedSide: (value: string) => void;
+  searchSides: Array<{ id: string; count: number }>;
+  searchSide: string;
+  setSearchSide: (value: string) => void;
   layout: LayoutMode;
   setLayout: (layout: LayoutMode) => void;
   previewAngle: PreviewAngle;
@@ -2210,15 +2248,21 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
     .slice(0, 8)
     .map((item) => item.entity), [entities, loading, query]);
   const suggestionsVisible = searchOpen && Boolean(query.trim()) && suggestions.length > 0;
-  const currentUsageOptions = entityUsageOrder.filter((usage) => {
-    if (!entityUsageLabels[currentKind][usage]) return false;
-    return usage === currentUsage || usageFacets.some((facet) => facet.usage === usage && facet.count > 0);
-  });
-  const activeSearchFilterCount = searchScope === "global"
+  const currentUsageOptions = entityUsageOrder.filter(
+    (usage) => Boolean(entityUsageLabels[currentKind][usage]),
+  );
+  const selectedCurrentSearchUsages = currentUsageOptions.filter(
+    (usage) => searchUsages.includes(usage),
+  );
+  const effectiveCurrentSearchUsages = selectedCurrentSearchUsages.length > 0
+    ? selectedCurrentSearchUsages
+    : currentUsageOptions;
+  const activeSearchCategoryCount = searchScope === "global"
     ? Number(searchKinds.length !== entityKindOrder.length)
       + Number(searchUsages.length !== entityUsageOrder.length)
-      + Number(Boolean(selectedSide))
-    : Number(Boolean(currentUsage)) + Number(Boolean(selectedSide));
+      + Number(Boolean(searchSide))
+    : Number(effectiveCurrentSearchUsages.length !== currentUsageOptions.length)
+      + Number(Boolean(searchSide));
   useEffect(() => setSuggestionIndex(0), [query, suggestions[0]?.id]);
   useEffect(() => {
     if (focusToken <= 0) return;
@@ -2256,8 +2300,12 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
     if (next.length > 0) setSearchKinds(next);
   }
   function toggleSearchUsage(usage: EntityUsage, checked: boolean) {
-    const next = entityUsageOrder.filter((value) => value === usage ? checked : searchUsages.includes(value));
-    if (next.length > 0) setSearchUsages(next);
+    const selected = searchScope === "current"
+      ? entityUsageOrder.filter((value) => searchUsages.includes(value) || effectiveCurrentSearchUsages.includes(value))
+      : searchUsages;
+    const next = entityUsageOrder.filter((value) => value === usage ? checked : selected.includes(value));
+    const required = searchScope === "current" ? currentUsageOptions : entityUsageOrder;
+    if (next.some((value) => required.includes(value))) setSearchUsages(next);
   }
   return (
     <section className="asset-panel entity-panel panel">
@@ -2269,13 +2317,13 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
               <button type="button" className={searchScope === "current" ? "active" : ""} aria-pressed={searchScope === "current"} onClick={() => setSearchScope("current")}>当前</button>
             </div>
             <details className="entity-search-filter">
-              <summary><Icon name="filter" size={15} /><span>筛选</span>{activeSearchFilterCount > 0 && <em>{activeSearchFilterCount}</em>}</summary>
+              <summary><Icon name="filter" size={15} /><span>分类</span>{activeSearchCategoryCount > 0 && <em>{activeSearchCategoryCount}</em>}</summary>
               <div className={`entity-search-filter-popover ${searchScope}`}>
                 {searchScope === "global" ? <>
                   <section><header><strong>单位类型</strong><button type="button" onClick={() => setSearchKinds([...entityKindOrder])}>全选</button></header>{entityKindOrder.map((kind) => <label key={kind}><input type="checkbox" checked={searchKinds.includes(kind)} onChange={(event) => toggleSearchKind(kind, event.target.checked)} /><Icon name={entityKindIcons[kind]} size={15} /><span>{entityKindLabels[kind]}</span></label>)}</section>
                   <section><header><strong>单位用途</strong><button type="button" onClick={() => setSearchUsages([...entityUsageOrder])}>全选</button></header>{entityUsageOrder.map((usage) => <label key={usage}><input type="checkbox" checked={searchUsages.includes(usage)} onChange={(event) => toggleSearchUsage(usage, event.target.checked)} /><span>{entitySearchUsageLabels[usage]}</span></label>)}</section>
-                </> : <section><header><strong>{entityKindLabels[currentKind]}分类</strong><button type="button" onClick={() => setCurrentUsage("")}>不限</button></header><label><input type="radio" name="current-entity-usage" checked={!currentUsage} onChange={() => setCurrentUsage("")} /><span>全部{entityKindLabels[currentKind]}</span></label>{currentUsageOptions.map((usage) => <label key={usage}><input type="radio" name="current-entity-usage" checked={currentUsage === usage} onChange={() => setCurrentUsage(usage)} /><span>{entityUsageLabel(currentKind, usage)}</span><em>{usageFacets.find((facet) => facet.usage === usage)?.count || 0}</em></label>)}</section>}
-                <section><header><strong>阵营</strong><button type="button" onClick={() => setSelectedSide("")}>不限</button></header><label><input type="radio" name="entity-side" checked={!selectedSide} onChange={() => setSelectedSide("")} /><span>不限阵营</span></label>{sides.map((side) => <label key={side.id}><input type="radio" name="entity-side" checked={selectedSide === side.id} onChange={() => setSelectedSide(side.id)} /><span>{sideLabels[side.id] || side.id}</span><em>{side.count}</em></label>)}</section>
+                </> : <section><header><strong>{entityKindLabels[currentKind]}分类</strong><button type="button" onClick={() => setSearchUsages(entityUsageOrder.filter((usage) => searchUsages.includes(usage) || currentUsageOptions.includes(usage)))}>全选</button></header>{currentUsageOptions.map((usage) => <label key={usage}><input type="checkbox" checked={effectiveCurrentSearchUsages.includes(usage)} onChange={(event) => toggleSearchUsage(usage, event.target.checked)} /><span>{entityUsageLabel(currentKind, usage)}</span><em>{usageFacets.find((facet) => facet.usage === usage)?.count || 0}</em></label>)}</section>}
+                <section><header><strong>阵营</strong><button type="button" onClick={() => setSearchSide("")}>不限</button></header><label><input type="radio" name="entity-search-side" checked={!searchSide} onChange={() => setSearchSide("")} /><span>不限阵营</span></label>{searchSides.map((side) => <label key={side.id}><input type="radio" name="entity-search-side" checked={searchSide === side.id} onChange={() => setSearchSide(side.id)} /><span>{sideLabels[side.id] || side.id}</span><em>{side.count}</em></label>)}</section>
               </div>
             </details>
           </div>
@@ -2289,7 +2337,10 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
         <span className="result-count">显示 {entities.length} / {total}</span>
         <LayoutToggle layout={layout} onChange={setLayout} />
       </div>
-      <div className="filter-strip entity-sort-strip">
+      <div className="filter-strip">
+        <div className="tag-filter entity-browse-filter" role="group" aria-label="按阵营筛选当前列表">
+          {sides.map((side) => <button key={side.id} className={selectedSide === side.id ? "active" : ""} onClick={() => setSelectedSide(selectedSide === side.id ? "" : side.id)}>{sideLabels[side.id] || side.id}<em>{side.count}</em></button>)}
+        </div>
         <div className="media-filter-actions entity-filter-actions">
           <label className="group-toggle"><input type="checkbox" checked={buildableFirst} onChange={(event) => setBuildableFirst(event.target.checked)} /><span>可建造优先</span></label>
           <label className="sort-control"><span>排序</span><select value={sort} onChange={(event) => setSort(event.target.value as EntitySort)}>
@@ -2315,7 +2366,16 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
           </button>
         )) : entities.map((entity) => <EntityGridCard key={entity.id} entity={entity} sourceId={sourceId} sourceRevision={sourceRevision} previewAngle={previewAngle} selected={selectedId === entity.id} onSelect={setSelectedId} />)}
         {loading && entities.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在解析规则实体…</strong></div>}
-        {!loading && entities.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的单位</strong><button onClick={() => { setQuery(""); setSelectedSide(""); setCurrentUsage(""); setSearchKinds([...entityKindOrder]); setSearchUsages([...entityUsageOrder]); }}>清除筛选</button></div>}
+        {!loading && entities.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的单位</strong><button onClick={() => {
+          if (query.trim()) {
+            setQuery("");
+            setSearchSide("");
+            setSearchKinds([...entityKindOrder]);
+            setSearchUsages([...entityUsageOrder]);
+          } else {
+            setSelectedSide("");
+          }
+        }}>{query.trim() ? "清除搜索" : "清除筛选"}</button></div>}
       </div>
     </section>
   );
