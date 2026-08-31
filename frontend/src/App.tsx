@@ -925,6 +925,7 @@ function ExplorerApp() {
   const [entitySearchScope, setEntitySearchScope] = useState<EntitySearchScope>(
     rememberedLocation.entitySearchScope === "current" ? "current" : "global",
   );
+  const [entitySearchFocusToken, setEntitySearchFocusToken] = useState(0);
   const [entitySearchKinds, setEntitySearchKinds] = useState<EntityKind[]>(
     () => rememberedEntityKinds(rememberedLocation.entitySearchKinds),
   );
@@ -1040,9 +1041,14 @@ function ExplorerApp() {
     () => sortEntities(entities, entitySort, gameLanguage, entityBuildableFirst, entitySide),
     [entities, entitySort, gameLanguage, entityBuildableFirst, entitySide],
   );
-  const globalEntitySearchActive = entitySearchScope === "global" && Boolean(entityQuery.trim());
   const entitySearchKindKey = entitySearchKinds.join(",");
   const entitySearchUsageKey = entitySearchUsages.join(",");
+  const globalEntitySearchActive = entitySearchScope === "global" && (
+    Boolean(entityQuery.trim())
+    || entitySearchKinds.length !== entityKindOrder.length
+    || entitySearchUsages.length !== entityUsageOrder.length
+    || Boolean(entitySide)
+  );
   const compactAudioDetail = view === "assets" && isMediaCategory;
   const detailSize = detailPlacement === "bottom"
     ? compactAudioDetail ? audioDetailBottomSize : detailBottomSize
@@ -1322,6 +1328,19 @@ function ExplorerApp() {
 
   useEffect(() => {
     if (!isStaticSnapshot && storedAutomaticUpdateCheck()) void checkLatestUpdate();
+  }, []);
+
+  useEffect(() => {
+    const focusEntitySearch = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLocaleLowerCase() !== "k") return;
+      event.preventDefault();
+      pauseAudioAsset();
+      setView("entities");
+      setEntitySearchScope("global");
+      setEntitySearchFocusToken((current) => current + 1);
+    };
+    window.addEventListener("keydown", focusEntitySearch);
+    return () => window.removeEventListener("keydown", focusEntitySearch);
   }, []);
 
   useEffect(() => subscribeAudioPlayback(() => {
@@ -1853,6 +1872,10 @@ function ExplorerApp() {
               setSearchKinds={setEntitySearchKinds}
               searchUsages={entitySearchUsages}
               setSearchUsages={setEntitySearchUsages}
+              currentKind={entityKind || "vehicle"}
+              currentUsage={entityUsage}
+              setCurrentUsage={setEntityUsage}
+              usageFacets={entityUsages}
               sort={entitySort}
               setSort={updateEntitySort}
               buildableFirst={entityBuildableFirst}
@@ -1867,6 +1890,7 @@ function ExplorerApp() {
               layout={layout}
               setLayout={updateLayout}
               previewAngle={previewAngle}
+              focusToken={entitySearchFocusToken}
               scrollKey={`entities:${sourceId}:${entityKind}:${entityUsage}:${entitySide}:${entityQuery}:${entitySearchScope}:${entitySearchKindKey}:${entitySearchUsageKey}:${entitySort}:${entityBuildableFirst}:${layout}`}
             />
             <div className="workspace-resizer" role="separator" tabIndex={0} aria-label="调整详情区域大小" aria-orientation={detailPlacement === "bottom" ? "horizontal" : "vertical"} aria-valuenow={detailSize} onPointerDown={beginDetailResize} onKeyDown={resizeDetailWithKeyboard}><span /></div>
@@ -2119,7 +2143,7 @@ function entitySuggestionScore(entity: EntitySummary, query: string) {
   })()) ? 5 : Number.POSITIVE_INFINITY;
 }
 
-function EntityListPanel({ entities, total, loading, query, setQuery, searchScope, setSearchScope, searchKinds, setSearchKinds, searchUsages, setSearchUsages, sort, setSort, buildableFirst, setBuildableFirst, selectedId, setSelectedId, sourceId, sourceRevision, sides, selectedSide, setSelectedSide, layout, setLayout, previewAngle, scrollKey }: {
+function EntityListPanel({ entities, total, loading, query, setQuery, searchScope, setSearchScope, searchKinds, setSearchKinds, searchUsages, setSearchUsages, currentKind, currentUsage, setCurrentUsage, usageFacets, sort, setSort, buildableFirst, setBuildableFirst, selectedId, setSelectedId, sourceId, sourceRevision, sides, selectedSide, setSelectedSide, layout, setLayout, previewAngle, focusToken, scrollKey }: {
   entities: EntitySummary[];
   total: number;
   loading: boolean;
@@ -2131,6 +2155,10 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
   setSearchKinds: (value: EntityKind[]) => void;
   searchUsages: EntityUsage[];
   setSearchUsages: (value: EntityUsage[]) => void;
+  currentKind: EntityKind;
+  currentUsage: EntityUsage | "";
+  setCurrentUsage: (value: EntityUsage | "") => void;
+  usageFacets: Array<{ usage: EntityUsage; count: number }>;
   sort: EntitySort;
   setSort: (value: EntitySort) => void;
   buildableFirst: boolean;
@@ -2145,9 +2173,11 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
   layout: LayoutMode;
   setLayout: (layout: LayoutMode) => void;
   previewAngle: PreviewAngle;
+  focusToken: number;
   scrollKey: string;
 }) {
   const listScroll = useRememberedScroll(scrollKey, entities.length);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const suggestions = useMemo(() => entities
@@ -2157,7 +2187,22 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
     .slice(0, 8)
     .map((item) => item.entity), [entities, loading, query]);
   const suggestionsVisible = searchOpen && Boolean(query.trim()) && suggestions.length > 0;
+  const currentUsageOptions = entityUsageOrder.filter((usage) => {
+    if (!entityUsageLabels[currentKind][usage]) return false;
+    return usage === currentUsage || usageFacets.some((facet) => facet.usage === usage && facet.count > 0);
+  });
+  const activeSearchFilterCount = searchScope === "global"
+    ? Number(searchKinds.length !== entityKindOrder.length)
+      + Number(searchUsages.length !== entityUsageOrder.length)
+      + Number(Boolean(selectedSide))
+    : Number(Boolean(currentUsage)) + Number(Boolean(selectedSide));
   useEffect(() => setSuggestionIndex(0), [query, suggestions[0]?.id]);
+  useEffect(() => {
+    if (focusToken <= 0) return;
+    searchInputRef.current?.focus();
+    searchInputRef.current?.select();
+    setSearchOpen(Boolean(query.trim()));
+  }, [focusToken]);
 
   function selectSuggestion(entity: EntitySummary) {
     setQuery(entity.display_name);
@@ -2195,33 +2240,33 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
     <section className="asset-panel entity-panel panel">
       <div className="asset-toolbar">
         <div className="entity-search-cluster" role="search">
-          <div className="entity-search-input">
-            <div className="search-box entity-search-box"><Icon name="search" /><input value={query} onFocus={() => setSearchOpen(true)} onBlur={() => setSearchOpen(false)} onKeyDown={handleSearchKeyDown} onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }} placeholder={searchScope === "global" ? "搜索全部单位、英文或拼音…" : "搜索当前分类、英文或拼音…"} aria-label="搜索单位" role="combobox" aria-autocomplete="list" aria-expanded={suggestionsVisible} aria-controls="entity-search-suggestions" aria-activedescendant={suggestionsVisible ? `entity-suggestion-${suggestions[suggestionIndex]?.id}` : undefined} />{query && <button type="button" onClick={() => { setQuery(""); setSearchOpen(false); }} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</div>
-            {suggestionsVisible && <div className="entity-search-suggestions" id="entity-search-suggestions" role="listbox" aria-label="单位搜索建议" onMouseDown={(event) => event.preventDefault()}>
-              {suggestions.map((entity, index) => <button id={`entity-suggestion-${entity.id}`} type="button" role="option" aria-selected={index === suggestionIndex} className={index === suggestionIndex ? "active" : ""} key={entity.id} onMouseEnter={() => setSuggestionIndex(index)} onClick={() => selectSuggestion(entity)}><span><strong>{entity.display_name}</strong><small>{entity.internal_name}</small></span>{entity.search_aliases && <em>{entity.search_aliases.pinyin} · {entity.search_aliases.pinyin_initials}</em>}</button>)}
-            </div>}
-          </div>
           <div className="entity-search-options">
             <div className="entity-search-scope" role="group" aria-label="单位搜索范围">
               <button type="button" className={searchScope === "global" ? "active" : ""} aria-pressed={searchScope === "global"} onClick={() => setSearchScope("global")}>全局</button>
               <button type="button" className={searchScope === "current" ? "active" : ""} aria-pressed={searchScope === "current"} onClick={() => setSearchScope("current")}>当前</button>
             </div>
-            {searchScope === "global" && <details className="entity-search-filter">
-              <summary><Icon name="filter" size={15} /><span>筛选</span><em>{searchKinds.length + searchUsages.length}/9</em></summary>
-              <div className="entity-search-filter-popover">
-                <section><header><strong>单位类型</strong><button type="button" onClick={() => setSearchKinds([...entityKindOrder])}>全选</button></header>{entityKindOrder.map((kind) => <label key={kind}><input type="checkbox" checked={searchKinds.includes(kind)} onChange={(event) => toggleSearchKind(kind, event.target.checked)} /><Icon name={entityKindIcons[kind]} size={15} /><span>{entityKindLabels[kind]}</span></label>)}</section>
-                <section><header><strong>单位用途</strong><button type="button" onClick={() => setSearchUsages([...entityUsageOrder])}>全选</button></header>{entityUsageOrder.map((usage) => <label key={usage}><input type="checkbox" checked={searchUsages.includes(usage)} onChange={(event) => toggleSearchUsage(usage, event.target.checked)} /><span>{entitySearchUsageLabels[usage]}</span></label>)}</section>
+            <details className="entity-search-filter">
+              <summary><Icon name="filter" size={15} /><span>筛选</span>{activeSearchFilterCount > 0 && <em>{activeSearchFilterCount}</em>}</summary>
+              <div className={`entity-search-filter-popover ${searchScope}`}>
+                {searchScope === "global" ? <>
+                  <section><header><strong>单位类型</strong><button type="button" onClick={() => setSearchKinds([...entityKindOrder])}>全选</button></header>{entityKindOrder.map((kind) => <label key={kind}><input type="checkbox" checked={searchKinds.includes(kind)} onChange={(event) => toggleSearchKind(kind, event.target.checked)} /><Icon name={entityKindIcons[kind]} size={15} /><span>{entityKindLabels[kind]}</span></label>)}</section>
+                  <section><header><strong>单位用途</strong><button type="button" onClick={() => setSearchUsages([...entityUsageOrder])}>全选</button></header>{entityUsageOrder.map((usage) => <label key={usage}><input type="checkbox" checked={searchUsages.includes(usage)} onChange={(event) => toggleSearchUsage(usage, event.target.checked)} /><span>{entitySearchUsageLabels[usage]}</span></label>)}</section>
+                </> : <section><header><strong>{entityKindLabels[currentKind]}分类</strong><button type="button" onClick={() => setCurrentUsage("")}>不限</button></header><label><input type="radio" name="current-entity-usage" checked={!currentUsage} onChange={() => setCurrentUsage("")} /><span>全部{entityKindLabels[currentKind]}</span></label>{currentUsageOptions.map((usage) => <label key={usage}><input type="radio" name="current-entity-usage" checked={currentUsage === usage} onChange={() => setCurrentUsage(usage)} /><span>{entityUsageLabel(currentKind, usage)}</span><em>{usageFacets.find((facet) => facet.usage === usage)?.count || 0}</em></label>)}</section>}
+                <section><header><strong>阵营</strong><button type="button" onClick={() => setSelectedSide("")}>不限</button></header><label><input type="radio" name="entity-side" checked={!selectedSide} onChange={() => setSelectedSide("")} /><span>不限阵营</span></label>{sides.map((side) => <label key={side.id}><input type="radio" name="entity-side" checked={selectedSide === side.id} onChange={() => setSelectedSide(side.id)} /><span>{sideLabels[side.id] || side.id}</span><em>{side.count}</em></label>)}</section>
               </div>
-            </details>}
+            </details>
+          </div>
+          <div className="entity-search-input">
+            <div className="search-box entity-search-box"><Icon name="search" /><input ref={searchInputRef} value={query} onFocus={() => setSearchOpen(true)} onBlur={() => setSearchOpen(false)} onKeyDown={handleSearchKeyDown} onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }} placeholder={searchScope === "global" ? "搜索全部单位、英文或拼音… Ctrl+K" : "搜索当前分类、英文或拼音… Ctrl+K"} aria-label="搜索单位" role="combobox" aria-autocomplete="list" aria-expanded={suggestionsVisible} aria-controls="entity-search-suggestions" aria-activedescendant={suggestionsVisible ? `entity-suggestion-${suggestions[suggestionIndex]?.id}` : undefined} />{query && <button type="button" onClick={() => { setQuery(""); setSearchOpen(false); }} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</div>
+            {suggestionsVisible && <div className="entity-search-suggestions" id="entity-search-suggestions" role="listbox" aria-label="单位搜索建议" onMouseDown={(event) => event.preventDefault()}>
+              {suggestions.map((entity, index) => <button id={`entity-suggestion-${entity.id}`} type="button" role="option" aria-selected={index === suggestionIndex} className={index === suggestionIndex ? "active" : ""} key={entity.id} onMouseEnter={() => setSuggestionIndex(index)} onClick={() => selectSuggestion(entity)}><span><strong>{entity.display_name}</strong><small>{entity.internal_name}</small></span>{entity.search_aliases && <em>{entity.search_aliases.pinyin} · {entity.search_aliases.pinyin_initials}</em>}</button>)}
+            </div>}
           </div>
         </div>
         <span className="result-count">显示 {entities.length} / {total}</span>
         <LayoutToggle layout={layout} onChange={setLayout} />
       </div>
-      <div className="filter-strip">
-        <div className="tag-filter" role="group" aria-label="按阵营筛选">
-          {sides.map((side) => <button key={side.id} className={selectedSide === side.id ? "active" : ""} onClick={() => setSelectedSide(selectedSide === side.id ? "" : side.id)}>{sideLabels[side.id] || side.id}<em>{side.count}</em></button>)}
-        </div>
+      <div className="filter-strip entity-sort-strip">
         <div className="media-filter-actions entity-filter-actions">
           <label className="group-toggle"><input type="checkbox" checked={buildableFirst} onChange={(event) => setBuildableFirst(event.target.checked)} /><span>可建造优先</span></label>
           <label className="sort-control"><span>排序</span><select value={sort} onChange={(event) => setSort(event.target.value as EntitySort)}>
@@ -2247,7 +2292,7 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
           </button>
         )) : entities.map((entity) => <EntityGridCard key={entity.id} entity={entity} sourceId={sourceId} sourceRevision={sourceRevision} previewAngle={previewAngle} selected={selectedId === entity.id} onSelect={setSelectedId} />)}
         {loading && entities.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在解析规则实体…</strong></div>}
-        {!loading && entities.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的单位</strong><button onClick={() => { setQuery(""); setSelectedSide(""); setSearchKinds([...entityKindOrder]); setSearchUsages([...entityUsageOrder]); }}>清除筛选</button></div>}
+        {!loading && entities.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的单位</strong><button onClick={() => { setQuery(""); setSelectedSide(""); setCurrentUsage(""); setSearchKinds([...entityKindOrder]); setSearchUsages([...entityUsageOrder]); }}>清除筛选</button></div>}
       </div>
     </section>
   );
