@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "provider": "npm+jsdelivr",
+  "package": "ra2-explorer-pages-data",
+  "version": "0.11.0",
+  "registry": "https://registry.npmjs.org/",
+  "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-data@0.11.0/data",
+  "snapshot_id": "ra2md-slim-0c56a01b33e8",
+  "files": 16,
+  "bytes": 7130125,
+  "sha256": "e0ae8f5cc3cfd11a6b26fd1367dc26abebecd043a223a2bd5782aa4cb064cd4b",
+  "included": [
+    "manifest",
+    "bilingual_catalogs",
+    "entity_card_atlases"
+  ],
+  "contains_original_game_files": false,
+  "package_bytes": 1787640,
+  "package_unpacked_bytes": 7131521,
+  "integrity": "sha512-E8ox/0Axh5hF3rovKLu5zqIasxmmp2XWjqk4iouw/yXFOg81WR7HJowAvPRrhTGLzlMQ6Jm/8jhyKt7B3ho+nw==",
+  "shasum": "a81d7eecf0803096ef958bac6efe386272a5087f",
+  "published": true
+}

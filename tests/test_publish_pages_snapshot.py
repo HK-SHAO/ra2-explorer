@@ -15,6 +15,7 @@ from scripts.publish_pages_snapshot import (
     _lock_manifest,
     _remote_prefix,
     _snapshot_manifest,
+    build_parser,
 )
 
 
@@ -73,3 +74,12 @@ def test_pages_publish_error_detail_uses_safe_response_metadata() -> None:
     assert _hub_error_detail(ExampleError()) == (
         "ExampleError · HTTP 503 · request request-123 · temporary failure"
     )
+
+
+def test_pages_publish_can_request_public_repository_creation() -> None:
+    args = build_parser().parse_args(
+        ["snapshot.zip", "--repo-type", "dataset", "--create-repository"]
+    )
+
+    assert args.repo_type == "dataset"
+    assert args.create_repository is True

@@ -11,6 +11,7 @@ from scripts.publish_pages_cdn import (
     _content_digest,
     _safe_member_path,
     prepare_package,
+    publish_package,
 )
 
 
@@ -100,3 +101,26 @@ def test_pages_cdn_rejects_existing_staging_without_confirmation(tmp_path: Path)
             package_name="ra2-explorer-pages-data",
             version="1.2.3",
         )
+
+
+def test_pages_cdn_publish_uses_environment_token_without_persisting_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def fake_npm_json(args: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> dict:
+        observed.update(args=args, cwd=cwd, env=env)
+        config = Path(str((env or {})["NPM_CONFIG_USERCONFIG"]))
+        observed["config"] = config.read_text(encoding="utf-8")
+        return {"id": "ra2-explorer-pages-data@1.2.3"}
+
+    monkeypatch.setattr("scripts.publish_pages_cdn._npm_json", fake_npm_json)
+
+    result = publish_package(tmp_path, "private-token-value")
+
+    assert result["id"].endswith("@1.2.3")
+    assert observed["cwd"] == tmp_path
+    assert observed["env"]["NODE_AUTH_TOKEN"] == "private-token-value"  # type: ignore[index]
+    assert "private-token-value" not in str(observed["config"])
+    assert not (tmp_path / ".npmrc.ra2exp").exists()

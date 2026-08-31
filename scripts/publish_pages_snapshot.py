@@ -141,6 +141,7 @@ def publish_snapshot(
     remote_prefix: str,
     auth_value: str,
     write_lock: Path | None,
+    create_repository: bool = False,
 ) -> dict[str, object]:
     _configure_transfer_environment()
     try:
@@ -161,6 +162,13 @@ def publish_snapshot(
     remote_manifest = f"{prefix}/manifest.json"
     api = HfApi(endpoint="https://huggingface.co", token=auth_value)
     try:
+        if create_repository:
+            api.create_repo(
+                repo_id=repository,
+                repo_type=repository_type,
+                private=False,
+                exist_ok=True,
+            )
         commit = api.create_commit(
             repo_id=repository,
             repo_type=repository_type,
@@ -213,6 +221,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="仓库内稳定目录",
     )
     parser.add_argument(
+        "--create-repository",
+        action="store_true",
+        help="仓库不存在时创建公开仓库",
+    )
+    parser.add_argument(
         "--env-file",
         type=Path,
         default=Path(".secrets/local.env"),
@@ -248,6 +261,7 @@ def main() -> int:
             remote_prefix=args.remote_prefix,
             auth_value=auth_value,
             write_lock=args.write_lock,
+            create_repository=args.create_repository,
         )
     except (OSError, SnapshotPublishError, ValueError, zipfile.BadZipFile) as error:
         print(f"pages snapshot publish failed: {error}", file=sys.stderr)

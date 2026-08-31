@@ -236,11 +236,22 @@ def publish_package(staging: Path, auth_value: str) -> dict[str, Any]:
         raise PagesCdnPublishError("缺少 NPM_TOKEN")
     env = dict(os.environ)
     env["NODE_AUTH_TOKEN"] = auth_value
-    return _npm_json(
-        ["publish", "--access", "public", "--registry", DEFAULT_REGISTRY, "--json"],
-        cwd=staging,
-        env=env,
+    user_config = staging / ".npmrc.ra2exp"
+    user_config.write_text(
+        "registry=https://registry.npmjs.org/\n"
+        "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}\n"
+        "always-auth=true\n",
+        encoding="utf-8",
     )
+    env["NPM_CONFIG_USERCONFIG"] = str(user_config)
+    try:
+        return _npm_json(
+            ["publish", "--access", "public", "--registry", DEFAULT_REGISTRY, "--json"],
+            cwd=staging,
+            env=env,
+        )
+    finally:
+        user_config.unlink(missing_ok=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
