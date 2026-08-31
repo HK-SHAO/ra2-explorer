@@ -1743,8 +1743,18 @@ function ExplorerApp() {
     let cancelled = false;
     setSearchSuggestionLoading(true);
     const timer = window.setTimeout(() => {
-      const entityRequest = searchTargets.includes("entities")
-        ? api.entities(sourceId, {
+      let pendingRequests = 0;
+      const requestFinished = () => {
+        pendingRequests -= 1;
+        if (!cancelled && pendingRequests === 0) setSearchSuggestionLoading(false);
+      };
+      const reportFailure = (reason: unknown) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : "搜索失败");
+      };
+
+      if (searchTargets.includes("entities")) {
+        pendingRequests += 1;
+        void api.entities(sourceId, {
           query: searchQuery,
           kind: appliedEntityKind,
           kinds: appliedEntityKinds,
@@ -1753,9 +1763,23 @@ function ExplorerApp() {
           side: appliedEntitySide,
           language: gameLanguage,
         })
-        : Promise.resolve(null);
-      const mediaRequest = searchTargets.includes("media")
-        ? api.media(sourceId, {
+          .then((entityPage) => {
+            if (cancelled) return;
+            setSearchEntityItems(entityPage.items);
+            setSearchEntityUsages(entityPage.usages);
+            setSearchEntitySides(entityPage.sides);
+          })
+          .catch(reportFailure)
+          .finally(requestFinished);
+      } else {
+        setSearchEntityItems([]);
+        setSearchEntityUsages([]);
+        setSearchEntitySides([]);
+      }
+
+      if (searchTargets.includes("media")) {
+        pendingRequests += 1;
+        void api.media(sourceId, {
           query: searchQuery,
           kind: appliedMediaKind,
           group: mediaSearchGroup,
@@ -1763,23 +1787,21 @@ function ExplorerApp() {
           limit: 80,
           language: gameLanguage,
         })
-        : Promise.resolve(null);
-      Promise.all([entityRequest, mediaRequest])
-        .then(([entityPage, mediaPage]) => {
-          if (cancelled) return;
-          setSearchEntityItems(entityPage?.items || []);
-          setSearchEntityUsages(entityPage?.usages || []);
-          setSearchEntitySides(entityPage?.sides || []);
-          setSearchMediaItems(mediaPage?.items || []);
-          setSearchMediaGroups(orderedMediaGroups(mediaPage?.groups || []));
-          setSearchMediaEventTypes(mediaPage?.event_types || []);
-        })
-        .catch((reason: Error) => {
-          if (!cancelled) setError(reason.message);
-        })
-        .finally(() => {
-          if (!cancelled) setSearchSuggestionLoading(false);
-        });
+          .then((mediaPage) => {
+            if (cancelled) return;
+            setSearchMediaItems(mediaPage.items);
+            setSearchMediaGroups(orderedMediaGroups(mediaPage.groups));
+            setSearchMediaEventTypes(mediaPage.event_types || []);
+          })
+          .catch(reportFailure)
+          .finally(requestFinished);
+      } else {
+        setSearchMediaItems([]);
+        setSearchMediaGroups([]);
+        setSearchMediaEventTypes([]);
+      }
+
+      if (pendingRequests === 0) setSearchSuggestionLoading(false);
     }, 180);
     return () => {
       cancelled = true;
