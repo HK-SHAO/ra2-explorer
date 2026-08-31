@@ -119,6 +119,9 @@ SECRET_ASSIGNMENT = re.compile(
     r"(?im)^\s*(?:export\s+)?(?:[A-Za-z0-9_.-]*(?:password|passwd|secret|token|api[_-]?key|client[_-]?secret)[A-Za-z0-9_.-]*)"
     r"\s*[:=]\s*([^\s#;,]+)"
 )
+TYPESCRIPT_IDENTIFIER_VALUE = re.compile(
+    r"[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*"
+)
 
 
 class ScanError(RuntimeError):
@@ -223,6 +226,10 @@ def scan_text(path: str, data: bytes, *, object_id: str | None = None) -> list[F
         if _safe_assignment(value):
             continue
         if normalized.endswith((".ts", ".tsx")) and value.casefold() in TYPESCRIPT_TYPE_VALUES:
+            continue
+        if normalized.endswith((".ts", ".tsx")) and TYPESCRIPT_IDENTIFIER_VALUE.fullmatch(
+            value
+        ):
             continue
         findings.append(
             Finding(

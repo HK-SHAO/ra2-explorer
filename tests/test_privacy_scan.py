@@ -31,7 +31,10 @@ def test_scan_allows_placeholders_and_github_noreply_addresses() -> None:
 
 
 def test_scan_allows_typescript_property_types() -> None:
-    content = b"type SearchProps = { focusToken: number; apiKey: string | null }\n"
+    content = (
+        b"type SearchProps = { focusToken: number; apiKey: string | null }\n"
+        b"const search = { focusToken: searchFocusToken };\n"
+    )
 
     assert privacy_scan.scan_text("frontend/src/App.tsx", content) == []
 
