@@ -296,6 +296,8 @@ def _prepare_hf_environment(*, disable_xet: bool = False) -> None:
     os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
     if disable_xet:
         os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+    else:
+        os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
 
 
 def space_sync_plan(

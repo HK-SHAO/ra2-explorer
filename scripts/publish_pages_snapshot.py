@@ -117,6 +117,8 @@ def publish_snapshot(
     auth_value: str,
     write_lock: Path | None,
 ) -> dict[str, object]:
+    os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
+    os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
     try:
         from huggingface_hub import CommitOperationAdd, HfApi
     except ImportError as error:
