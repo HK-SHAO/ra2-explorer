@@ -37,7 +37,7 @@ from ra2_explorer.storage import Database
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
 ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
 UNAFFILIATED_SIDE = "unaffiliated"
-SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v4",)
+SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v5",)
 _PLANNING_SIDE_IDS = ("GDI", "Nod", "ThirdSide")
 _TYPE_SECTIONS = {
     "vehicle": "VehicleTypes",
@@ -1691,6 +1691,204 @@ def _entity_faction_ids(entity: GameEntity) -> tuple[str, ...]:
     return (UNAFFILIATED_SIDE,)
 
 
+_VOICE_MEDIA_GROUP_SLOTS = (
+    ("selection_voice", frozenset({"select"})),
+    ("movement_voice", frozenset({"move"})),
+    ("combat_voice", frozenset({"attack", "special_attack"})),
+    ("feedback_voice", frozenset({"feedback"})),
+    ("death_voice", frozenset({"die"})),
+    (
+        "ability_voice",
+        frozenset({"capture", "harvest", "deploy", "enter", "create"}),
+    ),
+)
+_SOUND_MEDIA_GROUP_SLOTS = (
+    ("combat_sound", frozenset({"attack", "special_attack"})),
+    ("death_sound", frozenset({"die"})),
+    (
+        "movement_sound",
+        frozenset({"movement", "start_moving", "stop_moving", "turret_rotate"}),
+    ),
+    (
+        "action_sound",
+        frozenset(
+            {
+                "create",
+                "deploy",
+                "deploy_sound",
+                "undeploy",
+                "enter",
+                "enter_transport",
+                "leave_transport",
+                "activate",
+                "deactivate",
+                "cloak",
+                "uncloak",
+                "chrono_in",
+                "chrono_out",
+                "capture",
+                "harvest",
+            }
+        ),
+    ),
+    ("impact_sound", frozenset({"crashing", "impact_land", "impact_water", "sinking"})),
+    ("destruction_sound", frozenset({"destruction", "explosion"})),
+)
+
+
+def _normalized_media_event(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
+
+def _inferred_voice_event_slots(events: tuple[str, ...] | list[str]) -> set[str]:
+    inferred: set[str] = set()
+    for event in events:
+        normalized = _normalized_media_event(event)
+        if "select" in normalized:
+            inferred.add("select")
+        if "move" in normalized:
+            inferred.add("move")
+        if any(token in normalized for token in ("attack", "airstrike", "crushing")):
+            inferred.add("attack")
+        if "specialattack" in normalized:
+            inferred.add("special_attack")
+        if any(
+            token in normalized
+            for token in ("fear", "psyresist", "overload", "powerdown", "missionaborted")
+        ):
+            inferred.add("feedback")
+        if any(token in normalized for token in ("voicedie", "die", "death")):
+            inferred.add("die")
+        if "created" in normalized or "createvoice" in normalized:
+            inferred.add("create")
+        if "deploy" in normalized or "transform" in normalized:
+            inferred.add("deploy")
+        if any(token in normalized for token in ("capture", "liberated", "steal")):
+            inferred.add("capture")
+        if "harvest" in normalized:
+            inferred.add("harvest")
+    return inferred
+
+
+def _is_descriptive_media_text(value: str | None) -> bool:
+    text = (value or "").strip()
+    return text.startswith("*") or text.isdecimal()
+
+
+def _is_descriptive_sound_text(sample: MediaSample) -> bool:
+    return _is_descriptive_media_text(sample.text)
+
+
+def _sound_description_sample(sample: MediaSample) -> MediaSample:
+    def cleaned(value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped[1:].strip() if stripped.startswith("*") else stripped
+
+    return replace(
+        sample,
+        text=cleaned(sample.text),
+        original_text=cleaned(sample.original_text),
+        localized_text=cleaned(sample.localized_text),
+    )
+
+
+def _standalone_sound_group(event: str, sample: MediaSample) -> str:
+    folded = _normalized_media_event(f"{event} {sample.name}")
+    if any(token in folded for token in ("ambient", "amb", "bird", "wind", "water")):
+        return "ambient_sound"
+    if any(
+        token in folded
+        for token in ("underattack", "warning", "alarm", "beacon", "detected", "ready")
+    ):
+        return "notification_sound"
+    if _is_descriptive_sound_text(sample) or any(
+        token in folded
+        for token in (
+            "menu",
+            "credit",
+            "camera",
+            "commandbar",
+            "options",
+            "message",
+            "planningmode",
+            "radar",
+            "score",
+            "textbleep",
+            "gameclosed",
+            "playerjoined",
+            "newgame",
+            "cratemoney",
+        )
+    ):
+        return "interface_sound"
+    if any(token in folded for token in ("expl", "detonat", "blast", "destruct")):
+        return "destruction_sound"
+    if any(token in folded for token in ("impact", "crash", "splash", "sinking")):
+        return "impact_sound"
+    if any(token in folded for token in ("attack", "fire", "weapon", "shot")):
+        return "weapon_sound"
+    if any(
+        token in folded
+        for token in ("move", "engine", "motor", "drive", "tread", "turret", "rotate")
+    ):
+        return "movement_sound"
+    if any(
+        token in folded
+        for token in (
+            "deploy",
+            "undeploy",
+            "create",
+            "build",
+            "repair",
+            "transform",
+            "activate",
+            "deactivate",
+            "cloak",
+            "chrono",
+            "transport",
+            "harvest",
+        )
+    ):
+        return "action_sound"
+    return "other_sound"
+
+
+def _refined_media_groups(
+    kind: str,
+    groups: set[str],
+    slots: set[str],
+) -> set[str]:
+    refined = set(groups)
+    if kind == "voice" and refined.intersection({"unit_voice", "other_voice"}):
+        semantic_groups = {
+            group
+            for group, group_slots in _VOICE_MEDIA_GROUP_SLOTS
+            if slots.intersection(group_slots)
+        }
+        if semantic_groups:
+            refined.difference_update({"unit_voice", "other_voice"})
+            refined.update(semantic_groups)
+    elif kind == "sound" and refined.intersection(
+        {"combat_sound", "unit_sound", "other_sound"}
+    ):
+        semantic_groups = {
+            group
+            for group, group_slots in _SOUND_MEDIA_GROUP_SLOTS
+            if slots.intersection(group_slots)
+        }
+        if any(
+            re.fullmatch(r"(?:elite_)?(?:primary|secondary|weapon_\d+)", slot)
+            for slot in slots
+        ):
+            semantic_groups.add("weapon_sound")
+        if semantic_groups:
+            refined.difference_update({"combat_sound", "unit_sound", "other_sound"})
+            refined.update(semantic_groups)
+    return refined
+
+
 def _build_media_items(
     assets: list[dict[str, Any]],
     entities: tuple[GameEntity, ...],
@@ -1736,7 +1934,7 @@ def _build_media_items(
         kind: str,
         group: str,
         event: str,
-        slot: str,
+        slot: str | tuple[str, ...],
         entity: GameEntity | None = None,
     ) -> None:
         state = state_for(sample)
@@ -1752,8 +1950,10 @@ def _build_media_items(
             state["localized_texts"].add(sample.localized_text.strip())
         if event:
             state["events"].add(event)
-        if slot:
+        if isinstance(slot, str) and slot:
             state["slots"].add(slot)
+        elif slot:
+            state["slots"].update(slot)
         if entity is not None:
             state["entities"][entity.id.casefold()] = {
                 "id": entity.id,
@@ -1777,7 +1977,9 @@ def _build_media_items(
             if association.kind == "animation":
                 continue
             for sample in association.samples:
-                is_voice = association.kind == "voice" or sample.text is not None
+                is_voice = association.kind == "voice" or (
+                    sample.text is not None and not _is_descriptive_sound_text(sample)
+                )
                 if is_voice:
                     add_sample(
                         sample,
@@ -1823,29 +2025,20 @@ def _build_media_items(
 
     for event, samples in audio_events.items():
         for sample in samples:
-            if sample.text:
+            if sample.text and not _is_descriptive_sound_text(sample):
+                inferred_slots = tuple(sorted(_inferred_voice_event_slots([event])))
                 add_sample(
                     sample,
                     kind="voice",
                     group="other_voice",
                     event=event,
-                    slot="sound_event",
+                    slot=("sound_event", *inferred_slots),
                 )
                 continue
-            folded = f"{event} {sample.name}".casefold()
-            if any(token in folded for token in ("ambient", "_amb", "bird", "wind", "water")):
-                group = "ambient_sound"
-            elif any(
-                token in folded
-                for token in ("attack", "fire", "expl", "impact", "weapon", "shot", "hit")
-            ):
-                group = "combat_sound"
-            else:
-                group = "other_sound"
             add_sample(
-                sample,
+                _sound_description_sample(sample),
                 kind="sound",
-                group=group,
+                group=_standalone_sound_group(event, sample),
                 event=event,
                 slot="sound_event",
             )
@@ -1854,6 +2047,27 @@ def _build_media_items(
         for suffix in (".wav", ".aud"):
             state = states.get(f"{key}{suffix}")
             if state is None:
+                continue
+            descriptive_text = _is_descriptive_media_text(value.text)
+            if descriptive_text:
+                state["sound"] = True
+                if not any(group.endswith("_sound") for group in state["groups"]):
+                    state["groups"].add("interface_sound")
+                cleaned = _sound_description_sample(
+                    MediaSample(
+                        key,
+                        value.text,
+                        None,
+                        value.original_text,
+                        value.localized_text,
+                    )
+                )
+                if cleaned.text:
+                    state["texts"].add(cleaned.text)
+                if cleaned.original_text:
+                    state["original_texts"].add(cleaned.original_text)
+                if cleaned.localized_text:
+                    state["localized_texts"].add(cleaned.localized_text)
                 continue
             state["voice"] = True
             state["texts"].add(value.text.strip())
@@ -1917,9 +2131,14 @@ def _build_media_items(
     items = []
     for state in states.values():
         kind = "voice" if state["voice"] else "sound" if state["sound"] else "unknown"
+        refined_groups = _refined_media_groups(
+            kind,
+            state["groups"],
+            state["slots"],
+        )
         groups = sorted(
             group
-            for group in state["groups"]
+            for group in refined_groups
             if (kind == "voice" and group.endswith("_voice"))
             or (kind == "sound" and group.endswith("_sound"))
         )
@@ -1931,7 +2150,7 @@ def _build_media_items(
             groups = ["unclassified"]
         asset_stem = str(state["asset"]["display_name"]).rsplit(".", 1)[0].casefold()
         mission_match = re.match(r"^([a-z])(\d{2})[_-]p(\d+)", asset_stem)
-        if kind == "voice" and mission_match and "unit_voice" not in groups:
+        if kind == "voice" and mission_match and not state["entities"]:
             if "other_voice" in groups:
                 groups.remove("other_voice")
             if "mission_voice" not in groups:

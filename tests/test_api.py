@@ -309,7 +309,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert len(media_items) == 1
     assert media_items[0]["asset"]["display_name"] == "fixture.wav"
     assert media_items[0]["description"] == "准备测试。"
-    assert media_items[0]["groups"] == ["unit_voice"]
+    assert media_items[0]["groups"] == ["selection_voice"]
     assert media_items[0]["original_texts"] == ["Ready for the test."]
     assert media_items[0]["localized_texts"] == ["准备测试。"]
     assert "zhunbeiceshi" in media_items[0]["search_aliases"]["pinyin_compact"]
@@ -785,12 +785,52 @@ def test_orphaned_retail_audio_keeps_evidence_based_categories() -> None:
     assert items["aprotr1.wav"]["groups"] == ["ambient_voice"]
     assert items["aprotr1.wav"]["events"] == ["PropagandaTruck"]
     assert items["aprotr1.wav"]["slots"] == ["ambient"]
-    assert items["gexp05a.wav"]["groups"] == ["combat_sound"]
+    assert items["gexp05a.wav"]["groups"] == ["destruction_sound"]
     assert items["gexp05a.wav"]["events"] == ["Explosion05"]
     assert items["gexp05a.wav"]["slots"] == ["explosion"]
     assert items["BARGRAPH.AUD"]["groups"] == ["interface_sound"]
     assert items["BARGRAPH.AUD"]["slots"] == ["interface"]
     assert items["MYSTERY.AUD"]["kind"] == "unknown"
+
+
+def test_standalone_sound_events_receive_semantic_subcategories() -> None:
+    def asset(name: str) -> dict[str, object]:
+        return {
+            "id": name.casefold(),
+            "display_name": name,
+            "format": "wav",
+            "virtual_path": f"audio.mix::{name}",
+            "size": 1024,
+            "storage_kind": "mix",
+        }
+
+    selected = asset("iarnsea.wav")
+    dying = asset("vintdia.wav")
+    interface = asset("ucommand.wav")
+    weapon = asset("laser.wav")
+    items = {
+        item["asset"]["display_name"]: item
+        for item in _build_media_items(
+            [selected, dying, interface, weapon],
+            (),
+            {
+                "ArnoldSelect": (MediaSample("iarnsea", "Your orders", selected),),
+                "IntruderVoiceDie": (MediaSample("vintdia", "Bail out", dying),),
+                "CommandBar": (MediaSample("ucommand", "*Command units", interface),),
+                "LaserFire": (MediaSample("laser", None, weapon),),
+            },
+            (),
+            {},
+        )
+    }
+
+    assert items["iarnsea.wav"]["groups"] == ["selection_voice"]
+    assert items["iarnsea.wav"]["slots"] == ["select", "sound_event"]
+    assert items["vintdia.wav"]["groups"] == ["death_voice"]
+    assert items["ucommand.wav"]["kind"] == "sound"
+    assert items["ucommand.wav"]["groups"] == ["interface_sound"]
+    assert items["ucommand.wav"]["texts"] == ["Command units"]
+    assert items["laser.wav"]["groups"] == ["weapon_sound"]
 
 
 def test_shared_media_entity_refs_preserve_affiliation() -> None:

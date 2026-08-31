@@ -294,6 +294,7 @@ const mediaSlotLabels: Record<string, string> = {
   die: "阵亡",
   create: "建造完成",
   deploy: "部署",
+  deploy_sound: "部署音效",
   undeploy: "取消部署",
   enter: "进入目标",
   enter_transport: "进入载具",
@@ -427,13 +428,25 @@ function ruleFieldName(ruleField: string | null) {
 }
 
 const mediaGroupLabels: Record<string, string> = {
+  selection_voice: "选中回应",
+  movement_voice: "移动指令",
+  combat_voice: "攻击指令",
+  feedback_voice: "受击与反馈",
+  death_voice: "阵亡语音",
+  ability_voice: "部署与技能",
   unit_voice: "单位语音",
   eva_voice: "EVA 播报",
   mission_voice: "任务对白",
   taunt_voice: "多人嘲讽",
   ambient_voice: "场景播报",
   other_voice: "其他语音",
+  weapon_sound: "武器开火",
   combat_sound: "战斗音效",
+  death_sound: "阵亡与毁坏",
+  movement_sound: "移动与机械",
+  action_sound: "部署与操作",
+  impact_sound: "撞击与坠毁",
+  destruction_sound: "爆炸与摧毁",
   unit_sound: "单位动作",
   ambient_sound: "环境音效",
   notification_sound: "提示音效",
@@ -441,6 +454,24 @@ const mediaGroupLabels: Record<string, string> = {
   other_sound: "其他音效",
   unclassified: "未关联音频",
 };
+
+const mediaGroupOrder = [
+  "selection_voice", "movement_voice", "combat_voice", "feedback_voice", "death_voice", "ability_voice",
+  "unit_voice", "eva_voice", "mission_voice", "taunt_voice", "ambient_voice", "other_voice",
+  "weapon_sound", "combat_sound", "death_sound", "movement_sound", "action_sound", "impact_sound",
+  "destruction_sound", "unit_sound", "notification_sound", "ambient_sound", "interface_sound", "other_sound",
+  "unclassified",
+];
+
+function orderedMediaGroups(groups: Array<{ group: string; count: number }>) {
+  return [...groups].sort((left, right) => {
+    const leftRank = mediaGroupOrder.indexOf(left.group);
+    const rightRank = mediaGroupOrder.indexOf(right.group);
+    return (leftRank < 0 ? mediaGroupOrder.length : leftRank)
+      - (rightRank < 0 ? mediaGroupOrder.length : rightRank)
+      || left.group.localeCompare(right.group);
+  });
+}
 
 const sideLabels: Record<string, string> = {
   GDI: "盟军",
@@ -1630,7 +1661,7 @@ function ExplorerApp() {
           if (cancelled) return;
           setMediaItems(page.items);
           setMediaTotal(page.total);
-          setMediaGroups(page.groups);
+          setMediaGroups(orderedMediaGroups(page.groups));
           setMediaKindCounts(page.kinds);
           setMediaEventTypes(page.event_types || []);
           const remembered = assetSelectionsRef.current.get(assetSelectionKey(sourceId, selectedCategoryId)) || "";
@@ -1740,7 +1771,7 @@ function ExplorerApp() {
           setSearchEntityUsages(entityPage?.usages || []);
           setSearchEntitySides(entityPage?.sides || []);
           setSearchMediaItems(mediaPage?.items || []);
-          setSearchMediaGroups(mediaPage?.groups || []);
+          setSearchMediaGroups(orderedMediaGroups(mediaPage?.groups || []));
           setSearchMediaEventTypes(mediaPage?.event_types || []);
         })
         .catch((reason: Error) => {
