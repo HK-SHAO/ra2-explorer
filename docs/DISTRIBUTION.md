@@ -21,7 +21,7 @@
 
 公共目录只允许 `RA2 Explorer.exe`、`ra2exp.exe`、共享 `_internal`、编译前端、公开参考数据、MIT `LICENSE`、简短 `README.txt`、运行标记和公开更新通道。源码、测试、项目文档、Git 元数据、Node 依赖、source map 和构建脚本都会使审计失败；第三方运行依赖在 `.dist-info` 中必须保留的许可证文件除外。
 
-## v0.9 本机构建测量
+## 构建体积
 
 以下数据来自 Windows x64 generic 生产构建，不含游戏或 `.ra2pack`：
 
@@ -29,14 +29,16 @@
 | --- | ---: | ---: |
 | 解压目录（210 个文件） | 58,496,601 | 55.8 MiB |
 | `RA2-Explorer-Web-x64.zip` | 34,960,844 | 33.3 MiB |
-| Pages 固定数据 ZIP | 79,220,842 | 75.6 MiB |
-| Pages 解包数据 | 144,037,066 | 137.4 MiB |
+| Pages 固定数据 ZIP（v0.11） | 80,437,370 | 76.7 MiB |
+| Pages 解包数据（v0.11） | 146,007,104 | 139.2 MiB |
+| npm/jsDelivr 高频数据（解包） | 7,131,521 | 6.8 MiB |
+| npm 高频数据 tarball | 1,787,640 | 1.7 MiB |
 
 具体 Release 可能因 Python、依赖或压缩器小幅变化。普通本地用户不会下载或复制数百 MiB 的 MIX；首次导入直接关联本机安装。Pages 访客也不会下载数据 ZIP，而是按页面、预取队列和用户操作请求静态文件。
 
 ## 大文件隔离
 
-主分支只追踪代码和 `packaging\pages-data.json`。Pages 数据 ZIP 存放在独立文件仓库并固定到不可变 revision；代码更新继续复用它。`.ra2pack`、游戏文件和本地发行输出均位于被 Git 忽略的目录。
+主分支只追踪代码、`packaging\pages-data.json` 和 `packaging\pages-cdn.json`。Pages 完整 ZIP 存放在独立 Hugging Face Dataset 并固定到不可变 revision；高频清单、目录和卡片图集固定到 npm 精确版本并由 jsDelivr 分发。浏览器只请求所需文件，CDN 失败时回退 Pages 同源副本。`.ra2pack`、游戏文件和本地发行输出均位于被 Git 忽略的目录。
 
 ## 自动发布
 

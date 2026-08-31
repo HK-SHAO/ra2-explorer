@@ -4,10 +4,10 @@ Hugging Face 在本项目中只承担静态文件分发，不运行 RA2 Explorer
 
 ## 分发内容
 
-公开文件仓库保存两类互不混用的产物：
+公开文件分成两个互不混用的仓库：
 
-- `releases/`：稳定 Windows ZIP、版本清单、SHA-256 和 Release 说明；
-- `pages-data/`：GitHub Pages 使用的固定单位/声音数据 ZIP 与清单。
+- Release Space 的 `releases/`：稳定 Windows ZIP、版本清单、SHA-256 和 Release 说明；
+- `rockstarengine/ra2-explorer-pages-data` Dataset：GitHub Pages 使用的固定单位/声音数据 ZIP 与清单。
 
 Windows 更新默认从 `https://hf-mirror.com` 下载，失败后回退 GitHub。Pages workflow 同样先尝试镜像，再回退 `https://huggingface.co`。写入操作只使用 Hugging Face 官方 API；访问 token 不会发送给镜像。
 
@@ -29,9 +29,9 @@ Actions 需要仓库 secrets：
 只有派生内容真正变化时才运行：
 
 ```bat
-.venv\Scripts\python.exe scripts\publish_pages_snapshot.py .runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip
+.venv\Scripts\python.exe scripts\publish_pages_snapshot.py .runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip --repository rockstarengine/ra2-explorer-pages-data --repo-type dataset --create-repository
 ```
 
 发布器先完成路径安全、格式白名单、原始游戏格式禁令、计数、体积和隐私审计，再上传 ZIP，并原子更新锁定清单。普通 UI、搜索或性能修复继续复用既有快照。
 
-Hugging Face Space 的运行配额、Docker bundle 和历史完整资源分片不属于当前发行链路；维护者不应在稳定发布中尝试启动或同步 Space 运行时。
+Pages 数据使用独立 Dataset，避免与历代 Windows ZIP 共用 Space 的存储上限。Hugging Face Space 的 CPU 运行配额、Docker bundle 和历史完整资源分片不属于当前发行链路；维护者不应在稳定发布中尝试启动或同步 Space 运行时。

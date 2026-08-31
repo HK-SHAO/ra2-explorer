@@ -95,10 +95,11 @@ scripts\build_windows.cmd
 ```bat
 .venv\Scripts\ra2exp.exe pages export SOURCE_ID --audio-bitrate 24k --workers 4 --overwrite
 .venv\Scripts\python.exe scripts\verify_pages_snapshot.py .runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip
-.venv\Scripts\python.exe scripts\publish_pages_snapshot.py .runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip
+.venv\Scripts\python.exe scripts\publish_pages_snapshot.py .runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip --repository rockstarengine/ra2-explorer-pages-data --repo-type dataset --create-repository
+.venv\Scripts\python.exe scripts\publish_pages_cdn.py .runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip --version X.Y.Z --overwrite --publish
 ```
 
-普通 UI 修复只运行 `npm run build:pages`；Pages 输出到 `frontend\dist-pages`，不会覆盖本地版 `frontend\dist`。工作流从 `packaging\pages-data.json` 下载并审计固定快照。
+普通 UI 修复只运行 `npm run build:pages`；Pages 输出到 `frontend\dist-pages`，不会覆盖本地版 `frontend\dist`。工作流从 `packaging\pages-data.json` 下载并审计完整快照，Vite 从 `packaging\pages-cdn.json` 注入固定 jsDelivr 基址。`NPM_TOKEN` 与 HF token 只放在被忽略的 `.secrets\local.env` 或 CI secrets；npm 数据版本发布后不可覆盖。
 
 ## 文档与提交
 

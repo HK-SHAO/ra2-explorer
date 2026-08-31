@@ -15,4 +15,4 @@
 | [游戏源输入](GAME_SOURCE_INPUTS.md) | 开发者 | 真正参与解析的零售文件与覆盖顺序 |
 | [Hugging Face 文件镜像](HUGGINGFACE.md) | 维护者 | 稳定安装包与 Pages 数据的文件分发 |
 
-实现事实优先以代码、测试和锁定清单为准：应用版本在 `pyproject.toml`，Pages 数据版本在 `packaging/pages-data.json`，自动发布流程在 `.github/workflows/`。容易变化的 commit、快照哈希和构建结果不应复制到多份文档。
+实现事实优先以代码、测试和锁定清单为准：应用版本在 `pyproject.toml`，Pages 完整数据在 `packaging/pages-data.json`，高频 CDN 数据在 `packaging/pages-cdn.json`，自动发布流程在 `.github/workflows/`。容易变化的 commit、快照哈希和构建结果不应复制到多份文档。
