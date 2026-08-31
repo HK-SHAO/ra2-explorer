@@ -630,7 +630,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .entity-card { content-visibility: auto; contain-intrinsic-size: auto 174px; }
 .entity-card-preview.format-shp > img { padding: 8px 10px 15px; filter: drop-shadow(0 3px 5px rgba(0,0,0,.48)); }
 .entity-thumbnail-atlas { display: block; flex: 0 0 auto; background-repeat: no-repeat; image-rendering: pixelated; filter: drop-shadow(0 4px 7px rgba(0,0,0,.5)); }
-.entity-thumbnail-atlas-probe { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
 .entity-card-preview.missing { background: #15171b; }
 .entity-card .asset-card-copy { min-height: 38px; display: flex; align-items: center; justify-content: center; text-align: center; }
 .entity-card .asset-card-copy strong { width: 100%; }

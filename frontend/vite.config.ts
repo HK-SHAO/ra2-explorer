@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { defineConfig, loadEnv, type Plugin } from "vite";
+import { defineConfig, loadEnv, type HtmlTagDescriptor, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
 function gitValue(args: string[]) {
@@ -39,25 +39,44 @@ export default defineConfig(({ mode }) => {
   const normalizedBase = publicBase.endsWith("/") ? publicBase : `${publicBase}/`;
   const defaultAtlas = env.RA2EXP_DEFAULT_ATLAS?.replace(/^\/+/, "");
   const staticCdnBase = pagesCdnBase(mode, env.RA2EXP_STATIC_CDN_BASE);
-  const preloadPagesAtlas = {
-    name: "preload-pages-unit-atlas",
+  const preloadPagesAssets = {
+    name: "preload-pages-startup-assets",
     transformIndexHtml() {
       if (mode !== "pages" || !defaultAtlas) return [];
-      return [{
-        tag: "link",
-        attrs: {
-          rel: "preload",
-          as: "image",
-          type: "image/webp",
-          href: staticCdnBase ? `${staticCdnBase}/${defaultAtlas}` : `${normalizedBase}data/${defaultAtlas}`,
+      const snapshotBase = staticCdnBase || `${normalizedBase}data`;
+      const links: HtmlTagDescriptor[] = [
+        {
+          tag: "link",
+          attrs: { rel: "preload", as: "fetch", crossorigin: "anonymous", href: `${snapshotBase}/manifest.json` },
+          injectTo: "head-prepend" as const,
         },
+        {
+          tag: "link",
+          attrs: { rel: "preload", as: "fetch", crossorigin: "anonymous", href: `${snapshotBase}/catalog/entities.zh-CN.json` },
+          injectTo: "head-prepend" as const,
+        },
+        {
+          tag: "link",
+          attrs: {
+            rel: "preload",
+            as: "image",
+            type: "image/webp",
+            href: `${snapshotBase}/${defaultAtlas}`,
+          },
+          injectTo: "head-prepend" as const,
+        },
+      ];
+      if (staticCdnBase) links.unshift({
+        tag: "link",
+        attrs: { rel: "preconnect", href: new URL(staticCdnBase).origin },
         injectTo: "head-prepend" as const,
-      }];
+      });
+      return links;
     },
   } satisfies Plugin;
   return {
     base: publicBase,
-    plugins: [react(), preloadPagesAtlas],
+    plugins: [react(), preloadPagesAssets],
     define: {
       "import.meta.env.VITE_RA2EXP_BUILD_COMMIT": JSON.stringify(buildCommit),
       "import.meta.env.VITE_RA2EXP_BUILD_TAG": JSON.stringify(buildTag),

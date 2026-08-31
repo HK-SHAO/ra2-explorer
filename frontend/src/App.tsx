@@ -3034,6 +3034,56 @@ function entityCardPreviewUrl(entity: EntitySummary, sourceId: string, previewAn
   });
 }
 
+const thumbnailAtlasStatus = new Map<string, "loaded" | "failed">();
+const pendingThumbnailAtlases = new Map<string, Promise<boolean>>();
+
+function preloadThumbnailAtlas(url: string) {
+  const known = thumbnailAtlasStatus.get(url);
+  if (known) return Promise.resolve(known === "loaded");
+  const existing = pendingThumbnailAtlases.get(url);
+  if (existing) return existing;
+  const pending = new Promise<boolean>((resolve) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => {
+      thumbnailAtlasStatus.set(url, "loaded");
+      pendingThumbnailAtlases.delete(url);
+      resolve(true);
+    };
+    image.onerror = () => {
+      thumbnailAtlasStatus.set(url, "failed");
+      pendingThumbnailAtlases.delete(url);
+      resolve(false);
+    };
+    image.src = url;
+  });
+  pendingThumbnailAtlases.set(url, pending);
+  return pending;
+}
+
+function useThumbnailAtlasUrl(primaryUrl: string, fallbackUrl: string) {
+  const [resolvedUrl, setResolvedUrl] = useState(() => (
+    thumbnailAtlasStatus.get(primaryUrl) === "failed" ? fallbackUrl : primaryUrl
+  ));
+  useEffect(() => {
+    let disposed = false;
+    if (!primaryUrl || primaryUrl === fallbackUrl) {
+      setResolvedUrl(primaryUrl);
+      return () => { disposed = true; };
+    }
+    if (thumbnailAtlasStatus.get(primaryUrl) === "failed") {
+      setResolvedUrl(fallbackUrl);
+      return () => { disposed = true; };
+    }
+    setResolvedUrl(primaryUrl);
+    void preloadThumbnailAtlas(primaryUrl).then((loaded) => {
+      if (!disposed && !loaded) setResolvedUrl(fallbackUrl);
+    });
+    return () => { disposed = true; };
+  }, [fallbackUrl, primaryUrl]);
+  return resolvedUrl;
+}
+
 function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle }: { entity: EntitySummary; sourceId: string; sourceRevision: string; previewAngle: PreviewAngle }) {
   const previewRef = useRef<HTMLSpanElement>(null);
   const atlas = isStaticSnapshot ? entity.thumbnail_atlas : undefined;
@@ -3045,17 +3095,13 @@ function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle }: {
     : 0;
   const atlasUrl = atlas ? api.entityThumbnailAtlasUrl(atlas.path, atlasFacing) : "";
   const atlasFallbackUrl = atlas ? api.entityThumbnailAtlasFallbackUrl(atlas.path, atlasFacing) : "";
-  const [readyAtlasUrl, setReadyAtlasUrl] = useState(atlasUrl);
+  const readyAtlasUrl = useThumbnailAtlasUrl(atlasUrl, atlasFallbackUrl);
   const atlasColumn = atlas ? atlas.index % atlas.columns : 0;
   const atlasRow = atlas ? Math.floor(atlas.index / atlas.columns) : 0;
   const url = entity.renderable && !atlas
     ? entityCardPreviewUrl(entity, sourceId, previewAngle, sourceRevision)
     : "";
   const [readyUrl, setReadyUrl] = useState(() => hasLoadedCardPreview(url) ? url : "");
-
-  useEffect(() => {
-    setReadyAtlasUrl(atlasUrl);
-  }, [atlasUrl]);
 
   useEffect(() => {
     if (!url) {
@@ -3098,9 +3144,7 @@ function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle }: {
           height: atlas.cell_height,
           backgroundImage: `url("${readyAtlasUrl}")`,
           backgroundPosition: `${-atlasColumn * atlas.cell_width}px ${-atlasRow * atlas.cell_height}px`,
-        }}><img className="entity-thumbnail-atlas-probe" src={atlasUrl} alt="" aria-hidden="true" onError={() => {
-          if (atlasFallbackUrl && atlasFallbackUrl !== atlasUrl) setReadyAtlasUrl(atlasFallbackUrl);
-        }} /></span>
+        }} />
         : readyUrl && <img decoding="async" fetchPriority="low" src={readyUrl} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
       : <Icon name="unit" size={34} />}
     {entity.affiliation && <span className={`entity-affiliation-badge affiliation-${entity.affiliation.kind} affiliation-${affiliationClassId(entity.affiliation.id)}`} title={entity.affiliation.display_name}>
