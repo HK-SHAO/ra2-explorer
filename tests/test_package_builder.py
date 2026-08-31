@@ -93,6 +93,27 @@ def test_distribution_audit_rejects_project_development_files(tmp_path: Path) ->
         audit_distribution(package)
 
 
+def test_distribution_audit_keeps_dependency_license_metadata(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    _minimal_distribution(package)
+    licenses = package / "_internal" / "httpx2-2.12.0.dist-info" / "licenses"
+    licenses.mkdir(parents=True)
+    (licenses / "LICENSE.md").write_text("third-party license", encoding="utf-8")
+
+    audit_distribution(package)
+
+
+def test_distribution_audit_rejects_internal_development_markdown(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    _minimal_distribution(package)
+    internal = package / "_internal"
+    internal.mkdir()
+    (internal / "development-notes.md").write_text("notes", encoding="utf-8")
+
+    with pytest.raises(Ra2ExplorerError, match="开发文件"):
+        audit_distribution(package)
+
+
 def test_distribution_audit_accepts_public_hf_update_channel(tmp_path: Path) -> None:
     package = tmp_path / "package"
     _minimal_distribution(package)

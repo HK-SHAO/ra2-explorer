@@ -22,6 +22,7 @@ RA2 Explorer 维护两种互补发行物：
 `portable` 会排除 EXE、DLL、BAT、CMD、COM、MSI、SYS、SCR、LNK 和 PIF。它不会运行游戏程序，但仍可能包含受权利约束的素材，因此默认发布 workflow 永远不构建或上传该模式。
 
 发行目录审计只允许两个启动程序、`_internal` 运行依赖、编译前端、MIT `LICENSE`、简短 `README.txt`、运行标记和可选 `.runtime`。源码、项目开发文档、测试、构建脚本、Git 元数据、Node 依赖、source map 与 TypeScript/Python 源文件都会使构建失败。
+第三方运行依赖在 `.dist-info` 中附带的许可证与告知文件会保留，但不会因此放行其他 Markdown 或开发文件。
 
 ## 实测体积
 

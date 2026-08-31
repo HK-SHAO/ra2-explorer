@@ -385,6 +385,18 @@ def _contains_bytes(path: Path, needle: bytes) -> bool:
     return False
 
 
+def _is_dependency_license(relative: Path) -> bool:
+    parent_parts = tuple(part.casefold() for part in relative.parts[:-1])
+    return (
+        bool(parent_parts)
+        and parent_parts[0] == "_internal"
+        and any(part.endswith(".dist-info") for part in parent_parts[1:])
+        and relative.stem.casefold().startswith(
+            ("authors", "copying", "license", "notice")
+        )
+    )
+
+
 def audit_distribution(
     package_root: Path,
     *,
@@ -439,7 +451,11 @@ def audit_distribution(
         if any(
             part.casefold() in DENIED_DEVELOPMENT_DIRECTORIES
             for part in relative.parts[:-1]
-        ) or (not in_game_data and file_path.suffix.casefold() in DENIED_SOURCE_SUFFIXES):
+        ) or (
+            not in_game_data
+            and file_path.suffix.casefold() in DENIED_SOURCE_SUFFIXES
+            and not _is_dependency_license(relative)
+        ):
             raise Ra2ExplorerError(f"发行目录包含开发文件：{relative.as_posix()}")
         if file_path.resolve() in allowed_private_files:
             continue
