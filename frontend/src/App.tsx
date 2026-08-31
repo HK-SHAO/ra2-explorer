@@ -252,7 +252,7 @@ const dependencySlotLabels: Record<string, string> = {
   secondary: "副武器",
   elite_primary: "精英主武器",
   elite_secondary: "精英副武器",
-  destruction: "DeathWeapon",
+  destruction: "摧毁武器",
 };
 
 const dependencyPropertyLabels: Record<string, string> = {
@@ -2014,7 +2014,6 @@ function ExplorerApp() {
     setScope: setEntitySearchScope,
     targets: searchTargets,
     setTargets: updateSearchTargets,
-    currentTarget: view === "entities" ? "entities" : "media",
     entityKinds: entitySearchKinds,
     setEntityKinds: setEntitySearchKinds,
     entityUsages: entitySearchUsages,
@@ -2351,7 +2350,6 @@ type CatalogSearchBarProps = {
   setScope: (value: EntitySearchScope) => void;
   targets: CatalogSearchTarget[];
   setTargets: (value: CatalogSearchTarget[]) => void;
-  currentTarget: CatalogSearchTarget;
   entityKinds: EntityKind[];
   setEntityKinds: (value: EntityKind[]) => void;
   entityUsages: EntityUsage[];
@@ -2378,7 +2376,7 @@ type CatalogSearchBarProps = {
 
 function CatalogSearchBar(props: CatalogSearchBarProps) {
   const {
-    query, setQuery, scope, setScope, targets, setTargets, currentTarget,
+    query, setQuery, scope, setScope, targets, setTargets,
     entityKinds, setEntityKinds, entityUsages, setEntityUsages, currentEntityKind,
     entityUsageFacets, entitySides, entitySide, setEntitySide,
     mediaKinds, setMediaKinds, currentMediaKind, mediaGroups, mediaGroup, setMediaGroup,
