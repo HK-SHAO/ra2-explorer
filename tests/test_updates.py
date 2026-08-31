@@ -97,6 +97,39 @@ def test_hugging_face_mirror_is_primary_update_source() -> None:
     assert seen["timeout"] == 8.0
 
 
+def test_hugging_face_dataset_update_channel_uses_dataset_path(tmp_path: Path) -> None:
+    (tmp_path / "update-channel.json").write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "hf_space_repo": "example/ra2-explorer-releases",
+                "hf_repo_type": "dataset",
+            }
+        ),
+        encoding="utf-8",
+    )
+    channel = load_public_update_channel(tmp_path)
+    assert channel is not None
+    seen = {}
+
+    def opener(request: object, *, timeout: float) -> _Response:
+        seen["url"] = request.full_url  # type: ignore[attr-defined]
+        return _Response(_hf_manifest())
+
+    result = check_for_updates(
+        current_version="0.7.0",
+        opener=opener,
+        hf_repository=channel["hf_space_repo"],
+        hf_repository_type=channel["hf_repo_type"],
+    )
+
+    assert result["provider"] == "huggingface"
+    assert "/datasets/example/ra2-explorer-releases/resolve/main/" in seen["url"]
+    assert "/datasets/example/ra2-explorer-releases/resolve/main/" in result["asset"][
+        "download_url"
+    ]
+
+
 def test_update_check_is_explicit_and_returns_release_digest() -> None:
     seen = {}
 
@@ -177,6 +210,7 @@ def test_update_channel_file_uses_hf_mirror_by_default(tmp_path: Path) -> None:
     assert load_public_update_channel(tmp_path) == {
         "hf_space_repo": "example/ra2-explorer",
         "hf_endpoint": DEFAULT_HF_ENDPOINT,
+        "hf_repo_type": "space",
     }
 
 

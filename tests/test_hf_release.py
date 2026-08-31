@@ -27,6 +27,8 @@ def test_hf_release_script_can_run_from_file_path() -> None:
     assert "--resource-pack" in process.stdout
     assert "--space-bundle" in process.stdout
     assert "--force-regular-archive" in process.stdout
+    assert "--repo-type" in process.stdout
+    assert "--create-repository" in process.stdout
 
 
 def test_regular_upload_fallback_is_explicitly_bounded(tmp_path, monkeypatch) -> None:

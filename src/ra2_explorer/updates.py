@@ -38,6 +38,7 @@ def check_for_updates(
     opener: Callable[..., Any] = urlopen,
     hf_repository: str | None = None,
     hf_endpoint: str | None = None,
+    hf_repository_type: str | None = None,
 ) -> dict[str, object]:
     channel = load_public_update_channel()
     repository = (
@@ -50,12 +51,18 @@ def check_for_updates(
         if hf_endpoint is None and channel
         else hf_endpoint or DEFAULT_HF_ENDPOINT
     )
+    repository_type = (
+        str(channel.get("hf_repo_type") or "space")
+        if hf_repository_type is None and hf_repository is None and channel
+        else hf_repository_type or "space"
+    )
     mirror_error: _UpdateNetworkError | None = None
     if repository:
         try:
             return _check_hugging_face(
                 repository,
                 endpoint=endpoint,
+                repository_type=repository_type,
                 current_version=current_version,
                 timeout=timeout,
                 opener=opener,
@@ -78,6 +85,7 @@ def load_public_update_channel(root: Path | None = None) -> dict[str, str] | Non
     environment = {
         "hf_space_repo": os.environ.get("HF_SPACE_RELEASE_REPO", "").strip(),
         "hf_endpoint": os.environ.get("HF_ENDPOINT", "").strip(),
+        "hf_repo_type": os.environ.get("HF_RELEASE_REPO_TYPE", "").strip(),
     }
     if environment["hf_space_repo"]:
         return _validated_channel(environment)
@@ -101,12 +109,17 @@ def _check_hugging_face(
     repository: str,
     *,
     endpoint: str,
+    repository_type: str,
     current_version: str,
     timeout: float,
     opener: Callable[..., Any],
 ) -> dict[str, object]:
     channel = _validated_channel(
-        {"hf_space_repo": repository, "hf_endpoint": endpoint}
+        {
+            "hf_space_repo": repository,
+            "hf_endpoint": endpoint,
+            "hf_repo_type": repository_type,
+        }
     )
     manifest_url = _hf_file_url(channel, "releases/latest.json")
     payload = _fetch_json(
@@ -277,7 +290,14 @@ def _validated_channel(value: dict[str, object]) -> dict[str, str]:
         or parsed.fragment
     ):
         raise Ra2ExplorerError("Hugging Face 更新端点配置无效")
-    return {"hf_space_repo": repository, "hf_endpoint": endpoint}
+    repository_type = str(value.get("hf_repo_type") or "space").strip().casefold()
+    if repository_type not in {"dataset", "space"}:
+        raise Ra2ExplorerError("Hugging Face 更新仓库类型无效")
+    return {
+        "hf_space_repo": repository,
+        "hf_endpoint": endpoint,
+        "hf_repo_type": repository_type,
+    }
 
 
 def _hf_file_url(channel: dict[str, str], path: str) -> str:
@@ -285,7 +305,8 @@ def _hf_file_url(channel: dict[str, str], path: str) -> str:
         raise Ra2ExplorerError("Hugging Face 更新文件路径无效")
     repository = quote(channel["hf_space_repo"], safe="/")
     file_path = quote(path, safe="/")
-    return f"{channel['hf_endpoint']}/spaces/{repository}/resolve/main/{file_path}"
+    repository_prefix = "datasets" if channel["hf_repo_type"] == "dataset" else "spaces"
+    return f"{channel['hf_endpoint']}/{repository_prefix}/{repository}/resolve/main/{file_path}"
 
 
 def _read_local_public_environment(path: Path) -> dict[str, object]:
@@ -300,10 +321,15 @@ def _read_local_public_environment(path: Path) -> dict[str, object]:
             continue
         key, raw_value = line.split("=", 1)
         key = key.removeprefix("export ").strip()
-        if key not in {"HF_ENDPOINT", "HF_SPACE_RELEASE_REPO"}:
+        if key not in {"HF_ENDPOINT", "HF_RELEASE_REPO_TYPE", "HF_SPACE_RELEASE_REPO"}:
             continue
         parsed_value = raw_value.strip().strip('"').strip("'")
-        values["hf_endpoint" if key == "HF_ENDPOINT" else "hf_space_repo"] = parsed_value
+        mapped_key = {
+            "HF_ENDPOINT": "hf_endpoint",
+            "HF_RELEASE_REPO_TYPE": "hf_repo_type",
+            "HF_SPACE_RELEASE_REPO": "hf_space_repo",
+        }[key]
+        values[mapped_key] = parsed_value
     return values
 
 

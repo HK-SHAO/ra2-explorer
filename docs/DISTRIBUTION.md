@@ -42,7 +42,7 @@
 
 ## 自动发布
 
-- `.github\workflows\release.yml` 在 Windows 与 `cmd.exe` 中执行测试、Ruff、隐私扫描、generic 构建、包内容审计、CLI smoke、ZIP、attestation、GitHub Release 和 Hugging Face 镜像同步。
+- `.github\workflows\release.yml` 在 Windows 与 `cmd.exe` 中执行测试、Ruff、隐私扫描、generic 构建、包内容审计、CLI smoke、ZIP、attestation、GitHub Release 和独立 Hugging Face Dataset 镜像同步。
 - `.github\workflows\pages.yml` 下载锁定数据，解包前后审计，构建 `frontend\dist-pages` 并通过官方 Pages actions 发布。
 
 公共 EXE 尚未进行 Authenticode 签名时，Windows SmartScreen 可能显示未知发布者。构建来源证明可以核对 workflow 与 commit，但不替代代码签名。

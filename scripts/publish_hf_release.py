@@ -74,12 +74,20 @@ def publish_release(
     notes: str = "",
     space_bundle: Path | None = None,
     force_regular_archive: bool = False,
+    repository: str | None = None,
+    repository_type: str | None = None,
+    create_repository: bool = False,
 ) -> None:
     _load_local_release_environment(Path.cwd() / ".secrets" / "local.env")
     token = os.environ.get("HF_TOKEN_RELEASE", "").strip()
-    repository = os.environ.get("HF_SPACE_RELEASE_REPO", "").strip()
-    if not token or not repository:
+    resolved_repository = repository or os.environ.get("HF_SPACE_RELEASE_REPO", "").strip()
+    resolved_repository_type = (
+        repository_type or os.environ.get("HF_RELEASE_REPO_TYPE", "space")
+    ).strip().casefold()
+    if not token or not resolved_repository:
         raise RuntimeError("HF release credentials are not configured")
+    if resolved_repository_type not in {"dataset", "space"}:
+        raise ValueError("HF release repository type must be dataset or space")
     if archive.name != UPDATE_ASSET_NAME or not archive.is_file():
         raise FileNotFoundError(f"expected release archive: {UPDATE_ASSET_NAME}")
 
@@ -91,6 +99,13 @@ def publish_release(
     from huggingface_hub import CommitOperationAdd, CommitOperationDelete, HfApi
 
     api = HfApi(endpoint=OFFICIAL_HF_ENDPOINT, token=token)
+    if create_repository:
+        api.create_repo(
+            repo_id=resolved_repository,
+            repo_type=resolved_repository_type,
+            private=False,
+            exist_ok=True,
+        )
     archive_operation = CommitOperationAdd(
         path_in_repo=f"releases/v{normalized}/{UPDATE_ASSET_NAME}",
         path_or_fileobj=archive,
@@ -122,8 +137,8 @@ def publish_release(
             for path in deletions
         )
     api.create_commit(
-        repo_id=repository,
-        repo_type="space",
+        repo_id=resolved_repository,
+        repo_type=resolved_repository_type,
         operations=operations,
         commit_message=f"Publish RA2 Explorer {normalized}",
     )
@@ -294,10 +309,13 @@ def _force_regular_upload(operation: object) -> None:
 
 def _prepare_hf_environment(*, disable_xet: bool = False) -> None:
     os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
     if disable_xet:
         os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
-    else:
+    elif os.name != "nt":
         os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
+    else:
+        os.environ.pop("HF_XET_HIGH_PERFORMANCE", None)
 
 
 def space_sync_plan(
@@ -338,7 +356,7 @@ def _load_local_release_environment(path: Path) -> None:
         lines = path.read_text(encoding="utf-8-sig").splitlines()
     except OSError:
         return
-    allowed = {"HF_TOKEN_RELEASE", "HF_SPACE_RELEASE_REPO"}
+    allowed = {"HF_RELEASE_REPO_TYPE", "HF_TOKEN_RELEASE", "HF_SPACE_RELEASE_REPO"}
     for raw_line in lines:
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -357,6 +375,9 @@ def main() -> int:
     parser.add_argument("--space-bundle", type=Path)
     parser.add_argument("--resource-pack", type=Path)
     parser.add_argument("--force-regular-archive", action="store_true")
+    parser.add_argument("--repository")
+    parser.add_argument("--repo-type", choices=("dataset", "space"))
+    parser.add_argument("--create-repository", action="store_true")
     args = parser.parse_args()
     if args.resource_pack is not None:
         publish_resource_pack(args.resource_pack.resolve())
@@ -377,6 +398,9 @@ def main() -> int:
         notes=notes,
         space_bundle=args.space_bundle.resolve() if args.space_bundle else None,
         force_regular_archive=args.force_regular_archive,
+        repository=args.repository,
+        repository_type=args.repo_type,
+        create_repository=args.create_repository,
     )
     return 0
 
