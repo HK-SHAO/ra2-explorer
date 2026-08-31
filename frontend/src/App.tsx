@@ -545,6 +545,7 @@ function assetIcon(format: string): IconName {
 
 type LayoutMode = "list" | "grid";
 type DetailPlacement = "right" | "bottom";
+type MediaHeaderAlignment = "left" | "center";
 type EntitySort = "cameo" | "faction" | "name_asc" | "name_desc" | "cost_asc" | "cost_desc" | "strength_asc" | "strength_desc";
 type EntitySearchScope = "global" | "current";
 type CatalogSearchTarget = "entities" | "media";
@@ -958,6 +959,12 @@ function storedAutomaticUpdateCheck() {
   return window.localStorage.getItem("ra2exp-auto-update-check-v1") === "true";
 }
 
+function storedMediaHeaderAlignment(): MediaHeaderAlignment {
+  return window.localStorage.getItem("ra2exp-media-header-alignment-v1") === "center"
+    ? "center"
+    : "left";
+}
+
 function categoryCount(stats: Stats, formats: string[]) {
   const selected = new Set(formats);
   return stats.formats.reduce(
@@ -1076,6 +1083,9 @@ function ExplorerApp() {
   const [mediaEventType, setMediaEventType] = useState(rememberedLocation.mediaEventType || "");
   const [mediaGrouped, setMediaGrouped] = useState(
     () => window.localStorage.getItem("ra2exp-media-grouped-v1") !== "false",
+  );
+  const [mediaHeaderAlignment, setMediaHeaderAlignment] = useState<MediaHeaderAlignment>(
+    storedMediaHeaderAlignment,
   );
   const [mediaLoading, setMediaLoading] = useState(false);
   const [mediaSort, setMediaSort] = useState<MediaSort>(rememberedLocation.mediaSort || "name_asc");
@@ -1259,6 +1269,11 @@ function ExplorerApp() {
   function updatePreviewAngle(next: PreviewAngle) {
     setPreviewAngle(next);
     window.localStorage.setItem("ra2exp-preview-angle-v1", String(next));
+  }
+
+  function updateMediaHeaderAlignment(next: MediaHeaderAlignment) {
+    setMediaHeaderAlignment(next);
+    window.localStorage.setItem("ra2exp-media-header-alignment-v1", next);
   }
 
   function updateEntitySort(next: EntitySort) {
@@ -2144,6 +2159,7 @@ function ExplorerApp() {
               setMediaGrouped(next);
               window.localStorage.setItem("ra2exp-media-grouped-v1", String(next));
             }}
+            headerAlignment={mediaHeaderAlignment}
             selectedId={selectedId}
               onSelect={selectMediaCard}
             playingId={playingMediaId}
@@ -2259,6 +2275,8 @@ function ExplorerApp() {
         onGameLanguageChange={updateGameLanguage}
         previewAngle={previewAngle}
         onPreviewAngleChange={updatePreviewAngle}
+        mediaHeaderAlignment={mediaHeaderAlignment}
+        onMediaHeaderAlignmentChange={updateMediaHeaderAlignment}
         sources={sources}
         selectedSourceId={sourceId}
         discoveries={discovery.candidates}
@@ -2546,7 +2564,7 @@ function CatalogSearchBar(props: CatalogSearchBarProps) {
   </div>;
 }
 
-function MediaListPanel({ items, total, loading, search, groups, selectedGroup, setSelectedGroup, eventTypes, selectedEventType, setSelectedEventType, grouped, setGrouped, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore, scrollKey }: {
+function MediaListPanel({ items, total, loading, search, groups, selectedGroup, setSelectedGroup, eventTypes, selectedEventType, setSelectedEventType, grouped, setGrouped, headerAlignment, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore, scrollKey }: {
   items: MediaItem[];
   total: number;
   loading: boolean;
@@ -2559,6 +2577,7 @@ function MediaListPanel({ items, total, loading, search, groups, selectedGroup, 
   setSelectedEventType: (value: string) => void;
   grouped: boolean;
   setGrouped: (value: boolean) => void;
+  headerAlignment: MediaHeaderAlignment;
   selectedId: string;
   onSelect: (id: string) => void;
   playingId: string;
@@ -2570,6 +2589,7 @@ function MediaListPanel({ items, total, loading, search, groups, selectedGroup, 
   scrollKey: string;
 }) {
   const listScroll = useRememberedScroll(scrollKey, items.length);
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
   const sections = useMemo(() => {
     const groupedItems = new Map<string, { label: string; subtitle: string; items: MediaItem[] }>();
     for (const item of items) {
@@ -2580,6 +2600,30 @@ function MediaListPanel({ items, total, loading, search, groups, selectedGroup, 
     }
     return [...groupedItems.entries()].map(([key, section]) => ({ key, ...section }));
   }, [items]);
+  const allSectionsExpanded = sections.every((section) => !collapsedSections.has(section.key));
+
+  useEffect(() => {
+    const available = new Set(sections.map((section) => section.key));
+    setCollapsedSections((current) => {
+      const next = new Set([...current].filter((key) => available.has(key)));
+      return next.size === current.size ? current : next;
+    });
+  }, [sections]);
+
+  function toggleSection(key: string) {
+    setCollapsedSections((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function toggleAllSections() {
+    setCollapsedSections(allSectionsExpanded
+      ? new Set(sections.map((section) => section.key))
+      : new Set());
+  }
 
   function renderMediaItem(item: MediaItem) {
     if (layout === "list") {
@@ -2615,12 +2659,23 @@ function MediaListPanel({ items, total, loading, search, groups, selectedGroup, 
         </div>
         <div className="media-filter-actions">
           <label className="group-toggle"><input type="checkbox" checked={grouped} onChange={(event) => setGrouped(event.target.checked)} /><span>分组</span></label>
+          {grouped && sections.length > 0 && <button type="button" className="group-collapse-toggle" aria-expanded={allSectionsExpanded} onClick={toggleAllSections}><Icon name="chevron" size={14} /><span>{allSectionsExpanded ? "全部收起" : "全部展开"}</span></button>}
           <label className="sort-control"><span>排序</span><select value={sort} onChange={(event) => setSort(event.target.value as MediaSort)}><option value="name_asc">文件名 A–Z</option><option value="name_desc">文件名 Z–A</option><option value="description_asc">说明 A–Z</option></select></label>
         </div>
       </div>
-      <div ref={listScroll.ref} className={`asset-list ${grouped ? "media-grouped-list" : layout === "grid" ? "asset-grid media-grid" : "list-columns"}`} tabIndex={0} aria-label="声音列表" onScroll={(event) => { listScroll.remember(event); const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void onLoadMore(); }}>
+      <div ref={listScroll.ref} className={`asset-list ${grouped ? `media-grouped-list media-header-align-${headerAlignment}` : layout === "grid" ? "asset-grid media-grid" : "list-columns"}`} tabIndex={0} aria-label="声音列表" onScroll={(event) => { listScroll.remember(event); const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void onLoadMore(); }}>
         {grouped
-          ? sections.map((section) => <section className="media-group-section" key={section.key}><header><span><strong title={section.label}>{section.label}</strong>{section.subtitle && <small>{section.subtitle}</small>}</span><em>{section.items.length}</em></header><div className={layout === "grid" ? "asset-grid media-grid media-group-items" : "list-columns media-group-items"}>{section.items.map(renderMediaItem)}</div></section>)
+          ? sections.map((section, index) => {
+            const expanded = !collapsedSections.has(section.key);
+            const contentId = `media-group-${index}`;
+            return <section className={`media-group-section ${expanded ? "expanded" : "collapsed"}`} key={section.key}>
+              <button type="button" className="media-group-header" aria-expanded={expanded} aria-controls={contentId} onClick={() => toggleSection(section.key)}>
+                <span className="media-group-heading"><strong title={section.label}>{section.label}</strong><em>{section.items.length}</em>{section.subtitle && <small>{section.subtitle}</small>}</span>
+                <Icon name="chevron" size={15} />
+              </button>
+              {expanded && <div id={contentId} className={layout === "grid" ? "asset-grid media-grid media-group-items" : "list-columns media-group-items"}>{section.items.map(renderMediaItem)}</div>}
+            </section>;
+          })
           : items.map(renderMediaItem)}
         {items.length < total && <button className="load-more" disabled={loading} onClick={() => void onLoadMore()}>{loading ? "正在载入…" : `载入更多（剩余 ${(total - items.length).toLocaleString("zh-CN")}）`}</button>}
         {loading && items.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在建立声音关联…</strong></div>}
@@ -4435,6 +4490,8 @@ function SettingsDialog({
   onGameLanguageChange,
   previewAngle,
   onPreviewAngleChange,
+  mediaHeaderAlignment,
+  onMediaHeaderAlignmentChange,
   sources,
   selectedSourceId,
   discoveries,
@@ -4463,6 +4520,8 @@ function SettingsDialog({
   onGameLanguageChange: (language: GameLanguage) => void;
   previewAngle: PreviewAngle;
   onPreviewAngleChange: (angle: PreviewAngle) => void;
+  mediaHeaderAlignment: MediaHeaderAlignment;
+  onMediaHeaderAlignmentChange: (alignment: MediaHeaderAlignment) => void;
   sources: Source[];
   selectedSourceId: string;
   discoveries: GameInstallation[];
@@ -4550,6 +4609,13 @@ function SettingsDialog({
                   <select className="display-setting-select" aria-label="单位默认预览角度" value={previewAngle} onChange={(event) => onPreviewAngleChange(normalizePreviewAngle(Number(event.target.value)))}>
                     {previewAngleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
+                </div>
+                <div className="display-setting-row">
+                  <strong>声音分组标题</strong>
+                  <div className="layout-choice" role="group" aria-label="声音分组标题对齐方式">
+                    <button type="button" className={mediaHeaderAlignment === "left" ? "active" : ""} onClick={() => onMediaHeaderAlignmentChange("left")}>左对齐</button>
+                    <button type="button" className={mediaHeaderAlignment === "center" ? "active" : ""} onClick={() => onMediaHeaderAlignmentChange("center")}>居中</button>
+                  </div>
                 </div>
               </div>
             </section>
