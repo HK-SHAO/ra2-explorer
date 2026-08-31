@@ -4893,7 +4893,7 @@ function SettingsDialog({
 
             {!isStaticSnapshot && <section className="settings-section" id="settings-updates">
               <header><h3>应用更新</h3><span>当前 {currentVersion || updateInfo?.current_version || "—"}</span></header>
-              <label className="settings-toggle"><input type="checkbox" checked={automaticUpdateCheck} onChange={(event) => onAutomaticUpdateCheckChange(event.target.checked)} /><span><strong>应用启动时检查更新</strong><small>优先使用 Hugging Face 镜像；不会自动下载或安装。</small></span></label>
+              <label className="settings-toggle"><input type="checkbox" checked={automaticUpdateCheck} onChange={(event) => onAutomaticUpdateCheckChange(event.target.checked)} /><span><strong>应用启动时检查更新</strong><small>从 GitHub Releases 获取版本信息；不会自动下载或安装。</small></span></label>
               <div className="update-actions">
                 <button type="button" className="button ghost" disabled={updateChecking} onClick={() => void onCheckUpdate()}>{updateChecking ? "正在检查…" : "检查更新"}</button>
                 {updateInfo?.update_available && updateInfo.asset && <a className="button primary" href={updateInfo.asset.download_url} target="_blank" rel="noreferrer"><Icon name="download" />下载 {updateInfo.latest_version}</a>}

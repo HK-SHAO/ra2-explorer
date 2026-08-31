@@ -13,6 +13,6 @@
 | [开发指南](DEVELOPMENT.md) | 开发者 | 环境、测试、后台服务和发布命令 |
 | [架构](ARCHITECTURE.md) | 开发者 | 当前运行模型、语义层、缓存与 API 边界 |
 | [游戏源输入](GAME_SOURCE_INPUTS.md) | 开发者 | 真正参与解析的零售文件与覆盖顺序 |
-| [Hugging Face 文件镜像](HUGGINGFACE.md) | 维护者 | 稳定安装包与 Pages 数据的文件分发 |
+| [已归档的 HF 发布链路](archive/HUGGINGFACE.md) | 维护者 | 2026-08-31 前实现的只读历史入口 |
 
-实现事实优先以代码、测试和锁定清单为准：应用版本在 `pyproject.toml`，Pages 完整数据在 `packaging/pages-data.json`，高频 CDN 数据在 `packaging/pages-cdn.json`，自动发布流程在 `.github/workflows/`。容易变化的 commit、快照哈希和构建结果不应复制到多份文档。
+实现事实优先以代码、测试和锁定清单为准：应用版本在 `pyproject.toml`，Pages 完整数据在 `packaging/pages-data.json`，高频 CDN 数据在 `packaging/pages-cdn.json`，自动发布流程在 `.github/workflows/`。`docs/archive/` 只保留已退出主线的历史说明，不代表当前支持的部署方式。容易变化的 commit、快照哈希和构建结果不应复制到多份文档。

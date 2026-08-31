@@ -16,7 +16,7 @@ Pages 不运行 Python、FastAPI 或 SQLite。发布前由本地解析器把真�
 | --- | ---: | ---: |
 | 单位 | 559 | — |
 | 声音 | 3,322 | — |
-| 发布文件 | 28,977 | — |
+| 发布文件 | 28,978 | — |
 | 解包后的 Pages 数据 | 146,007,104 字节 | 139.2 MiB |
 | 固定数据 ZIP | 80,437,370 字节 | 76.7 MiB |
 | ZIP SHA-256 | `16f7a46e0632b9c8192df2a9872acefa6d75a14b0a1200666e42d3674073eee8` | — |
@@ -40,9 +40,9 @@ GitHub 官方给出的 Pages 限制包括：发布站点最大 1 GB、每月 100
 
 ## 为什么大数据不进入主分支
 
-主分支只追踪前端、导出器、审计脚本和两个小型锁定清单。76.7 MiB ZIP 存放在独立的 Hugging Face Dataset，`packaging/pages-data.json` 记录不可变 revision、大小和 SHA-256；高频启动文件存放在 npm，`packaging/pages-cdn.json` 记录精确版本、内容摘要和 jsDelivr 基址。Vite 直接读取 CDN 锁，不在多个环境文件中重复版本。两种远端文件都不依赖或启动 Space 容器。
+主分支只追踪前端、导出器、审计脚本和两个小型锁定清单。76.7 MiB ZIP 分为 10 个不超过 8 MiB 的资产，存放在独立的 [`pages-data-0.11.0` GitHub Release](https://github.com/Hansimov/ra2-explorer/releases/tag/pages-data-0.11.0)。`packaging/pages-data.json` 固定 tag、分片名称、每片大小与 SHA-256，以及合并后整包大小与 SHA-256；高频启动文件存放在 npm，`packaging/pages-cdn.json` 记录精确版本、内容摘要和 jsDelivr 基址。Vite 直接读取 CDN 锁，不在多个环境文件中重复版本。
 
-Pages workflow 默认从 `https://hf-mirror.com` 下载，网络失败才回退 `https://huggingface.co`。下载后必须依次通过固定字节数、SHA-256、ZIP 路径安全、文件类型白名单、原始游戏格式禁令、清单计数和隐私扫描，之后才允许解包进站点 artifact。代码版本更新不会重新上传数据；只有解析结果、模型或声音实际变化时才发布新快照并更新锁定清单。
+Pages workflow 从固定 GitHub 数据 Release 并行下载最多四个分片，逐片校验后按顺序合并，再依次验证整包字节数、SHA-256、ZIP 路径安全、文件类型白名单、原始游戏格式禁令、清单计数和隐私扫描；全部通过后才允许解包进站点 artifact。代码版本更新不会重新上传数据；只有解析结果、模型或声音实际变化时才创建新的数据 tag 并更新锁定清单。
 
 ## 构建与发布
 
@@ -63,11 +63,11 @@ Pages workflow 默认从 `https://hf-mirror.com` 下载，网络失败才回退 
 只有数据发生变化时才上传，并原子更新小型锁定清单：
 
 ```bat
-.venv\Scripts\python.exe scripts\publish_pages_snapshot.py ".runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip" --repository rockstarengine/ra2-explorer-pages-data --repo-type dataset --create-repository
+.venv\Scripts\python.exe scripts\publish_pages_snapshot.py ".runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip" --tag pages-data-0.11.0
 .venv\Scripts\python.exe scripts\publish_pages_cdn.py ".runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip" --version 0.11.0 --overwrite --publish
 ```
 
-第二条命令只提取清单、目录和卡片图集，`NPM_TOKEN` 只从 `.secrets\local.env` 或进程环境读取。发布器以环境变量占位生成临时 npm 配置，结束后立即删除；token 不进入命令参数、包内容或锁定清单。npm 版本不可覆盖，每次数据变化必须使用新版本并同步提交两个锁。
+第一条发布命令从 `.secrets\local.env` 或进程环境读取 `GITHUB_TOKEN_RA2_EXPLORER`，先审计 ZIP，再把它拆为 8 MiB 分片上传；中断后重跑会校验并跳过已完成分片。第二条命令只提取清单、目录和卡片图集，`NPM_TOKEN` 同样只从本机凭据文件或进程环境读取。两个发布器都不会把令牌写入命令输出、包内容或锁定清单。npm 版本和数据 tag 不覆盖旧内容，每次数据变化必须使用新版本并同步提交两个锁。
 
 前端静态构建和本机预览：
 
@@ -97,6 +97,6 @@ Pages 构建写入独立的 `frontend\dist-pages`，普通本地应用继续使�
 - 启动目录与卡片图集优先走固定版本 jsDelivr，Pages 保留同源副本并仅在失败时回退，不用竞速请求制造双倍流量；
 - 单位页不为声音计数读取完整声音目录；本地版首屏卡片和后台预取使用独立优先级与有界并发，切换分类时新前台请求可越过旧后台队列；
 - 简体、繁体目录分离，模型、声音和详情完全按需；
-- 完整数据存放在固定 Dataset 提交，高频数据存放在固定 npm 版本；普通代码发布不产生重复的大文件历史。
+- 完整数据存放在固定 GitHub 数据 Release，高频数据存放在固定 npm 版本；普通代码发布不产生重复的大文件历史。
 
 进一步下降体积时，优先考虑把体素 JSON 改为量化二进制并使用 meshopt、拆分声音目录索引、对共享元数据去重，以及为静态资源增加内容寻址文件名。不要用“启动时把全部资源读进内存”换取速度：那会显著增加移动设备内存、首次流量和主线程解析时间。

@@ -19,7 +19,7 @@
 
 `portable` 排除 EXE、DLL、BAT、CMD、COM、MSI、SYS、SCR、LNK 和 PIF；默认 workflow 永远不构建或上传它。
 
-公共目录只允许 `RA2 Explorer.exe`、`ra2exp.exe`、共享 `_internal`、编译前端、公开参考数据、MIT `LICENSE`、简短 `README.txt`、运行标记和公开更新通道。源码、测试、项目文档、Git 元数据、Node 依赖、source map 和构建脚本都会使审计失败；第三方运行依赖在 `.dist-info` 中必须保留的许可证文件除外。
+公共目录只允许 `RA2 Explorer.exe`、`ra2exp.exe`、共享 `_internal`、编译前端、公开参考数据、MIT `LICENSE`、简短 `README.txt` 和运行标记。源码、测试、项目文档、Git 元数据、Node 依赖、source map、构建脚本和外部更新通道配置都会使审计失败；第三方运行依赖在 `.dist-info` 中必须保留的许可证文件除外。
 
 ## 构建体积
 
@@ -38,11 +38,11 @@
 
 ## 大文件隔离
 
-主分支只追踪代码、`packaging\pages-data.json` 和 `packaging\pages-cdn.json`。Pages 完整 ZIP 存放在独立 Hugging Face Dataset 并固定到不可变 revision；高频清单、目录和卡片图集固定到 npm 精确版本并由 jsDelivr 分发。浏览器只请求所需文件，CDN 失败时回退 Pages 同源副本。`.ra2pack`、游戏文件和本地发行输出均位于被 Git 忽略的目录。
+主分支只追踪代码、`packaging\pages-data.json` 和 `packaging\pages-cdn.json`。Pages 完整 ZIP 以 8 MiB 分片存放在独立 GitHub 数据 Release；锁定清单固定 tag、每片大小与 SHA-256，以及合并后整包大小与 SHA-256。高频清单、目录和卡片图集固定到 npm 精确版本并由 jsDelivr 分发。浏览器只请求所需文件，CDN 失败时回退 Pages 同源副本。`.ra2pack`、游戏文件和本地发行输出均位于被 Git 忽略的目录。
 
 ## 自动发布
 
-- `.github\workflows\release.yml` 在 Windows 与 `cmd.exe` 中执行测试、Ruff、隐私扫描、generic 构建、包内容审计、CLI smoke、ZIP、attestation、GitHub Release 和独立 Hugging Face Dataset 镜像同步。
+- `.github\workflows\release.yml` 在 Windows 与 `cmd.exe` 中执行测试、Ruff、隐私扫描、generic 构建、包内容审计、CLI smoke、ZIP、attestation 和 GitHub Release 发布。
 - `.github\workflows\pages.yml` 下载锁定数据，解包前后审计，构建 `frontend\dist-pages` 并通过官方 Pages actions 发布。
 
 公共 EXE 尚未进行 Authenticode 签名时，Windows SmartScreen 可能显示未知发布者。构建来源证明可以核对 workflow 与 commit，但不替代代码签名。
