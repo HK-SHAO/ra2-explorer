@@ -988,6 +988,23 @@ def archive_pages_snapshot(
     }
 
 
+def _pages_audio_stats(
+    media: dict[str, Any],
+    audio_ids: set[str],
+) -> dict[str, object]:
+    format_counts = Counter(str(item["asset"]["format"]) for item in media["items"])
+    return {
+        "total_assets": len(audio_ids),
+        "formats": [
+            {"format": format_name, "count": count}
+            for format_name, count in sorted(format_counts.items())
+        ],
+        "media_kinds": media["kinds"],
+        "media_groups": media["groups"],
+        "media_event_types": media["event_types"],
+    }
+
+
 def build_pages_snapshot(
     settings: Settings,
     source_id: str,
@@ -1100,16 +1117,7 @@ def build_pages_snapshot(
             },
         )
 
-        format_counts = Counter(
-            str(item["asset"]["format"]) for item in media_cn["items"]
-        )
-        audio_stats = {
-            "total_assets": len(audio_ids),
-            "formats": [
-                {"format": format_name, "count": count}
-                for format_name, count in sorted(format_counts.items())
-            ],
-        }
+        audio_stats = _pages_audio_stats(media_cn, audio_ids)
         diagnostics = _request_json(
             client,
             f"/api/semantic/{quote(source_id, safe='')}/diagnostics",

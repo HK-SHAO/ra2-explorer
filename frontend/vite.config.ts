@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
 function gitValue(args: string[]) {
@@ -22,9 +22,28 @@ export default defineConfig(({ mode }) => {
     ? gitValue(["rev-list", "--left-right", "--count", `${stableTag}...HEAD`]).split(/\s+/)
     : [];
   const repositoryUrl = (env.VITE_RA2EXP_REPOSITORY_URL || "https://github.com/Hansimov/ra2-explorer").replace(/\/$/, "");
+  const publicBase = env.RA2EXP_PUBLIC_BASE || "/";
+  const normalizedBase = publicBase.endsWith("/") ? publicBase : `${publicBase}/`;
+  const defaultAtlas = env.RA2EXP_DEFAULT_ATLAS?.replace(/^\/+/, "");
+  const preloadPagesAtlas = {
+    name: "preload-pages-unit-atlas",
+    transformIndexHtml() {
+      if (mode !== "pages" || !defaultAtlas) return [];
+      return [{
+        tag: "link",
+        attrs: {
+          rel: "preload",
+          as: "image",
+          type: "image/webp",
+          href: `${normalizedBase}data/${defaultAtlas}`,
+        },
+        injectTo: "head-prepend" as const,
+      }];
+    },
+  } satisfies Plugin;
   return {
-    base: env.RA2EXP_PUBLIC_BASE || "/",
-    plugins: [react()],
+    base: publicBase,
+    plugins: [react(), preloadPagesAtlas],
     define: {
       "import.meta.env.VITE_RA2EXP_BUILD_COMMIT": JSON.stringify(buildCommit),
       "import.meta.env.VITE_RA2EXP_BUILD_TAG": JSON.stringify(buildTag),

@@ -17,6 +17,7 @@ from ra2_explorer.pages_snapshot import (
     _directory_stats,
     _entity_thumbnail_atlas_cell,
     _export_entity_thumbnail_atlases,
+    _pages_audio_stats,
     _prune_reused_exports,
     _safe_filename,
     _snapshot_identity,
@@ -272,3 +273,22 @@ def test_pages_exports_one_thumbnail_atlas_request_per_entity_kind(
     assert (tmp_path / "previews/entity-atlases/infantry/7-r3.webp").is_file()
     with Image.open(tmp_path / "previews/entity-atlases/infantry/0-r3.webp") as atlas:
         assert atlas.size == (144, 135)
+
+
+def test_pages_audio_stats_include_lightweight_media_facets() -> None:
+    media = {
+        "items": [{"asset": {"format": "wav"}}, {"asset": {"format": "wav"}}],
+        "kinds": [{"kind": "voice", "count": 2}],
+        "groups": [{"group": "selection_voice", "count": 2}],
+        "event_types": [{"event_type": "select", "count": 2}],
+    }
+
+    stats = _pages_audio_stats(media, {"one", "two"})
+
+    assert stats == {
+        "total_assets": 2,
+        "formats": [{"format": "wav", "count": 2}],
+        "media_kinds": [{"kind": "voice", "count": 2}],
+        "media_groups": [{"group": "selection_voice", "count": 2}],
+        "media_event_types": [{"event_type": "select", "count": 2}],
+    }

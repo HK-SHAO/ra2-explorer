@@ -56,6 +56,9 @@ export interface FormatCount {
 export interface Stats {
   total_assets: number;
   formats: FormatCount[];
+  media_kinds?: Array<{ kind: MediaKind; count: number }>;
+  media_groups?: Array<{ group: string; count: number }>;
+  media_event_types?: Array<{ event_type: string; count: number }>;
 }
 
 export interface AppInfo {

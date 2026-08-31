@@ -1600,6 +1600,9 @@ function ExplorerApp() {
         if (cancelled) return;
         setStats(nextStats);
         setPalettes(nextPalettes);
+        setMediaKindCounts(nextStats.media_kinds || []);
+        setMediaGroups(orderedMediaGroups(nextStats.media_groups || []));
+        setMediaEventTypes(nextStats.media_event_types || []);
       })
       .catch((reason: Error) => !cancelled && setError(reason.message));
     return () => { cancelled = true; };
