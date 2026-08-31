@@ -23,6 +23,7 @@
 **/*.pyc
 node_modules/
 dist/
+dist-pages/
 
 *.tmp
 *.bak

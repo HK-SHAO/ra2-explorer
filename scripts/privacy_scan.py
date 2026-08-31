@@ -32,6 +32,7 @@ IGNORED_PATHS = (
     ".venv/*",
     "frontend/node_modules/*",
     "frontend/dist/*",
+    "frontend/dist-pages/*",
     "node_modules/*",
 )
 

@@ -35,6 +35,7 @@ export default defineConfig(({ mode }) => {
       "import.meta.env.VITE_RA2EXP_REPOSITORY_URL": JSON.stringify(repositoryUrl),
     },
     build: {
+      outDir: mode === "pages" ? "dist-pages" : "dist",
       rollupOptions: {
         output: {
           manualChunks(id) {
