@@ -3,6 +3,7 @@ export type ResourcePriority = "foreground" | "background";
 interface ImageJob {
   url: string;
   priority: ResourcePriority;
+  startedPriority: ResourcePriority | null;
   batch: number;
   image: HTMLImageElement | null;
   resolve: (loaded: boolean) => void;
@@ -14,8 +15,10 @@ const pendingCardPreviews = new Map<string, ImageJob>();
 const cardPreviewQueue: ImageJob[] = [];
 const retainedCardImages = new Map<string, HTMLImageElement>();
 const retainedCardImageLimit = 96;
-const cardPreviewConcurrency = 6;
+const cardPreviewForegroundConcurrency = 8;
+const cardPreviewBackgroundConcurrency = 2;
 let activeCardPreviews = 0;
+let activeBackgroundCardPreviews = 0;
 let backgroundPauseDepth = 0;
 let latestCardPreviewBatch = 0;
 
@@ -31,6 +34,9 @@ function retainDecodedCard(url: string, image: HTMLImageElement) {
 
 function finishCardPreview(job: ImageJob, loaded: boolean) {
   activeCardPreviews = Math.max(0, activeCardPreviews - 1);
+  if (job.startedPriority === "background") {
+    activeBackgroundCardPreviews = Math.max(0, activeBackgroundCardPreviews - 1);
+  }
   pendingCardPreviews.delete(job.url);
   if (loaded && job.image) {
     completedCardPreviews.add(job.url);
@@ -41,7 +47,9 @@ function finishCardPreview(job: ImageJob, loaded: boolean) {
 }
 
 function startCardPreview(job: ImageJob) {
+  job.startedPriority = job.priority;
   activeCardPreviews += 1;
+  if (job.startedPriority === "background") activeBackgroundCardPreviews += 1;
   const image = new Image();
   job.image = image;
   image.decoding = "async";
@@ -58,10 +66,15 @@ function startCardPreview(job: ImageJob) {
 }
 
 function drainCardPreviewQueue() {
-  while (activeCardPreviews < cardPreviewConcurrency && cardPreviewQueue.length > 0) {
+  while (activeCardPreviews < cardPreviewForegroundConcurrency && cardPreviewQueue.length > 0) {
     const foregroundIndex = cardPreviewQueue.findIndex((job) => job.priority === "foreground");
     let nextIndex = foregroundIndex;
-    if (nextIndex < 0 && backgroundPauseDepth === 0) {
+    if (
+      nextIndex < 0
+      && backgroundPauseDepth === 0
+      && activeBackgroundCardPreviews < cardPreviewBackgroundConcurrency
+      && activeCardPreviews < cardPreviewBackgroundConcurrency
+    ) {
       let newestBatch = -1;
       for (let index = 0; index < cardPreviewQueue.length; index += 1) {
         if (cardPreviewQueue[index].batch <= newestBatch) continue;
@@ -95,7 +108,7 @@ function enqueueCardPreview(url: string, priority: ResourcePriority, batch: numb
 
   let resolveJob: (loaded: boolean) => void = () => {};
   const promise = new Promise<boolean>((resolve) => { resolveJob = resolve; });
-  const job: ImageJob = { url, priority, batch, image: null, resolve: resolveJob, promise };
+  const job: ImageJob = { url, priority, startedPriority: null, batch, image: null, resolve: resolveJob, promise };
   pendingCardPreviews.set(url, job);
   cardPreviewQueue.push(job);
   drainCardPreviewQueue();

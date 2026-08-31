@@ -1415,6 +1415,8 @@ function ExplorerApp() {
     setEntityTotal(0);
     setEntitySides([]);
     setMediaItems([]);
+    setMediaGroups([]);
+    setMediaKindCounts([]);
     setMediaEventTypes([]);
     setTotal(0);
     setMediaTotal(0);
@@ -1427,14 +1429,11 @@ function ExplorerApp() {
     Promise.all([
       api.stats(sourceId),
       isStaticSnapshot ? Promise.resolve([] as Asset[]) : api.palettes(sourceId),
-      api.media(sourceId, { kind: "voice", limit: 1, language: gameLanguage }),
     ])
-      .then(([nextStats, nextPalettes, mediaFacets]) => {
+      .then(([nextStats, nextPalettes]) => {
         if (cancelled) return;
         setStats(nextStats);
         setPalettes(nextPalettes);
-        setMediaGroups(mediaFacets.groups);
-        setMediaKindCounts(mediaFacets.kinds);
       })
       .catch((reason: Error) => !cancelled && setError(reason.message));
     return () => { cancelled = true; };
@@ -1566,7 +1565,11 @@ function ExplorerApp() {
     const urls = visibleEntities
       .filter((entity) => entity.renderable)
       .map((entity) => entityCardPreviewUrl(entity, sourceId, previewAngle, sourceRevision));
-    const timer = window.setTimeout(() => preloadCardPreviewGroup(urls), 80);
+    for (const url of urls.slice(0, 12)) void preloadCardPreview(url, "foreground");
+    const timer = window.setTimeout(
+      () => preloadCardPreviewGroup(urls.slice(12)),
+      isStaticSnapshot ? 1_600 : 400,
+    );
     return () => window.clearTimeout(timer);
   }, [view, sourceId, sourceRevision, visibleEntities, previewAngle]);
 
@@ -1821,7 +1824,7 @@ function ExplorerApp() {
                 <div className="tree-parent"><Icon name="play" /><strong>声音</strong><em>{mediaKindCounts.reduce((count, item) => count + item.count, 0) || categoryCount(stats, audioFormats)}</em></div>
                 <div className="tree-children">
                   {visibleCategories.filter((item) => ["voices", "sounds"].includes(item.id)).map((item) => <div className="tree-child-group" key={item.id}>
-                    <button title={item.label} className={view === "assets" && assetCategory === item.id && !mediaGroup ? "active" : ""} onClick={() => selectAssetCategory(item.id)}><span><Icon name={item.id === "voices" ? "voice" : "sound"} /><b>{item.label}</b></span><em>{mediaKindCounts.find((count) => count.kind === (item.id === "voices" ? "voice" : "sound"))?.count || 0}</em></button>
+                    <button title={item.label} className={view === "assets" && assetCategory === item.id && !mediaGroup ? "active" : ""} onClick={() => selectAssetCategory(item.id)}><span><Icon name={item.id === "voices" ? "voice" : "sound"} /><b>{item.label}</b></span>{mediaKindCounts.length > 0 && <em>{mediaKindCounts.find((count) => count.kind === (item.id === "voices" ? "voice" : "sound"))?.count || 0}</em>}</button>
                     {view === "assets" && assetCategory === item.id && mediaGroups.filter((group) => group.group.endsWith(item.id === "voices" ? "_voice" : "_sound")).map((group) => <button title={mediaGroupLabels[group.group] || group.group} className={`tree-grandchild ${mediaGroup === group.group ? "active" : ""}`} key={group.group} onClick={() => setMediaGroup(mediaGroup === group.group ? "" : group.group)}><span><Icon name={item.id === "voices" ? "voice" : "sound"} /><b>{mediaGroupLabels[group.group] || group.group}</b></span><em>{group.count}</em></button>)}
                   </div>)}
                 </div>
