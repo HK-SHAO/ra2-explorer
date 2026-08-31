@@ -5,6 +5,7 @@ import {
   staticAudioUrl,
   staticEntityModelUrl,
   staticEntityPreviewUrl,
+  staticEntityThumbnailAtlasUrl,
   staticSnapshotRequest,
 } from "./staticSnapshot";
 
@@ -221,6 +222,14 @@ export interface EntitySummary {
     display_name: string;
     icon: EntityComponentAsset | null;
   } | null;
+  thumbnail_atlas?: {
+    path: string;
+    index: number;
+    columns: number;
+    cell_width: number;
+    cell_height: number;
+    facing_count: number;
+  };
 }
 
 export type AssetSort = "name_asc" | "name_desc" | "size_desc" | "size_asc";
@@ -613,6 +622,9 @@ export const api = {
     if (options.revision) params.set("r", options.revision);
     return `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}/preview.png?${params}`;
   },
+  entityThumbnailAtlasUrl: (path: string, facing: number) => isStaticSnapshot
+    ? staticEntityThumbnailAtlasUrl(path, facing)
+    : "",
   entityModelUrl: (
     sourceId: string,
     entityId: string,

@@ -15,6 +15,8 @@ from ra2_explorer.pages_snapshot import (
     _AssetUsage,
     _composite_entity_preview_layers,
     _directory_stats,
+    _entity_thumbnail_atlas_cell,
+    _export_entity_thumbnail_atlases,
     _prune_reused_exports,
     _safe_filename,
     _snapshot_identity,
@@ -210,3 +212,63 @@ def test_pages_building_preview_focus_includes_every_visible_main_layer() -> Non
 
     assert composite.size == (200, 100)
     assert focus == (90, 40, 190, 60)
+
+
+def test_pages_thumbnail_atlas_cell_matches_card_dimensions() -> None:
+    source = Image.new("RGBA", (20, 10), (255, 0, 0, 255))
+
+    cell = _entity_thumbnail_atlas_cell(source, "shp")
+
+    assert cell.size == (144, 135)
+    assert cell.getchannel("A").getbbox() == (10, 33, 134, 95)
+
+
+def test_pages_exports_one_thumbnail_atlas_request_per_entity_kind(
+    tmp_path: Path,
+) -> None:
+    entities = []
+    for entity_id, kind, supports_facing in (
+        ("TANK", "vehicle", True),
+        ("SOLDIER", "infantry", True),
+    ):
+        facing_count = 8 if supports_facing else 1
+        for facing in range(facing_count):
+            output = (
+                tmp_path
+                / "previews"
+                / "entities"
+                / entity_id
+                / "thumbnail"
+                / str(facing)
+                / "0.webp"
+            )
+            output.parent.mkdir(parents=True, exist_ok=True)
+            Image.new("RGBA", (24, 16), (facing, 20, 30, 255)).save(
+                output,
+                format="WEBP",
+                lossless=True,
+            )
+        entities.append(
+            {
+                "id": entity_id,
+                "kind": kind,
+                "body_format": "shp",
+                "renderable": True,
+                "preview": {
+                    "format": "shp",
+                    "supports_facing": supports_facing,
+                },
+            }
+        )
+
+    metadata = _export_entity_thumbnail_atlases(tmp_path, entities)
+
+    assert metadata["TANK"]["facing_count"] == 1
+    assert metadata["SOLDIER"]["facing_count"] == 8
+    assert metadata["SOLDIER"]["path"] == (
+        "previews/entity-atlases/infantry/{facing}-r3.webp"
+    )
+    assert (tmp_path / "previews/entity-atlases/vehicle/0-r3.webp").is_file()
+    assert (tmp_path / "previews/entity-atlases/infantry/7-r3.webp").is_file()
+    with Image.open(tmp_path / "previews/entity-atlases/infantry/0-r3.webp") as atlas:
+        assert atlas.size == (144, 135)

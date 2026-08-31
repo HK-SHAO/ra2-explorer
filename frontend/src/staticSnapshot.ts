@@ -395,6 +395,10 @@ export function staticEntityPreviewUrl(
   );
 }
 
+export function staticEntityThumbnailAtlasUrl(path: string, facing: number) {
+  return snapshotUrl(path.replace("{facing}", String(facing)));
+}
+
 export function staticEntityModelUrl(entityId: string, frame = 0) {
   return snapshotUrl(`models/entities/${encodeURIComponent(entityId)}/${frame}.json`);
 }

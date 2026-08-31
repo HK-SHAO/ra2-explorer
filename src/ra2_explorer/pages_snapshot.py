@@ -43,6 +43,9 @@ _SAFE_FILENAME = re.compile(r"^[A-Za-z0-9_.~$-]+$")
 _AUDIO_FORMATS = {"aud", "bag_audio", "wav"}
 _MODEL_FORMATS = {"hva", "vxl"}
 _IMAGE_FORMATS = {"pcx", "shp", "tmp"}
+_ENTITY_ATLAS_CELL_WIDTH = 144
+_ENTITY_ATLAS_CELL_HEIGHT = 135
+_ENTITY_ATLAS_COLUMNS = 12
 _T = TypeVar("_T")
 
 
@@ -610,6 +613,126 @@ def _export_entity_previews(
     )
 
 
+def _entity_thumbnail_atlas_cell(image: Image.Image, body_format: str | None) -> Image.Image:
+    cell = Image.new(
+        "RGBA",
+        (_ENTITY_ATLAS_CELL_WIDTH, _ENTITY_ATLAS_CELL_HEIGHT),
+        (0, 0, 0, 0),
+    )
+    left = right = 10
+    top = 8 if body_format == "shp" else 10
+    bottom = 15 if body_format == "shp" else 10
+    available_width = _ENTITY_ATLAS_CELL_WIDTH - left - right
+    available_height = _ENTITY_ATLAS_CELL_HEIGHT - top - bottom
+    rgba = image.convert("RGBA")
+    scale = min(available_width / rgba.width, available_height / rgba.height)
+    fitted = rgba.resize(
+        (
+            max(1, round(rgba.width * scale)),
+            max(1, round(rgba.height * scale)),
+        ),
+        Image.Resampling.NEAREST,
+    )
+    position = (
+        left + (available_width - fitted.width) // 2,
+        top + (available_height - fitted.height) // 2,
+    )
+    cell.alpha_composite(fitted, position)
+    return cell
+
+
+def _export_entity_thumbnail_atlases(
+    root: Path,
+    entities: list[dict[str, Any]],
+) -> dict[str, dict[str, object]]:
+    atlas_root = root / "previews" / "entity-atlases"
+    if atlas_root.is_dir():
+        shutil.rmtree(atlas_root)
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for entity in entities:
+        if entity.get("renderable"):
+            grouped.setdefault(str(entity["kind"]), []).append(entity)
+
+    metadata: dict[str, dict[str, object]] = {}
+    for kind, items in sorted(grouped.items()):
+        items.sort(key=lambda item: str(item["id"]).casefold())
+        columns = min(_ENTITY_ATLAS_COLUMNS, max(1, len(items)))
+        rows = (len(items) + columns - 1) // columns
+        facing_counts: list[int] = []
+        for item in items:
+            preview = item.get("preview") or {}
+            facing_counts.append(
+                8
+                if kind == "infantry"
+                and preview.get("supports_facing")
+                and preview.get("format") != "vxl"
+                else 1
+            )
+        sheet_facing_count = max(facing_counts, default=1)
+        sheet_pattern = (
+            f"previews/entity-atlases/{_safe_filename(kind)}/"
+            f"{{facing}}-r{PAGES_RENDER_REVISION}.webp"
+        )
+        for index, (item, facing_count) in enumerate(zip(items, facing_counts, strict=True)):
+            metadata[str(item["id"])] = {
+                "path": sheet_pattern,
+                "index": index,
+                "columns": columns,
+                "cell_width": _ENTITY_ATLAS_CELL_WIDTH,
+                "cell_height": _ENTITY_ATLAS_CELL_HEIGHT,
+                "facing_count": facing_count,
+            }
+
+        for facing in range(sheet_facing_count):
+            output = root / sheet_pattern.replace("{facing}", str(facing))
+            atlas = Image.new(
+                "RGBA",
+                (columns * _ENTITY_ATLAS_CELL_WIDTH, rows * _ENTITY_ATLAS_CELL_HEIGHT),
+                (0, 0, 0, 0),
+            )
+            for index, (item, facing_count) in enumerate(
+                zip(items, facing_counts, strict=True)
+            ):
+                source_facing = facing if facing < facing_count else 0
+                entity_id = _safe_filename(str(item["id"]))
+                source = (
+                    root
+                    / "previews"
+                    / "entities"
+                    / entity_id
+                    / "thumbnail"
+                    / str(source_facing)
+                    / "0.webp"
+                )
+                if not source.is_file():
+                    raise Ra2ExplorerError(f"单位缩略图图集缺少来源：{item['id']}")
+                with Image.open(source) as image:
+                    cell = _entity_thumbnail_atlas_cell(
+                        image,
+                        str(item.get("body_format") or item.get("preview", {}).get("format") or ""),
+                    )
+                atlas.alpha_composite(
+                    cell,
+                    (
+                        index % columns * _ENTITY_ATLAS_CELL_WIDTH,
+                        index // columns * _ENTITY_ATLAS_CELL_HEIGHT,
+                    ),
+                )
+            _save_webp(atlas, output)
+    return metadata
+
+
+def _attach_entity_thumbnail_atlases(
+    catalogs: dict[str, tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]],
+    metadata: dict[str, dict[str, object]],
+) -> None:
+    for entities, _media, _details in catalogs.values():
+        for item in entities["items"]:
+            atlas = metadata.get(str(item["id"]))
+            if atlas is not None:
+                item["thumbnail_atlas"] = atlas
+
+
 def _composite_entity_preview_layers(
     image: Image.Image,
     focus_bounds: tuple[int, int, int, int] | None,
@@ -949,6 +1072,10 @@ def build_pages_snapshot(
             entity_images,
             workers=workers,
         )
+        thumbnail_atlases = _export_entity_thumbnail_atlases(staging, details_cn)
+        _attach_entity_thumbnail_atlases(catalogs, thumbnail_atlases)
+        for language, (entities, _media, _details) in catalogs.items():
+            _write_json(staging / "catalog" / f"entities.{language}.json", entities)
         _export_render_tasks(
             client,
             animation_images,

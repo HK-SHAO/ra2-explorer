@@ -1816,7 +1816,7 @@ function ExplorerApp() {
   useEffect(() => {
     if (view !== "entities" || !sourceId || !sourceRevision || visibleEntities.length === 0) return;
     const urls = visibleEntities
-      .filter((entity) => entity.renderable)
+      .filter((entity) => entity.renderable && !entity.thumbnail_atlas)
       .map((entity) => entityCardPreviewUrl(entity, sourceId, previewAngle, sourceRevision));
     for (const url of urls.slice(0, 12)) void preloadCardPreview(url, "foreground");
     const timer = window.setTimeout(
@@ -2817,7 +2817,17 @@ function entityCardPreviewUrl(entity: EntitySummary, sourceId: string, previewAn
 
 function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle }: { entity: EntitySummary; sourceId: string; sourceRevision: string; previewAngle: PreviewAngle }) {
   const previewRef = useRef<HTMLSpanElement>(null);
-  const url = entity.renderable
+  const atlas = isStaticSnapshot ? entity.thumbnail_atlas : undefined;
+  const requestedFacing = entity.body_format === "shp" && entity.kind === "infantry"
+    ? entityFacingForPreviewAngle(entity.body_format, previewAngle)
+    : 0;
+  const atlasFacing = atlas
+    ? Math.min(Math.max(0, requestedFacing), Math.max(0, atlas.facing_count - 1))
+    : 0;
+  const atlasUrl = atlas ? api.entityThumbnailAtlasUrl(atlas.path, atlasFacing) : "";
+  const atlasColumn = atlas ? atlas.index % atlas.columns : 0;
+  const atlasRow = atlas ? Math.floor(atlas.index / atlas.columns) : 0;
+  const url = entity.renderable && !atlas
     ? entityCardPreviewUrl(entity, sourceId, previewAngle, sourceRevision)
     : "";
   const [readyUrl, setReadyUrl] = useState(() => hasLoadedCardPreview(url) ? url : "");
@@ -2857,7 +2867,14 @@ function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle }: {
 
   return <span ref={previewRef} className={`asset-card-preview entity-card-preview format-${entity.body_format || "unknown"} ${entity.renderable ? "ready" : "missing"}`}>
     {entity.renderable
-      ? readyUrl && <img decoding="async" fetchPriority="low" src={readyUrl} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
+      ? atlas
+        ? <span className="entity-thumbnail-atlas" aria-hidden="true" style={{
+          width: atlas.cell_width,
+          height: atlas.cell_height,
+          backgroundImage: `url("${atlasUrl}")`,
+          backgroundPosition: `${-atlasColumn * atlas.cell_width}px ${-atlasRow * atlas.cell_height}px`,
+        }} />
+        : readyUrl && <img decoding="async" fetchPriority="low" src={readyUrl} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
       : <Icon name="unit" size={34} />}
     {entity.affiliation && <span className={`entity-affiliation-badge affiliation-${entity.affiliation.kind} affiliation-${affiliationClassId(entity.affiliation.id)}`} title={entity.affiliation.display_name}>
       {entity.affiliation.display_name}
