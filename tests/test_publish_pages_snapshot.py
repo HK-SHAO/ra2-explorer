@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import zipfile
 from pathlib import Path
 
@@ -9,18 +8,17 @@ import pytest
 
 from scripts.publish_pages_snapshot import (
     SnapshotPublishError,
-    _configure_transfer_environment,
+    _asset_url,
     _data_manifest,
-    _hub_error_detail,
     _lock_manifest,
-    _remote_prefix,
     _snapshot_manifest,
+    _validate_tag,
     build_parser,
 )
 
 
 def test_pages_publish_metadata_keeps_snapshot_pinned(tmp_path: Path) -> None:
-    archive = tmp_path / "pages.zip"
+    archive = tmp_path / "RA2-Explorer-Pages-Data.zip"
     snapshot = {
         "snapshot_id": "snapshot-1",
         "payload": {"bytes": 1234},
@@ -32,54 +30,28 @@ def test_pages_publish_metadata_keeps_snapshot_pinned(tmp_path: Path) -> None:
     loaded = _snapshot_manifest(archive)
     data = _data_manifest(archive, loaded)
     lock = _lock_manifest(
-        repository="owner/repository",
-        repository_type="space",
-        revision="abc123",
-        remote_path="pages/data.zip",
+        repository="Hansimov/ra2-explorer",
+        tag="pages-data-0.11.0",
         data=data,
     )
 
-    assert lock["revision"] == "abc123"
+    assert lock["provider"] == "github-release"
+    assert lock["tag"] == "pages-data-0.11.0"
     assert lock["snapshot_id"] == "snapshot-1"
     assert lock["units"] == 12
     assert lock["sounds"] == 34
-    assert lock["endpoints"][0] == "https://hf-mirror.com"
-
-
-def test_pages_publish_rejects_parent_remote_path() -> None:
-    with pytest.raises(SnapshotPublishError, match="安全"):
-        _remote_prefix("../pages")
-
-
-def test_pages_publish_uses_bounded_output_on_windows(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("HF_HUB_ENABLE_HF_TRANSFER", "1")
-    monkeypatch.setenv("HF_XET_HIGH_PERFORMANCE", "1")
-    monkeypatch.delenv("HF_HUB_DISABLE_PROGRESS_BARS", raising=False)
-
-    _configure_transfer_environment(platform="nt")
-
-    assert "HF_HUB_ENABLE_HF_TRANSFER" not in os.environ
-    assert "HF_XET_HIGH_PERFORMANCE" not in os.environ
-    assert os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] == "1"
-
-
-def test_pages_publish_error_detail_uses_safe_response_metadata() -> None:
-    class ExampleError(Exception):
-        response = type("Response", (), {"status_code": 503})()
-        request_id = "request-123"
-        server_message = "temporary failure"
-
-    assert _hub_error_detail(ExampleError()) == (
-        "ExampleError · HTTP 503 · request request-123 · temporary failure"
+    assert lock["parts"][0]["url"] == _asset_url(  # type: ignore[index]
+        "Hansimov/ra2-explorer",
+        "pages-data-0.11.0",
+        "RA2-Explorer-Pages-Data.zip.part01",
     )
 
 
-def test_pages_publish_can_request_public_repository_creation() -> None:
-    args = build_parser().parse_args(
-        ["snapshot.zip", "--repo-type", "dataset", "--create-repository"]
-    )
+def test_pages_publish_rejects_application_version_tag() -> None:
+    with pytest.raises(SnapshotPublishError, match="v 前缀"):
+        _validate_tag("v0.11.0")
 
-    assert args.repo_type == "dataset"
-    assert args.create_repository is True
+
+def test_pages_publish_requires_explicit_data_tag() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["snapshot.zip"])

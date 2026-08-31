@@ -2,29 +2,57 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.fetch_pages_snapshot import SnapshotDownloadError, _snapshot_url
+from scripts.fetch_pages_snapshot import (
+    SnapshotDownloadError,
+    _part_url,
+    _validated_parts,
+)
 
 
-def test_snapshot_url_uses_pinned_space_revision() -> None:
-    lock = {
-        "repository": "owner/repository",
-        "repository_type": "space",
-        "revision": "0123456789abcdef",
-        "path": "pages/data.zip",
+def _lock(**overrides: object) -> dict[str, object]:
+    value: dict[str, object] = {
+        "repository": "Hansimov/ra2-explorer",
+        "tag": "pages-data-0.11.0",
+        "asset": "RA2-Explorer-Pages-Data.zip",
+        "bytes": 8,
+        "parts": [
+            {
+                "name": "RA2-Explorer-Pages-Data.zip.part01",
+                "bytes": 8,
+                "sha256": "a" * 64,
+                "url": (
+                    "https://github.com/Hansimov/ra2-explorer/releases/download/"
+                    "pages-data-0.11.0/RA2-Explorer-Pages-Data.zip.part01"
+                ),
+            }
+        ],
     }
+    value.update(overrides)
+    return value
 
-    assert _snapshot_url("https://hf-mirror.com/", lock) == (
-        "https://hf-mirror.com/spaces/owner/repository/resolve/0123456789abcdef/pages/data.zip"
+
+def test_part_url_uses_pinned_github_release_asset() -> None:
+    lock = _lock()
+    part = _validated_parts(lock)[0]
+    assert _part_url(lock, part) == (
+        "https://github.com/Hansimov/ra2-explorer/releases/download/"
+        "pages-data-0.11.0/RA2-Explorer-Pages-Data.zip.part01"
     )
 
 
-def test_snapshot_url_rejects_untrusted_endpoint() -> None:
-    lock = {
-        "repository": "owner/repository",
-        "repository_type": "space",
-        "revision": "main",
-        "path": "data.zip",
-    }
+def test_part_url_rejects_foreign_repository() -> None:
+    lock = _lock(repository="example/repository")
+    with pytest.raises(SnapshotDownloadError, match="不属于"):
+        _validated_parts(lock)
 
-    with pytest.raises(SnapshotDownloadError, match="不允许"):
-        _snapshot_url("https://example.com", lock)
+
+def test_part_url_rejects_untrusted_address() -> None:
+    lock = _lock()
+    lock["parts"][0]["url"] = "https://example.com/data.zip"  # type: ignore[index]
+    with pytest.raises(SnapshotDownloadError, match="固定 GitHub Release"):
+        _validated_parts(lock)
+
+
+def test_parts_must_cover_locked_archive_size() -> None:
+    with pytest.raises(SnapshotDownloadError, match="总大小"):
+        _validated_parts(_lock(bytes=9))

@@ -4,16 +4,21 @@ import argparse
 import hashlib
 import json
 import os
+import re
+import shutil
 import sys
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
-ALLOWED_ENDPOINT_HOSTS = {"hf-mirror.com", "huggingface.co"}
-REPOSITORY_ROUTES = {"space": "spaces", "dataset": "datasets", "model": ""}
+GITHUB_HOST = "github.com"
+EXPECTED_REPOSITORY = "Hansimov/ra2-explorer"
 CHUNK_SIZE = 1024 * 1024
 PROGRESS_BYTES = 8 * 1024 * 1024
+MAX_PARALLEL_DOWNLOADS = 4
+_PART_PATTERN = re.compile(r"^RA2-Explorer-Pages-Data\.zip\.part\d{2}$")
 
 
 class SnapshotDownloadError(RuntimeError):
@@ -36,36 +41,74 @@ def _load_lock(path: Path) -> dict[str, object]:
     if not isinstance(value, dict) or value.get("schema_version") != 1:
         raise SnapshotDownloadError("Pages 数据锁定清单版本无效")
     required = {
+        "provider",
         "repository",
-        "repository_type",
-        "revision",
-        "path",
+        "tag",
+        "asset",
+        "parts",
         "sha256",
         "bytes",
-        "endpoints",
     }
     if required - value.keys():
         raise SnapshotDownloadError("Pages 数据锁定清单缺少必要字段")
-    if value["repository_type"] not in REPOSITORY_ROUTES:
-        raise SnapshotDownloadError("Pages 数据仓库类型无效")
+    if value["provider"] != "github-release":
+        raise SnapshotDownloadError("Pages 数据提供方必须是 GitHub Release")
+    _validated_parts(value)
     return value
 
 
-def _snapshot_url(endpoint: str, lock: dict[str, object]) -> str:
-    normalized_endpoint = endpoint.rstrip("/")
-    parsed = urlsplit(normalized_endpoint)
-    if parsed.scheme != "https" or parsed.hostname not in ALLOWED_ENDPOINT_HOSTS:
-        raise SnapshotDownloadError(f"不允许的 Pages 数据端点：{parsed.hostname or endpoint}")
-    repository_type = str(lock["repository_type"])
-    route = REPOSITORY_ROUTES[repository_type]
-    prefix = f"/{route}" if route else ""
-    repository = quote(str(lock["repository"]), safe="/")
-    revision = quote(str(lock["revision"]), safe="")
-    remote_path = quote(str(lock["path"]), safe="/")
-    return f"{normalized_endpoint}{prefix}/{repository}/resolve/{revision}/{remote_path}"
+def _part_url(lock: dict[str, object], part: dict[str, object]) -> str:
+    repository = str(lock["repository"])
+    if repository != EXPECTED_REPOSITORY:
+        raise SnapshotDownloadError("Pages 数据仓库不属于本项目")
+    tag = quote(str(lock["tag"]), safe="")
+    name = str(part["name"])
+    if not _PART_PATTERN.fullmatch(name):
+        raise SnapshotDownloadError("Pages 数据分片名称无效")
+    expected = (
+        f"https://{GITHUB_HOST}/{repository}/releases/download/{tag}/"
+        f"{quote(name, safe='')}"
+    )
+    supplied = str(part["url"])
+    parsed = urlsplit(supplied)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != GITHUB_HOST
+        or parsed.query
+        or parsed.fragment
+        or supplied != expected
+    ):
+        raise SnapshotDownloadError("Pages 数据地址不是项目的固定 GitHub Release 资产")
+    return expected
 
 
-def _download_once(url: str, partial: Path, expected_bytes: int) -> None:
+def _validated_parts(lock: dict[str, object]) -> list[dict[str, object]]:
+    parts = lock["parts"]
+    if not isinstance(parts, list) or not parts:
+        raise SnapshotDownloadError("Pages 数据锁定清单没有分片")
+    validated: list[dict[str, object]] = []
+    expected_total = 0
+    for index, value in enumerate(parts, start=1):
+        if not isinstance(value, dict) or {"name", "bytes", "sha256", "url"} - value.keys():
+            raise SnapshotDownloadError("Pages 数据分片结构无效")
+        expected_name = f"{lock['asset']}.part{index:02d}"
+        if value["name"] != expected_name:
+            raise SnapshotDownloadError("Pages 数据分片顺序无效")
+        size = value["bytes"]
+        digest = str(value["sha256"])
+        if not isinstance(size, int) or size <= 0:
+            raise SnapshotDownloadError("Pages 数据分片大小无效")
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise SnapshotDownloadError("Pages 数据分片摘要无效")
+        _part_url(lock, value)
+        expected_total += size
+        validated.append(value)
+    if expected_total != lock["bytes"]:
+        raise SnapshotDownloadError("Pages 数据分片总大小无效")
+    return validated
+
+
+def _download_once(url: str, partial: Path, expected_bytes: int, label: str) -> None:
     start = partial.stat().st_size if partial.exists() else 0
     if start > expected_bytes:
         partial.unlink()
@@ -87,12 +130,40 @@ def _download_once(url: str, partial: Path, expected_bytes: int) -> None:
                 received += len(chunk)
                 if received >= next_progress:
                     print(
-                        f"[pages] 已下载 {received / 1024 / 1024:.1f} / "
-                        f"{expected_bytes / 1024 / 1024:.1f} MiB",
+                        f"[pages] {label} 已下载 {received / 1024 / 1024:.1f} MiB",
                         file=sys.stderr,
                         flush=True,
                     )
                     next_progress += PROGRESS_BYTES
+
+
+def _fetch_part(
+    lock: dict[str, object],
+    part: dict[str, object],
+    destination: Path,
+    index: int,
+    total: int,
+) -> Path:
+    expected_bytes = int(part["bytes"])
+    expected_sha256 = str(part["sha256"])
+    if (
+        destination.is_file()
+        and destination.stat().st_size == expected_bytes
+        and _hash_file(destination) == expected_sha256
+    ):
+        return destination
+    _download_once(
+        _part_url(lock, part),
+        destination,
+        expected_bytes,
+        f"分片 {index}/{total}",
+    )
+    if destination.stat().st_size != expected_bytes:
+        raise SnapshotDownloadError(f"Pages 数据分片 {index} 大小不一致")
+    if _hash_file(destination) != expected_sha256:
+        destination.unlink(missing_ok=True)
+        raise SnapshotDownloadError(f"Pages 数据分片 {index} 摘要不一致")
+    return destination
 
 
 def fetch_snapshot(lock_path: Path, output: Path) -> dict[str, object]:
@@ -109,32 +180,48 @@ def fetch_snapshot(lock_path: Path, output: Path) -> dict[str, object]:
         print(f"[pages] 使用已校验的数据包：{resolved}", file=sys.stderr)
         return lock
 
-    partial = resolved.with_name(f".{resolved.name}.partial")
-    errors: list[str] = []
-    endpoints = lock["endpoints"]
-    if not isinstance(endpoints, list) or not endpoints:
-        raise SnapshotDownloadError("Pages 数据锁定清单没有下载端点")
-    for endpoint in endpoints:
-        try:
-            url = _snapshot_url(str(endpoint), lock)
-            print(
-                f"[pages] 从 {urlsplit(url).hostname} 下载固定数据快照",
-                file=sys.stderr,
-                flush=True,
-            )
-            _download_once(url, partial, expected_bytes)
-            if partial.stat().st_size != expected_bytes:
-                raise SnapshotDownloadError(
-                    f"下载大小不一致：{partial.stat().st_size} != {expected_bytes}"
+    parts = _validated_parts(lock)
+    part_root = resolved.parent / f".{resolved.name}.parts"
+    part_root.mkdir(parents=True, exist_ok=True)
+    print(
+        f"[pages] 从 GitHub Release 并行下载 {len(parts)} 个固定数据分片",
+        file=sys.stderr,
+        flush=True,
+    )
+    try:
+        with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL_DOWNLOADS, len(parts))) as pool:
+            futures = [
+                pool.submit(
+                    _fetch_part,
+                    lock,
+                    part,
+                    part_root / str(part["name"]),
+                    index,
+                    len(parts),
                 )
-            if _hash_file(partial) != expected_sha256:
-                partial.unlink(missing_ok=True)
-                raise SnapshotDownloadError("下载数据的 SHA-256 不匹配")
-            os.replace(partial, resolved)
-            return lock
-        except (OSError, SnapshotDownloadError, urllib.error.URLError) as error:
-            errors.append(f"{urlsplit(str(endpoint)).hostname}: {type(error).__name__}")
-    raise SnapshotDownloadError(f"所有 Pages 数据端点均不可用：{', '.join(errors)}")
+                for index, part in enumerate(parts, start=1)
+            ]
+            local_parts = [future.result() for future in futures]
+    except (OSError, urllib.error.URLError) as error:
+        raise SnapshotDownloadError(
+            f"GitHub Release 数据不可用：{type(error).__name__}"
+        ) from error
+
+    partial = resolved.with_name(f".{resolved.name}.partial")
+    with partial.open("wb") as target:
+        for local_part in local_parts:
+            with local_part.open("rb") as source:
+                shutil.copyfileobj(source, target, CHUNK_SIZE)
+    if partial.stat().st_size != expected_bytes:
+        raise SnapshotDownloadError("合并后的 Pages 数据大小不一致")
+    if _hash_file(partial) != expected_sha256:
+        partial.unlink(missing_ok=True)
+        raise SnapshotDownloadError("合并后的 Pages 数据 SHA-256 不匹配")
+    os.replace(partial, resolved)
+    for local_part in local_parts:
+        local_part.unlink(missing_ok=True)
+    part_root.rmdir()
+    return lock
 
 
 def build_parser() -> argparse.ArgumentParser:
