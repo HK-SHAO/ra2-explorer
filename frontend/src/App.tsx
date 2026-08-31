@@ -758,12 +758,51 @@ function readBrowsingLocation(): Partial<BrowsingLocation> {
   }
 }
 
-function entitySelectionKey(sourceId: string, kind: EntityKind) {
-  return `${sourceId}:${kind}`;
+const ENTITY_SELECTIONS_STORAGE_KEY = "ra2exp-entity-selections-v2";
+const ASSET_SELECTIONS_STORAGE_KEY = "ra2exp-asset-selections-v2";
+const MAX_STORED_SELECTIONS = 256;
+
+function entitySelectionKey(sourceId: string, kind: EntityKind, usage: EntityUsage | "" = "") {
+  return `${sourceId}:${kind}:${usage || "all"}`;
 }
 
-function assetSelectionKey(sourceId: string, category: string) {
-  return `${sourceId}:${category}`;
+function assetSelectionKey(sourceId: string, category: string, group = "") {
+  return `${sourceId}:${category}:${group || "all"}`;
+}
+
+function initialSelectionMap(storageKey: string, fallbacks: Array<[string, string]>) {
+  const selections = new Map<string, string>();
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(storageKey) || "null");
+    if (stored && typeof stored === "object" && !Array.isArray(stored)) {
+      for (const [key, value] of Object.entries(stored).slice(-MAX_STORED_SELECTIONS)) {
+        if (typeof value === "string" && value) selections.set(key, value);
+      }
+    }
+  } catch {
+    // Ignore malformed browsing preferences.
+  }
+  for (const [key, value] of fallbacks) {
+    if (key && value && !selections.has(key)) selections.set(key, value);
+  }
+  return selections;
+}
+
+function rememberSelection(
+  selections: Map<string, string>,
+  storageKey: string,
+  key: string,
+  value: string,
+) {
+  if (!key || !value) return;
+  selections.delete(key);
+  selections.set(key, value);
+  while (selections.size > MAX_STORED_SELECTIONS) {
+    const oldest = selections.keys().next().value as string | undefined;
+    if (!oldest) break;
+    selections.delete(oldest);
+  }
+  window.localStorage.setItem(storageKey, JSON.stringify(Object.fromEntries(selections)));
 }
 
 function readStoredNumber(key: string, fallback: number, minimum: number, maximum: number) {
@@ -980,14 +1019,22 @@ function ExplorerApp() {
     || (["voices", "sounds"].includes(rememberedLocation.assetCategory || "")
       ? rememberedLocation.assetQuery || ""
       : "");
-  const entitySelectionsRef = useRef(new Map<string, string>(
+  const entitySelectionsRef = useRef(initialSelectionMap(
+    ENTITY_SELECTIONS_STORAGE_KEY,
     rememberedLocation.sourceId && rememberedLocation.entityKind && rememberedLocation.selectedEntityId
-      ? [[entitySelectionKey(rememberedLocation.sourceId, rememberedLocation.entityKind), rememberedLocation.selectedEntityId]]
+      ? [
+        [entitySelectionKey(rememberedLocation.sourceId, rememberedLocation.entityKind), rememberedLocation.selectedEntityId],
+        [entitySelectionKey(rememberedLocation.sourceId, rememberedLocation.entityKind, rememberedLocation.entityUsage || ""), rememberedLocation.selectedEntityId],
+      ]
       : [],
   ));
-  const assetSelectionsRef = useRef(new Map<string, string>(
+  const assetSelectionsRef = useRef(initialSelectionMap(
+    ASSET_SELECTIONS_STORAGE_KEY,
     rememberedLocation.sourceId && rememberedLocation.assetCategory && rememberedLocation.selectedAssetId
-      ? [[assetSelectionKey(rememberedLocation.sourceId, rememberedLocation.assetCategory), rememberedLocation.selectedAssetId]]
+      ? [
+        [assetSelectionKey(rememberedLocation.sourceId, rememberedLocation.assetCategory), rememberedLocation.selectedAssetId],
+        [assetSelectionKey(rememberedLocation.sourceId, rememberedLocation.assetCategory, rememberedLocation.mediaGroup || ""), rememberedLocation.selectedAssetId],
+      ]
       : [],
   ));
   const [view, setView] = useState<"assets" | "entities">(
@@ -1417,7 +1464,20 @@ function ExplorerApp() {
     setEntitySearchScope("current");
     setEntityKind(kind);
     setEntityUsage("");
+    setEntityLoading(true);
+    setEntities([]);
     setSelectedEntityId(entitySelectionsRef.current.get(entitySelectionKey(sourceId, kind)) || "");
+  }
+
+  function selectEntityUsage(usage: EntityUsage | "") {
+    const next = entityUsage === usage ? "" : usage;
+    setEntitySearchScope("current");
+    setEntityUsage(next);
+    setEntityLoading(true);
+    setEntities([]);
+    setSelectedEntityId(entityKind
+      ? entitySelectionsRef.current.get(entitySelectionKey(sourceId, entityKind, next)) || ""
+      : "");
   }
 
   function selectAssetCategory(category: string) {
@@ -1427,18 +1487,65 @@ function ExplorerApp() {
     setAssetFormatTag("");
     setMediaGroup("");
     setMediaEventType("");
+    if (["voices", "sounds"].includes(category)) setMediaLoading(true);
+    else setAssetPageLoading(true);
+    setMediaItems([]);
     setSelectedId(assetSelectionsRef.current.get(assetSelectionKey(sourceId, category)) || "");
     setPlayingMediaId("");
   }
 
+  function selectMediaGroup(group: string) {
+    const next = group;
+    pauseAudioAsset();
+    setMediaGroup(next);
+    setMediaLoading(true);
+    setMediaItems([]);
+    setSelectedId(assetSelectionsRef.current.get(assetSelectionKey(sourceId, selectedCategoryId, next)) || "");
+    setPlayingMediaId("");
+  }
+
+  function rememberEntityCard(id: string, kind: EntityKind, usage: EntityUsage | "") {
+    rememberSelection(
+      entitySelectionsRef.current,
+      ENTITY_SELECTIONS_STORAGE_KEY,
+      entitySelectionKey(sourceId, kind, usage),
+      id,
+    );
+    if (usage) {
+      rememberSelection(
+        entitySelectionsRef.current,
+        ENTITY_SELECTIONS_STORAGE_KEY,
+        entitySelectionKey(sourceId, kind),
+        id,
+      );
+    }
+  }
+
+  function rememberAssetCard(id: string, category: string, group: string) {
+    rememberSelection(
+      assetSelectionsRef.current,
+      ASSET_SELECTIONS_STORAGE_KEY,
+      assetSelectionKey(sourceId, category, group),
+      id,
+    );
+    if (group) {
+      rememberSelection(
+        assetSelectionsRef.current,
+        ASSET_SELECTIONS_STORAGE_KEY,
+        assetSelectionKey(sourceId, category),
+        id,
+      );
+    }
+  }
+
   function selectEntityCard(id: string) {
     const entity = visibleEntities.find((item) => item.id === id);
-    if (entity) entitySelectionsRef.current.set(entitySelectionKey(sourceId, entity.kind), id);
+    if (entity) rememberEntityCard(id, entity.kind, entitySearchActive ? "" : entityUsage);
     setSelectedEntityId(id);
   }
 
   function selectAssetCard(id: string) {
-    assetSelectionsRef.current.set(assetSelectionKey(sourceId, selectedCategoryId), id);
+    rememberAssetCard(id, selectedCategoryId, mediaSearchActive ? "" : mediaGroup);
     setSelectedId(id);
   }
 
@@ -1458,7 +1565,7 @@ function ExplorerApp() {
       setSearchQuery(entity.display_name);
       setView("entities");
       setEntityKind(entity.kind);
-      entitySelectionsRef.current.set(entitySelectionKey(sourceId, entity.kind), entity.id);
+      rememberEntityCard(entity.id, entity.kind, "");
       setSelectedEntityId(entity.id);
       return;
     }
@@ -1471,7 +1578,7 @@ function ExplorerApp() {
       setAssetFormatTag("");
       setMediaGroup("");
       setMediaEventType("");
-      assetSelectionsRef.current.set(assetSelectionKey(sourceId, category), media.asset.id);
+      rememberAssetCard(media.asset.id, category, "");
       setSelectedId(media.asset.id);
       toggleAudioAsset(media.asset.id, api.mediaUrl(media.asset.id));
     }
@@ -1530,10 +1637,22 @@ function ExplorerApp() {
 
   useEffect(() => {
     if (view !== "entities" || entityLoading) return;
-    if (!visibleEntities.some((entity) => entity.id === selectedEntityId)) {
-      setSelectedEntityId("");
+    if (visibleEntities.length === 0) {
+      if (selectedEntityId) setSelectedEntityId("");
+      return;
     }
-  }, [view, entityLoading, visibleEntities, selectedEntityId]);
+    if (visibleEntities.some((entity) => entity.id === selectedEntityId)) return;
+    const remembered = entityKind
+      ? entitySelectionsRef.current.get(entitySelectionKey(sourceId, entityKind, entitySearchActive ? "" : entityUsage)) || ""
+      : "";
+    const next = visibleEntities.find((entity) => entity.id === remembered)?.id
+      || visibleEntities[0].id;
+    setSelectedEntityId(next);
+    if (!entitySearchActive && entityKind) rememberEntityCard(next, entityKind, entityUsage);
+  }, [
+    view, entityLoading, visibleEntities, selectedEntityId, sourceId, entityKind, entityUsage,
+    entitySearchActive,
+  ]);
 
   async function refreshSources(preferredId?: string) {
     const next = await api.sources();
@@ -1643,9 +1762,13 @@ function ExplorerApp() {
           setAssets(page.items);
           setTotal(page.total);
           const remembered = assetSelectionsRef.current.get(assetSelectionKey(sourceId, selectedCategoryId)) || "";
-          setSelectedId((current) => page.items.some((asset) => asset.id === current)
-            ? current
-            : page.items.some((asset) => asset.id === remembered) ? remembered : "");
+          setSelectedId((current) => {
+            const next = page.items.some((asset) => asset.id === current)
+              ? current
+              : page.items.some((asset) => asset.id === remembered) ? remembered : page.items[0]?.id || "";
+            if (next) rememberAssetCard(next, selectedCategoryId, "");
+            return next;
+          });
         })
         .catch((reason: Error) => !cancelled && setError(reason.message))
         .finally(() => !cancelled && setAssetPageLoading(false));
@@ -1682,10 +1805,18 @@ function ExplorerApp() {
           setMediaGroups(orderedMediaGroups(page.groups));
           setMediaKindCounts(page.kinds);
           setMediaEventTypes(page.event_types || []);
-          const remembered = assetSelectionsRef.current.get(assetSelectionKey(sourceId, selectedCategoryId)) || "";
-          setSelectedId((current) => page.items.some((item) => item.asset.id === current)
-            ? current
-            : page.items.some((item) => item.asset.id === remembered) ? remembered : "");
+          const remembered = assetSelectionsRef.current.get(
+            assetSelectionKey(sourceId, selectedCategoryId, mediaSearchActive ? "" : mediaGroup),
+          ) || "";
+          setSelectedId((current) => {
+            const next = page.items.some((item) => item.asset.id === current)
+              ? current
+              : page.items.some((item) => item.asset.id === remembered)
+                ? remembered
+                : page.items[0]?.asset.id || "";
+            if (next && !mediaSearchActive) rememberAssetCard(next, selectedCategoryId, mediaGroup);
+            return next;
+          });
         })
         .catch((reason: Error) => !cancelled && setError(reason.message))
         .finally(() => !cancelled && setMediaLoading(false));
@@ -1728,12 +1859,6 @@ function ExplorerApp() {
           setEntityKinds(page.kinds);
           setEntityUsages(page.usages);
           setEntitySides(page.sides);
-          const remembered = entityKind
-            ? entitySelectionsRef.current.get(entitySelectionKey(sourceId, entityKind)) || ""
-            : "";
-          setSelectedEntityId((current) => page.items.some((entity) => entity.id === current)
-            ? current
-            : page.items.some((entity) => entity.id === remembered) ? remembered : "");
         })
         .catch((reason: Error) => !cancelled && setError(reason.message))
         .finally(() => !cancelled && setEntityLoading(false));
@@ -1845,6 +1970,42 @@ function ExplorerApp() {
   }, [view, sourceId, sourceRevision, visibleEntities, previewAngle]);
 
   useEffect(() => {
+    if (view !== "entities" || !sourceId || visibleEntities.length === 0) return;
+    const selectedIndex = Math.max(0, visibleEntities.findIndex((entity) => entity.id === selectedEntityId));
+    const nearbyIndexes = [selectedIndex, selectedIndex + 1, selectedIndex - 1, selectedIndex + 2, selectedIndex - 2];
+    const nearby = nearbyIndexes
+      .map((index) => visibleEntities[index])
+      .filter((entity, index, items): entity is EntitySummary => Boolean(entity)
+        && items.findIndex((item) => item?.id === entity.id) === index);
+    const timer = window.setTimeout(() => {
+      for (const entity of nearby) {
+        void api.entity(sourceId, entity.id, gameLanguage, sourceRevision).catch(() => undefined);
+      }
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [view, sourceId, sourceRevision, visibleEntities, selectedEntityId, gameLanguage]);
+
+  useEffect(() => {
+    if (view !== "assets" || !isMediaCategory || mediaItems.length === 0) return;
+    const selectedIndex = Math.max(0, mediaItems.findIndex((item) => item.asset.id === selectedId));
+    const nearbyIndexes = [selectedIndex, selectedIndex + 1, selectedIndex - 1];
+    const nearby = nearbyIndexes
+      .map((index) => mediaItems[index])
+      .filter((item, index, items): item is MediaItem => Boolean(item)
+        && items.findIndex((candidate) => candidate?.asset.id === item.asset.id) === index);
+    const timer = window.setTimeout(() => {
+      for (const item of nearby) {
+        void Promise.all([
+          api.asset(item.asset.id, sourceRevision),
+          api.metadata(item.asset.id, sourceRevision),
+          api.assetAssociations(item.asset.id, gameLanguage, sourceRevision),
+        ]).catch(() => undefined);
+      }
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [view, isMediaCategory, mediaItems, selectedId, sourceRevision, gameLanguage]);
+
+  useEffect(() => {
     if (view !== "entities" || !sourceId || !sourceRevision || !selectedEntityId || entities.length === 0) return;
     const controller = new AbortController();
     const selectedIndex = Math.max(0, entities.findIndex((entity) => entity.id === selectedEntityId));
@@ -1871,7 +2032,7 @@ function ExplorerApp() {
     }
     let cancelled = false;
     setEntityDetailLoading(true);
-    api.entity(sourceId, selectedEntityId, gameLanguage)
+    api.entity(sourceId, selectedEntityId, gameLanguage, sourceRevision)
       .then((entity) => !cancelled && setSelectedEntity(entity))
       .catch((reason: Error) => {
         if (cancelled) return;
@@ -1894,7 +2055,7 @@ function ExplorerApp() {
       return;
     }
     let cancelled = false;
-    Promise.all([api.asset(selectedId), api.metadata(selectedId)])
+    Promise.all([api.asset(selectedId, sourceRevision), api.metadata(selectedId, sourceRevision)])
       .then(([asset, nextMetadata]) => {
         if (cancelled) return;
         setSelected(asset);
@@ -1902,7 +2063,7 @@ function ExplorerApp() {
       })
       .catch((reason: Error) => !cancelled && setError(reason.message));
     return () => { cancelled = true; };
-  }, [selectedId]);
+  }, [selectedId, sourceRevision]);
 
   useEffect(() => {
     setAssociations(null);
@@ -1910,11 +2071,11 @@ function ExplorerApp() {
       return;
     }
     let cancelled = false;
-    api.assetAssociations(selected.id, gameLanguage)
+    api.assetAssociations(selected.id, gameLanguage, sourceRevision)
       .then((result) => !cancelled && setAssociations(result))
       .catch(() => undefined);
     return () => { cancelled = true; };
-  }, [selected, gameLanguage]);
+  }, [selected, gameLanguage, sourceRevision]);
 
   useEffect(() => {
     const playbackFrameCount = assetPlaybackFrameCount(selected?.format, metadata);
@@ -2119,7 +2280,7 @@ function ExplorerApp() {
                       {active && entityUsageOrder.map((usage) => {
                         const usageCount = entityUsages.find((item) => item.usage === usage)?.count || 0;
                         const label = entityUsageLabels[kind][usage];
-                        return label && usageCount > 0 ? <button title={label} className={`tree-grandchild ${entityUsage === usage ? "active" : ""}`} key={usage} onClick={() => { setEntitySearchScope("current"); setEntityUsage(entityUsage === usage ? "" : usage); }}><span><Icon name={entityKindIcons[kind]} /><b>{label}</b></span><em>{usageCount}</em></button> : null;
+                        return label && usageCount > 0 ? <button title={label} className={`tree-grandchild ${entityUsage === usage ? "active" : ""}`} key={usage} onClick={() => selectEntityUsage(usage)}><span><Icon name={entityKindIcons[kind]} /><b>{label}</b></span><em>{usageCount}</em></button> : null;
                       })}
                     </div>;
                   })}
@@ -2130,7 +2291,7 @@ function ExplorerApp() {
                 <div className="tree-children">
                   {visibleCategories.filter((item) => ["voices", "sounds"].includes(item.id)).map((item) => <div className="tree-child-group" key={item.id}>
                     <button title={item.label} className={view === "assets" && assetCategory === item.id && !mediaGroup ? "active" : ""} onClick={() => selectAssetCategory(item.id)}><span><Icon name={item.id === "voices" ? "voice" : "sound"} /><b>{item.label}</b></span>{mediaKindCounts.length > 0 && <em>{mediaKindCounts.find((count) => count.kind === (item.id === "voices" ? "voice" : "sound"))?.count || 0}</em>}</button>
-                    {view === "assets" && assetCategory === item.id && mediaGroups.filter((group) => group.group.endsWith(item.id === "voices" ? "_voice" : "_sound")).map((group) => <button title={mediaGroupLabels[group.group] || group.group} className={`tree-grandchild ${mediaGroup === group.group ? "active" : ""}`} key={group.group} onClick={() => setMediaGroup(mediaGroup === group.group ? "" : group.group)}><span><Icon name={item.id === "voices" ? "voice" : "sound"} /><b>{mediaGroupLabels[group.group] || group.group}</b></span><em>{group.count}</em></button>)}
+                    {view === "assets" && assetCategory === item.id && mediaGroups.filter((group) => group.group.endsWith(item.id === "voices" ? "_voice" : "_sound")).map((group) => <button title={mediaGroupLabels[group.group] || group.group} className={`tree-grandchild ${mediaGroup === group.group ? "active" : ""}`} key={group.group} onClick={() => selectMediaGroup(mediaGroup === group.group ? "" : group.group)}><span><Icon name={item.id === "voices" ? "voice" : "sound"} /><b>{mediaGroupLabels[group.group] || group.group}</b></span><em>{group.count}</em></button>)}
                   </div>)}
                 </div>
               </section>}
@@ -2150,7 +2311,7 @@ function ExplorerApp() {
             search={catalogSearch}
             groups={mediaGroups.filter((group) => group.group.endsWith(mediaKind === "voice" ? "_voice" : "_sound"))}
             selectedGroup={mediaGroup}
-            setSelectedGroup={setMediaGroup}
+            setSelectedGroup={selectMediaGroup}
             eventTypes={mediaEventTypes}
             selectedEventType={mediaEventType}
             setSelectedEventType={setMediaEventType}
@@ -2161,7 +2322,7 @@ function ExplorerApp() {
             }}
             headerAlignment={mediaHeaderAlignment}
             selectedId={selectedId}
-              onSelect={selectMediaCard}
+            onSelect={selectMediaCard}
             playingId={playingMediaId}
             sort={mediaSort}
             setSort={setMediaSort}

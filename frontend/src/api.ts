@@ -480,6 +480,34 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+const detailRequestCache = new Map<string, Promise<unknown>>();
+const DETAIL_REQUEST_CACHE_LIMIT = 256;
+
+function cachedRequest<T>(path: string): Promise<T> {
+  const cached = detailRequestCache.get(path) as Promise<T> | undefined;
+  if (cached) {
+    detailRequestCache.delete(path);
+    detailRequestCache.set(path, cached);
+    return cached;
+  }
+  const pending = request<T>(path).catch((reason) => {
+    detailRequestCache.delete(path);
+    throw reason;
+  });
+  detailRequestCache.set(path, pending);
+  while (detailRequestCache.size > DETAIL_REQUEST_CACHE_LIMIT) {
+    const oldest = detailRequestCache.keys().next().value as string | undefined;
+    if (!oldest) break;
+    detailRequestCache.delete(oldest);
+  }
+  return pending;
+}
+
+function withRevision(path: string, revision: string) {
+  if (!revision) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}r=${encodeURIComponent(revision)}`;
+}
+
 export const api = {
   health: () => request<AppInfo>("/api/health"),
   sources: () => request<Source[]>("/api/sources"),
@@ -552,9 +580,12 @@ export const api = {
     params.set("language", options.language ?? "zh-CN");
     return request<MediaPage>(`/api/media?${params}`);
   },
-  entity: (sourceId: string, entityId: string, language: GameLanguage = "zh-CN") =>
-    request<GameEntity>(
-      `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}?language=${encodeURIComponent(language)}`,
+  entity: (sourceId: string, entityId: string, language: GameLanguage = "zh-CN", revision = "") =>
+    cachedRequest<GameEntity>(
+      withRevision(
+        `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}?language=${encodeURIComponent(language)}`,
+        revision,
+      ),
     ).then((entity) => ({
       ...entity,
       body_format: entity.body_format ?? entity.components?.find((item) => item.role === "body")?.asset?.format ?? null,
@@ -575,9 +606,14 @@ export const api = {
         supports_player_color: false,
       },
     })),
-  asset: (id: string) => request<Asset>(`/api/assets/${id}`),
-  assetAssociations: (id: string, language: GameLanguage = "zh-CN") =>
-    request<AssetAssociationPage>(`/api/assets/${id}/associations?language=${encodeURIComponent(language)}`),
+  asset: (id: string, revision = "") => cachedRequest<Asset>(withRevision(`/api/assets/${id}`, revision)),
+  assetAssociations: (id: string, language: GameLanguage = "zh-CN", revision = "") =>
+    cachedRequest<AssetAssociationPage>(
+      withRevision(
+        `/api/assets/${id}/associations?language=${encodeURIComponent(language)}`,
+        revision,
+      ),
+    ),
   stats: (sourceId: string) => request<Stats>(`/api/stats?source_id=${encodeURIComponent(sourceId)}`),
   palettes: (sourceId: string) =>
     request<Asset[]>(`/api/palettes?source_id=${encodeURIComponent(sourceId)}`),
@@ -587,7 +623,9 @@ export const api = {
     ),
   playerColors: () => request<PlayerColor[]>("/api/player-colors"),
   shp: (assetId: string) => request<ShpMetadata>(`/api/assets/${assetId}/shp`),
-  metadata: (assetId: string) => request<AssetMetadata>(`/api/assets/${assetId}/metadata`),
+  metadata: (assetId: string, revision = "") => cachedRequest<AssetMetadata>(
+    withRevision(`/api/assets/${assetId}/metadata`, revision),
+  ),
   text: (assetId: string, query = "") => {
     const params = new URLSearchParams({ limit: "400" });
     if (query.trim()) params.set("q", query.trim());
