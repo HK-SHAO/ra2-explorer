@@ -25,6 +25,19 @@ SAFE_SECRET_VALUES = {
     "true",
     "write",
 }
+TYPESCRIPT_TYPE_VALUES = {
+    "any",
+    "bigint",
+    "boolean",
+    "never",
+    "number",
+    "object",
+    "string",
+    "symbol",
+    "undefined",
+    "unknown",
+    "void",
+}
 IGNORED_PATHS = (
     ".git/*",
     ".runtime/*",
@@ -208,6 +221,8 @@ def scan_text(path: str, data: bytes, *, object_id: str | None = None) -> list[F
     for match in SECRET_ASSIGNMENT.finditer(text):
         value = match.group(1)
         if _safe_assignment(value):
+            continue
+        if normalized.endswith((".ts", ".tsx")) and value.casefold() in TYPESCRIPT_TYPE_VALUES:
             continue
         findings.append(
             Finding(

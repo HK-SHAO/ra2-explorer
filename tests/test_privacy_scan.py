@@ -30,6 +30,12 @@ def test_scan_allows_placeholders_and_github_noreply_addresses() -> None:
     assert privacy_scan.scan_text("config.example", content) == []
 
 
+def test_scan_allows_typescript_property_types() -> None:
+    content = b"type SearchProps = { focusToken: number; apiKey: string | null }\n"
+
+    assert privacy_scan.scan_text("frontend/src/App.tsx", content) == []
+
+
 def test_scan_flags_local_machine_paths() -> None:
     path = "C:" + "\\" + "Users" + "\\" + "someone" + "\\" + "project"
 
