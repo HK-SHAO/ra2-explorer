@@ -242,6 +242,7 @@ def _forbidden_path(path: str, *, object_id: str | None = None) -> Finding | Non
     basename = lowered.rsplit("/", 1)[-1]
     forbidden = (
         "/.secrets/" in f"/{lowered}/"
+        or lowered == "docs/plan.md"
         or basename in {".env", "id_rsa", "id_ed25519"}
         or basename.endswith((".pem", ".p12", ".pfx"))
     )

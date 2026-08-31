@@ -50,3 +50,4 @@ def test_sensitive_file_names_are_rejected() -> None:
     assert privacy_scan._forbidden_path(".secrets/local.env") is not None
     assert privacy_scan._forbidden_path("config/.env") is not None
     assert privacy_scan._forbidden_path("config/.env.example") is None
+    assert privacy_scan._forbidden_path("docs/PLAN.md") is not None
