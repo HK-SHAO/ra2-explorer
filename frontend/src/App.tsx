@@ -516,7 +516,20 @@ type LayoutMode = "list" | "grid";
 type DetailPlacement = "right" | "bottom";
 type EntitySort = "cameo" | "faction" | "name_asc" | "name_desc" | "cost_asc" | "cost_desc" | "strength_asc" | "strength_desc";
 type EntitySearchScope = "global" | "current";
+type CatalogSearchTarget = "entities" | "media";
+type SearchMediaKind = "voice" | "sound";
 type PreviewAngle = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+type CatalogSearchSuggestion = {
+  key: string;
+  target: CatalogSearchTarget;
+  title: string;
+  subtitle: string;
+  meta: string;
+  score: number;
+  entity?: EntitySummary;
+  media?: MediaItem;
+};
 
 const DEFAULT_PREVIEW_ANGLE: PreviewAngle = 1;
 const entitySortValues: EntitySort[] = ["cameo", "faction", "name_asc", "name_desc", "cost_asc", "cost_desc", "strength_asc", "strength_desc"];
@@ -601,6 +614,11 @@ type BrowsingLocation = {
   entitySearchKinds: EntityKind[];
   entitySearchUsages: EntityUsage[];
   entitySearchSide: string;
+  searchQuery: string;
+  searchTargets: CatalogSearchTarget[];
+  mediaSearchKinds: SearchMediaKind[];
+  mediaSearchGroup: string;
+  mediaSearchEventType: string;
   selectedAssetId: string;
   selectedEntityId: string;
   assetQuery: string;
@@ -661,6 +679,20 @@ function rememberedEntityUsages(value: unknown): EntityUsage[] {
   if (!Array.isArray(value)) return [...entityUsageOrder];
   const selected = entityUsageOrder.filter((usage) => value.includes(usage));
   return selected.length > 0 ? selected : [...entityUsageOrder];
+}
+
+function rememberedSearchTargets(value: unknown): CatalogSearchTarget[] {
+  const order: CatalogSearchTarget[] = ["entities", "media"];
+  if (!Array.isArray(value)) return order;
+  const selected = order.filter((target) => value.includes(target));
+  return selected.length > 0 ? selected : order;
+}
+
+function rememberedMediaSearchKinds(value: unknown): SearchMediaKind[] {
+  const order: SearchMediaKind[] = ["voice", "sound"];
+  if (!Array.isArray(value)) return order;
+  const selected = order.filter((kind) => value.includes(kind));
+  return selected.length > 0 ? selected : order;
 }
 
 function entityUsageLabel(kind: EntityKind, usage: EntityUsage) {
@@ -905,6 +937,11 @@ function categoryCount(stats: Stats, formats: string[]) {
 
 function ExplorerApp() {
   const [rememberedLocation] = useState(readBrowsingLocation);
+  const rememberedSearchQuery = rememberedLocation.searchQuery
+    || rememberedLocation.entityQuery
+    || (["voices", "sounds"].includes(rememberedLocation.assetCategory || "")
+      ? rememberedLocation.assetQuery || ""
+      : "");
   const entitySelectionsRef = useRef(new Map<string, string>(
     rememberedLocation.sourceId && rememberedLocation.entityKind && rememberedLocation.selectedEntityId
       ? [[entitySelectionKey(rememberedLocation.sourceId, rememberedLocation.entityKind), rememberedLocation.selectedEntityId]]
@@ -953,11 +990,14 @@ function ExplorerApp() {
       ? rememberedLocation.entityKind as EntityKind
       : "vehicle",
   );
-  const [entityQuery, setEntityQuery] = useState(rememberedLocation.entityQuery || "");
+  const [searchQuery, setSearchQuery] = useState(rememberedSearchQuery);
   const [entitySearchScope, setEntitySearchScope] = useState<EntitySearchScope>(
     rememberedLocation.entitySearchScope === "current" ? "current" : "global",
   );
-  const [entitySearchFocusToken, setEntitySearchFocusToken] = useState(0);
+  const [searchFocusToken, setSearchFocusToken] = useState(0);
+  const [searchTargets, setSearchTargets] = useState<CatalogSearchTarget[]>(
+    () => rememberedSearchTargets(rememberedLocation.searchTargets),
+  );
   const [entitySearchKinds, setEntitySearchKinds] = useState<EntityKind[]>(
     () => rememberedEntityKinds(rememberedLocation.entitySearchKinds),
   );
@@ -989,6 +1029,18 @@ function ExplorerApp() {
   const [mediaGroups, setMediaGroups] = useState<Array<{ group: string; count: number }>>([]);
   const [mediaEventTypes, setMediaEventTypes] = useState<Array<{ event_type: string; count: number }>>([]);
   const [mediaKindCounts, setMediaKindCounts] = useState<Array<{ kind: MediaKind; count: number }>>([]);
+  const [mediaSearchKinds, setMediaSearchKinds] = useState<SearchMediaKind[]>(
+    () => rememberedMediaSearchKinds(rememberedLocation.mediaSearchKinds),
+  );
+  const [mediaSearchGroup, setMediaSearchGroup] = useState(rememberedLocation.mediaSearchGroup || "");
+  const [mediaSearchEventType, setMediaSearchEventType] = useState(rememberedLocation.mediaSearchEventType || "");
+  const [searchMediaGroups, setSearchMediaGroups] = useState<Array<{ group: string; count: number }>>([]);
+  const [searchMediaEventTypes, setSearchMediaEventTypes] = useState<Array<{ event_type: string; count: number }>>([]);
+  const [searchEntityItems, setSearchEntityItems] = useState<EntitySummary[]>([]);
+  const [searchEntityUsages, setSearchEntityUsages] = useState<Array<{ usage: EntityUsage; count: number }>>([]);
+  const [searchEntitySides, setSearchEntitySides] = useState<Array<{ id: string; count: number }>>([]);
+  const [searchMediaItems, setSearchMediaItems] = useState<MediaItem[]>([]);
+  const [searchSuggestionLoading, setSearchSuggestionLoading] = useState(false);
   const [mediaGroup, setMediaGroup] = useState(rememberedLocation.mediaGroup || "");
   const [mediaEventType, setMediaEventType] = useState(rememberedLocation.mediaEventType || "");
   const [mediaGrouped, setMediaGrouped] = useState(
@@ -1063,11 +1115,9 @@ function ExplorerApp() {
     () => orderedSideFacets(entitySides, entitySide),
     [entitySides, entitySide],
   );
-  const entitySearchSideFacets = useMemo(
-    () => orderedSideFacets(entitySides, entitySearchSide),
-    [entitySides, entitySearchSide],
-  );
-  const entitySearchActive = Boolean(entityQuery.trim());
+  const searchActive = Boolean(searchQuery.trim());
+  const entitySearchActive = searchActive && searchTargets.includes("entities");
+  const mediaSearchActive = searchActive && searchTargets.includes("media");
   const visibleEntities = useMemo(
     () => sortEntities(
       entities,
@@ -1101,6 +1151,52 @@ function ExplorerApp() {
   const appliedEntitySide = entitySearchActive ? entitySearchSide : entitySide;
   const appliedEntityKindKey = appliedEntityKinds?.join(",") || "";
   const appliedEntityUsageKey = appliedEntityUsages?.join(",") || "";
+  const appliedMediaKind: MediaKind | undefined = mediaSearchActive
+    ? entitySearchScope === "current"
+      ? mediaKind
+      : mediaSearchKinds.length === 1 ? mediaSearchKinds[0] : undefined
+    : mediaKind;
+  const appliedMediaGroup = mediaSearchActive ? mediaSearchGroup : mediaGroup;
+  const appliedMediaEventType = mediaSearchActive ? mediaSearchEventType : mediaEventType;
+  const catalogSearchSuggestions = useMemo<CatalogSearchSuggestion[]>(() => {
+    const compareSuggestions = (left: CatalogSearchSuggestion, right: CatalogSearchSuggestion) => {
+      const leftScore = Number.isFinite(left.score) ? left.score : 100;
+      const rightScore = Number.isFinite(right.score) ? right.score : 100;
+      return leftScore - rightScore || left.title.localeCompare(right.title, gameLanguage, { numeric: true });
+    };
+    const entitySuggestions: CatalogSearchSuggestion[] = searchEntityItems.map((entity) => ({
+      key: `entity:${entity.id}`,
+      target: "entities" as const,
+      title: entity.display_name,
+      subtitle: `${entity.internal_name} · ${entityKindLabels[entity.kind]}`,
+      meta: entity.search_aliases
+        ? `${entity.search_aliases.pinyin} · ${entity.search_aliases.pinyin_initials}`
+        : entity.id,
+      score: entitySuggestionScore(entity, searchQuery),
+      entity,
+    })).sort(compareSuggestions);
+    const mediaSuggestions: CatalogSearchSuggestion[] = searchMediaItems.map((media) => ({
+      key: `media:${media.asset.id}`,
+      target: "media" as const,
+      title: mediaPrimaryText(media),
+      subtitle: `${assetDisplayName(media.asset)} · ${media.kind === "voice" ? "语音" : "音效"}`,
+      meta: media.slots.slice(0, 2).map(mediaSlotLabel).join(" · ") || mediaGroupLabels[media.groups[0]] || "声音",
+      score: mediaSuggestionScore(media, searchQuery),
+      media,
+    })).sort(compareSuggestions);
+    const queues = view === "entities"
+      ? [entitySuggestions, mediaSuggestions]
+      : [mediaSuggestions, entitySuggestions];
+    const result: CatalogSearchSuggestion[] = [];
+    let index = 0;
+    while (result.length < 10 && queues.some((queue) => index < queue.length)) {
+      for (const queue of queues) {
+        if (queue[index] && result.length < 10) result.push(queue[index]);
+      }
+      index += 1;
+    }
+    return result;
+  }, [searchEntityItems, searchMediaItems, searchQuery, gameLanguage, view]);
   const compactAudioDetail = view === "assets" && isMediaCategory;
   const detailSize = detailPlacement === "bottom"
     ? compactAudioDetail ? audioDetailBottomSize : detailBottomSize
@@ -1109,7 +1205,7 @@ function ExplorerApp() {
     "--sidebar-width": sidebarCollapsedRef.current ? "58px" : "224px",
     "--detail-panel-size": `${detailSize}px`,
   } as CSSProperties;
-  const assetScrollKey = [sourceId, selectedCategoryId, assetFormatTag, mediaEventType, assetQuery, assetSort, layout]
+  const assetScrollKey = [sourceId, selectedCategoryId, assetFormatTag, appliedMediaEventType, isMediaCategory ? searchQuery : assetQuery, assetSort, layout]
     .map((value) => encodeURIComponent(value))
     .join(":");
   const assetListScroll = useRememberedScroll(`assets:${assetScrollKey}`, assets.length);
@@ -1244,10 +1340,15 @@ function ExplorerApp() {
       entitySearchKinds,
       entitySearchUsages,
       entitySearchSide,
+      searchQuery,
+      searchTargets,
+      mediaSearchKinds,
+      mediaSearchGroup,
+      mediaSearchEventType,
       selectedAssetId: selectedId,
       selectedEntityId,
       assetQuery,
-      entityQuery,
+      entityQuery: searchQuery,
       assetSort,
       entitySort,
       entityBuildableFirst,
@@ -1256,14 +1357,14 @@ function ExplorerApp() {
     window.localStorage.setItem("ra2exp-browsing-location-v1", JSON.stringify(location));
   }, [
     loading, sourceId, view, assetCategory, assetFormatTag, mediaGroup, mediaEventType, entityKind, entityUsage,
-    entitySide, entitySearchScope, entitySearchKinds, entitySearchUsages, entitySearchSide, selectedId, selectedEntityId, assetQuery, entityQuery, assetSort,
+    entitySide, entitySearchScope, entitySearchKinds, entitySearchUsages, entitySearchSide, searchQuery, searchTargets,
+    mediaSearchKinds, mediaSearchGroup, mediaSearchEventType, selectedId, selectedEntityId, assetQuery, assetSort,
     entitySort, entityBuildableFirst, mediaSort,
   ]);
 
   function selectEntityKind(kind: EntityKind) {
     pauseAudioAsset();
     if (kind !== entityKind) {
-      setEntityQuery("");
       setEntitySide("");
     }
     setView("entities");
@@ -1298,6 +1399,36 @@ function ExplorerApp() {
   function selectMediaCard(id: string) {
     selectAssetCard(id);
     toggleAudioAsset(id, api.mediaUrl(id));
+  }
+
+  function updateSearchTargets(next: CatalogSearchTarget[]) {
+    if (next.length > 0) setSearchTargets(next);
+  }
+
+  function selectCatalogSuggestion(suggestion: CatalogSearchSuggestion) {
+    if (suggestion.entity) {
+      const entity = suggestion.entity;
+      pauseAudioAsset();
+      setSearchQuery(entity.display_name);
+      setView("entities");
+      setEntityKind(entity.kind);
+      entitySelectionsRef.current.set(entitySelectionKey(sourceId, entity.kind), entity.id);
+      setSelectedEntityId(entity.id);
+      return;
+    }
+    if (suggestion.media) {
+      const media = suggestion.media;
+      const category = media.kind === "voice" ? "voices" : "sounds";
+      setSearchQuery(mediaPrimaryText(media));
+      setView("assets");
+      setAssetCategory(category);
+      setAssetFormatTag("");
+      setMediaGroup("");
+      setMediaEventType("");
+      assetSelectionsRef.current.set(assetSelectionKey(sourceId, category), media.asset.id);
+      setSelectedId(media.asset.id);
+      toggleAudioAsset(media.asset.id, api.mediaUrl(media.asset.id));
+    }
   }
 
   function updateAutomaticUpdateCheck(next: boolean) {
@@ -1389,16 +1520,14 @@ function ExplorerApp() {
   }, []);
 
   useEffect(() => {
-    const focusEntitySearch = (event: KeyboardEvent) => {
+    const focusCatalogSearch = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLocaleLowerCase() !== "k") return;
       event.preventDefault();
-      pauseAudioAsset();
-      setView("entities");
       setEntitySearchScope("global");
-      setEntitySearchFocusToken((current) => current + 1);
+      setSearchFocusToken((current) => current + 1);
     };
-    window.addEventListener("keydown", focusEntitySearch);
-    return () => window.removeEventListener("keydown", focusEntitySearch);
+    window.addEventListener("keydown", focusCatalogSearch);
+    return () => window.removeEventListener("keydown", focusCatalogSearch);
   }, []);
 
   useEffect(() => subscribeAudioPlayback(() => {
@@ -1418,6 +1547,12 @@ function ExplorerApp() {
     setMediaGroups([]);
     setMediaKindCounts([]);
     setMediaEventTypes([]);
+    setSearchEntityItems([]);
+    setSearchEntityUsages([]);
+    setSearchEntitySides([]);
+    setSearchMediaItems([]);
+    setSearchMediaGroups([]);
+    setSearchMediaEventTypes([]);
     setTotal(0);
     setMediaTotal(0);
     if (!sourceId) {
@@ -1482,10 +1617,10 @@ function ExplorerApp() {
     pauseAudioAsset();
     const timer = window.setTimeout(() => {
       api.media(sourceId, {
-        query: assetQuery,
-        kind: mediaKind,
-        group: mediaGroup,
-        eventType: mediaEventType,
+        query: mediaSearchActive ? searchQuery : "",
+        kind: appliedMediaKind,
+        group: appliedMediaGroup,
+        eventType: appliedMediaEventType,
         offset: 0,
         limit: 500,
         sort: mediaSort,
@@ -1505,12 +1640,15 @@ function ExplorerApp() {
         })
         .catch((reason: Error) => !cancelled && setError(reason.message))
         .finally(() => !cancelled && setMediaLoading(false));
-    }, assetQuery ? 180 : 0);
+    }, mediaSearchActive ? 180 : 0);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [sourceId, sourceRevision, selectedCategoryId, assetQuery, mediaKind, mediaGroup, mediaEventType, mediaSort, gameLanguage, view, isMediaCategory]);
+  }, [
+    sourceId, sourceRevision, selectedCategoryId, searchQuery, mediaSearchActive, appliedMediaKind,
+    appliedMediaGroup, appliedMediaEventType, mediaSort, gameLanguage, view, isMediaCategory,
+  ]);
 
   useEffect(() => {
     if (view !== "assets" || !isMediaCategory || mediaItems.length === 0) return;
@@ -1526,7 +1664,7 @@ function ExplorerApp() {
     setEntityLoading(true);
     const timer = window.setTimeout(() => {
       api.entities(sourceId, {
-        query: entityQuery,
+        query: entitySearchActive ? searchQuery : "",
         kind: appliedEntityKind,
         kinds: appliedEntityKinds,
         usage: appliedEntityUsage,
@@ -1550,14 +1688,76 @@ function ExplorerApp() {
         })
         .catch((reason: Error) => !cancelled && setError(reason.message))
         .finally(() => !cancelled && setEntityLoading(false));
-    }, entityQuery ? 180 : 0);
+    }, entitySearchActive ? 180 : 0);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
   }, [
-    sourceId, sourceRevision, entityQuery, appliedEntityKind, appliedEntityUsage, appliedEntitySide,
+    sourceId, sourceRevision, searchQuery, entitySearchActive, appliedEntityKind, appliedEntityUsage, appliedEntitySide,
     appliedEntityKindKey, appliedEntityUsageKey, gameLanguage, view,
+  ]);
+
+  useEffect(() => {
+    if (!sourceId || !searchQuery.trim()) {
+      setSearchEntityItems([]);
+      setSearchMediaItems([]);
+      setSearchEntityUsages([]);
+      setSearchEntitySides([]);
+      setSearchMediaGroups([]);
+      setSearchMediaEventTypes([]);
+      setSearchSuggestionLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSearchSuggestionLoading(true);
+    const timer = window.setTimeout(() => {
+      const entityRequest = searchTargets.includes("entities")
+        ? api.entities(sourceId, {
+          query: searchQuery,
+          kind: appliedEntityKind,
+          kinds: appliedEntityKinds,
+          usage: appliedEntityUsage,
+          usages: appliedEntityUsages,
+          side: appliedEntitySide,
+          language: gameLanguage,
+        })
+        : Promise.resolve(null);
+      const mediaRequest = searchTargets.includes("media")
+        ? api.media(sourceId, {
+          query: searchQuery,
+          kind: appliedMediaKind,
+          group: mediaSearchGroup,
+          eventType: mediaSearchEventType,
+          limit: 80,
+          language: gameLanguage,
+        })
+        : Promise.resolve(null);
+      Promise.all([entityRequest, mediaRequest])
+        .then(([entityPage, mediaPage]) => {
+          if (cancelled) return;
+          setSearchEntityItems(entityPage?.items || []);
+          setSearchEntityUsages(entityPage?.usages || []);
+          setSearchEntitySides(entityPage?.sides || []);
+          setSearchMediaItems(mediaPage?.items || []);
+          setSearchMediaGroups(mediaPage?.groups || []);
+          setSearchMediaEventTypes(mediaPage?.event_types || []);
+        })
+        .catch((reason: Error) => {
+          if (!cancelled) setError(reason.message);
+        })
+        .finally(() => {
+          if (!cancelled) setSearchSuggestionLoading(false);
+        });
+    }, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    sourceId, sourceRevision, searchQuery, searchTargets, appliedEntityKind, appliedEntityKindKey,
+    appliedEntityUsage, appliedEntityUsageKey, appliedEntitySide, appliedMediaKind, mediaSearchGroup,
+    mediaSearchEventType, gameLanguage,
   ]);
 
   useEffect(() => {
@@ -1754,10 +1954,10 @@ function ExplorerApp() {
     setMediaLoading(true);
     try {
       const page = await api.media(sourceId, {
-        query: assetQuery,
-        kind: mediaKind,
-        group: mediaGroup,
-        eventType: mediaEventType,
+        query: mediaSearchActive ? searchQuery : "",
+        kind: appliedMediaKind,
+        group: appliedMediaGroup,
+        eventType: appliedMediaEventType,
         offset: mediaItems.length,
         limit: 500,
         sort: mediaSort,
@@ -1775,6 +1975,41 @@ function ExplorerApp() {
       setMediaLoading(false);
     }
   }
+
+  const catalogSearch: CatalogSearchBarProps = {
+    query: searchQuery,
+    setQuery: setSearchQuery,
+    scope: entitySearchScope,
+    setScope: setEntitySearchScope,
+    targets: searchTargets,
+    setTargets: updateSearchTargets,
+    currentTarget: view === "entities" ? "entities" : "media",
+    entityKinds: entitySearchKinds,
+    setEntityKinds: setEntitySearchKinds,
+    entityUsages: entitySearchUsages,
+    setEntityUsages: setEntitySearchUsages,
+    currentEntityKind: entityKind || "vehicle",
+    entityUsageFacets: searchEntityUsages.length > 0 ? searchEntityUsages : entityUsages,
+    entitySides: orderedSideFacets(
+      searchEntitySides.length > 0 ? searchEntitySides : entitySides,
+      entitySearchSide,
+    ),
+    entitySide: entitySearchSide,
+    setEntitySide: setEntitySearchSide,
+    mediaKinds: mediaSearchKinds,
+    setMediaKinds: setMediaSearchKinds,
+    currentMediaKind: mediaKind === "voice" ? "voice" : "sound",
+    mediaGroups: searchMediaGroups.length > 0 ? searchMediaGroups : mediaGroups,
+    mediaGroup: mediaSearchGroup,
+    setMediaGroup: setMediaSearchGroup,
+    mediaEventTypes: searchMediaEventTypes.length > 0 ? searchMediaEventTypes : mediaEventTypes,
+    mediaEventType: mediaSearchEventType,
+    setMediaEventType: setMediaSearchEventType,
+    suggestions: catalogSearchSuggestions,
+    suggestionsLoading: searchSuggestionLoading,
+    onSelectSuggestion: selectCatalogSuggestion,
+    focusToken: searchFocusToken,
+  };
 
   if (loading) {
     return <div className="boot"><div className="radar"><span /></div><p>正在载入资料库…</p></div>;
@@ -1842,8 +2077,7 @@ function ExplorerApp() {
             items={mediaItems}
             total={mediaTotal}
             loading={mediaLoading}
-            query={assetQuery}
-            setQuery={setAssetQuery}
+            search={catalogSearch}
             groups={mediaGroups.filter((group) => group.group.endsWith(mediaKind === "voice" ? "_voice" : "_sound"))}
             selectedGroup={mediaGroup}
             setSelectedGroup={setMediaGroup}
@@ -1926,16 +2160,7 @@ function ExplorerApp() {
               entities={visibleEntities}
               total={entityTotal}
               loading={entityLoading}
-              query={entityQuery}
-              setQuery={setEntityQuery}
-              searchScope={entitySearchScope}
-              setSearchScope={setEntitySearchScope}
-              searchKinds={entitySearchKinds}
-              setSearchKinds={setEntitySearchKinds}
-              searchUsages={entitySearchUsages}
-              setSearchUsages={setEntitySearchUsages}
-              currentKind={entityKind || "vehicle"}
-              usageFacets={entityUsages}
+              search={catalogSearch}
               sort={entitySort}
               setSort={updateEntitySort}
               buildableFirst={entityBuildableFirst}
@@ -1947,14 +2172,10 @@ function ExplorerApp() {
               sides={entitySideFacets}
               selectedSide={entitySide}
               setSelectedSide={setEntitySide}
-              searchSides={entitySearchSideFacets}
-              searchSide={entitySearchSide}
-              setSearchSide={setEntitySearchSide}
               layout={layout}
               setLayout={updateLayout}
               previewAngle={previewAngle}
-              focusToken={entitySearchFocusToken}
-              scrollKey={`entities:${sourceId}:${entityKind}:${entityUsage}:${entitySide}:${entityQuery}:${entitySearchActive ? entitySearchScope : ""}:${entitySearchActive ? entitySearchKindKey : ""}:${entitySearchActive ? entitySearchUsageKey : ""}:${entitySearchActive ? entitySearchSide : ""}:${entitySort}:${entityBuildableFirst}:${layout}`}
+              scrollKey={`entities:${sourceId}:${entityKind}:${entityUsage}:${entitySide}:${searchQuery}:${entitySearchActive ? entitySearchScope : ""}:${entitySearchActive ? entitySearchKindKey : ""}:${entitySearchActive ? entitySearchUsageKey : ""}:${entitySearchActive ? entitySearchSide : ""}:${entitySort}:${entityBuildableFirst}:${layout}`}
             />
             <div className="workspace-resizer" role="separator" tabIndex={0} aria-label="调整详情区域大小" aria-orientation={detailPlacement === "bottom" ? "horizontal" : "vertical"} aria-valuenow={detailSize} onPointerDown={beginDetailResize} onKeyDown={resizeDetailWithKeyboard}><span /></div>
             <EntityDetailPanel
@@ -2092,12 +2313,190 @@ function mediaSectionIdentity(item: MediaItem) {
   return { key: `group:${group}`, label: mediaGroupLabels[group] || group, subtitle: "" };
 }
 
-function MediaListPanel({ items, total, loading, query, setQuery, groups, selectedGroup, setSelectedGroup, eventTypes, selectedEventType, setSelectedEventType, grouped, setGrouped, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore, scrollKey }: {
+type CatalogSearchBarProps = {
+  query: string;
+  setQuery: (value: string) => void;
+  scope: EntitySearchScope;
+  setScope: (value: EntitySearchScope) => void;
+  targets: CatalogSearchTarget[];
+  setTargets: (value: CatalogSearchTarget[]) => void;
+  currentTarget: CatalogSearchTarget;
+  entityKinds: EntityKind[];
+  setEntityKinds: (value: EntityKind[]) => void;
+  entityUsages: EntityUsage[];
+  setEntityUsages: (value: EntityUsage[]) => void;
+  currentEntityKind: EntityKind;
+  entityUsageFacets: Array<{ usage: EntityUsage; count: number }>;
+  entitySides: Array<{ id: string; count: number }>;
+  entitySide: string;
+  setEntitySide: (value: string) => void;
+  mediaKinds: SearchMediaKind[];
+  setMediaKinds: (value: SearchMediaKind[]) => void;
+  currentMediaKind: SearchMediaKind;
+  mediaGroups: Array<{ group: string; count: number }>;
+  mediaGroup: string;
+  setMediaGroup: (value: string) => void;
+  mediaEventTypes: Array<{ event_type: string; count: number }>;
+  mediaEventType: string;
+  setMediaEventType: (value: string) => void;
+  suggestions: CatalogSearchSuggestion[];
+  suggestionsLoading: boolean;
+  onSelectSuggestion: (suggestion: CatalogSearchSuggestion) => void;
+  focusToken: number;
+};
+
+function CatalogSearchBar(props: CatalogSearchBarProps) {
+  const {
+    query, setQuery, scope, setScope, targets, setTargets, currentTarget,
+    entityKinds, setEntityKinds, entityUsages, setEntityUsages, currentEntityKind,
+    entityUsageFacets, entitySides, entitySide, setEntitySide,
+    mediaKinds, setMediaKinds, currentMediaKind, mediaGroups, mediaGroup, setMediaGroup,
+    mediaEventTypes, mediaEventType, setMediaEventType, suggestions, suggestionsLoading,
+    onSelectSuggestion, focusToken,
+  } = props;
+  const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [categoriesOpen, setCategoriesOpen] = useState(false);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [suggestionIndex, setSuggestionIndex] = useState(0);
+  const suggestionsVisible = suggestionsOpen && Boolean(query.trim())
+    && (suggestions.length > 0 || suggestionsLoading);
+  const currentUsageOptions = entityUsageOrder.filter(
+    (usage) => Boolean(entityUsageLabels[currentEntityKind][usage]),
+  );
+  const effectiveCurrentUsages = currentUsageOptions.filter((usage) => entityUsages.includes(usage));
+  const selectedCurrentUsages = effectiveCurrentUsages.length > 0 ? effectiveCurrentUsages : currentUsageOptions;
+  const selectedMediaKinds = scope === "current" ? [currentMediaKind] : mediaKinds;
+  const visibleMediaGroups = mediaGroups.filter((group) => group.group === "unclassified"
+    || selectedMediaKinds.some((kind) => group.group.endsWith(`_${kind}`)));
+  const activeCategoryCount = (targets.includes("entities")
+    ? scope === "global"
+      ? Number(entityKinds.length !== entityKindOrder.length)
+        + Number(entityUsages.length !== entityUsageOrder.length)
+        + Number(Boolean(entitySide))
+      : Number(selectedCurrentUsages.length !== currentUsageOptions.length) + Number(Boolean(entitySide))
+    : 0)
+    + (targets.includes("media")
+      ? Number(scope === "global" && mediaKinds.length !== 2)
+        + Number(Boolean(mediaGroup))
+        + Number(Boolean(mediaEventType))
+      : 0);
+
+  useEffect(() => setSuggestionIndex(0), [query, suggestions[0]?.key]);
+  useEffect(() => {
+    if (focusToken <= 0) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+    setSuggestionsOpen(Boolean(query.trim()));
+  }, [focusToken]);
+  useEffect(() => {
+    const closeWhenOutside = (event: PointerEvent | FocusEvent) => {
+      if (rootRef.current?.contains(event.target as Node)) return;
+      setCategoriesOpen(false);
+      setSuggestionsOpen(false);
+    };
+    document.addEventListener("pointerdown", closeWhenOutside);
+    document.addEventListener("focusin", closeWhenOutside);
+    return () => {
+      document.removeEventListener("pointerdown", closeWhenOutside);
+      document.removeEventListener("focusin", closeWhenOutside);
+    };
+  }, []);
+
+  function toggleTarget(target: CatalogSearchTarget, checked: boolean) {
+    const order: CatalogSearchTarget[] = ["entities", "media"];
+    const next = order.filter((value) => value === target ? checked : targets.includes(value));
+    if (next.length > 0) setTargets(next);
+  }
+
+  function toggleEntityKind(kind: EntityKind, checked: boolean) {
+    const next = entityKindOrder.filter((value) => value === kind ? checked : entityKinds.includes(value));
+    if (next.length > 0) setEntityKinds(next);
+  }
+
+  function toggleEntityUsage(usage: EntityUsage, checked: boolean) {
+    const source = scope === "current"
+      ? entityUsageOrder.filter((value) => entityUsages.includes(value) || selectedCurrentUsages.includes(value))
+      : entityUsages;
+    const next = entityUsageOrder.filter((value) => value === usage ? checked : source.includes(value));
+    const required = scope === "current" ? currentUsageOptions : entityUsageOrder;
+    if (next.some((value) => required.includes(value))) setEntityUsages(next);
+  }
+
+  function toggleMediaKind(kind: SearchMediaKind, checked: boolean) {
+    const order: SearchMediaKind[] = ["voice", "sound"];
+    const next = order.filter((value) => value === kind ? checked : mediaKinds.includes(value));
+    if (next.length > 0) {
+      setMediaKinds(next);
+      if (mediaGroup && mediaGroup !== "unclassified" && !next.some((value) => mediaGroup.endsWith(`_${value}`))) {
+        setMediaGroup("");
+      }
+    }
+  }
+
+  function selectSuggestion(suggestion: CatalogSearchSuggestion) {
+    onSelectSuggestion(suggestion);
+    setCategoriesOpen(false);
+    setSuggestionsOpen(false);
+  }
+
+  function handleSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setCategoriesOpen(false);
+      setSuggestionsOpen(false);
+      return;
+    }
+    if (!suggestions.length || !["ArrowDown", "ArrowUp", "Enter"].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === "ArrowDown") {
+      setSuggestionsOpen(true);
+      setSuggestionIndex((current) => (current + 1) % suggestions.length);
+    } else if (event.key === "ArrowUp") {
+      setSuggestionsOpen(true);
+      setSuggestionIndex((current) => (current - 1 + suggestions.length) % suggestions.length);
+    } else {
+      selectSuggestion(suggestions[Math.min(suggestionIndex, suggestions.length - 1)]);
+    }
+  }
+
+  return <div ref={rootRef} className="entity-search-cluster catalog-search" role="search">
+    <div className="entity-search-options">
+      <div className="entity-search-scope" role="group" aria-label="搜索范围">
+        <button type="button" className={scope === "global" ? "active" : ""} aria-pressed={scope === "global"} onClick={() => { setScope("global"); setCategoriesOpen(false); }}>全局</button>
+        <button type="button" className={scope === "current" ? "active" : ""} aria-pressed={scope === "current"} onClick={() => { setScope("current"); if (mediaGroup && mediaGroup !== "unclassified" && !mediaGroup.endsWith(`_${currentMediaKind}`)) setMediaGroup(""); setCategoriesOpen(false); }}>当前</button>
+      </div>
+      <div className="catalog-search-targets" role="group" aria-label="搜索内容类型">
+        <label className={targets.includes("entities") ? "active" : ""}><input type="checkbox" checked={targets.includes("entities")} onChange={(event) => toggleTarget("entities", event.target.checked)} /><Icon name="unit" size={14} /><span>单位</span></label>
+        <label className={targets.includes("media") ? "active" : ""}><input type="checkbox" checked={targets.includes("media")} onChange={(event) => toggleTarget("media", event.target.checked)} /><Icon name="voice" size={14} /><span>声音</span></label>
+      </div>
+      <div className={`entity-search-filter ${categoriesOpen ? "open" : ""}`}>
+        <button type="button" className="entity-search-filter-trigger" aria-expanded={categoriesOpen} onClick={() => setCategoriesOpen((open) => !open)}><Icon name="filter" size={15} /><span>分类</span>{activeCategoryCount > 0 && <em>{activeCategoryCount}</em>}</button>
+        {categoriesOpen && <div className={`entity-search-filter-popover ${scope}`}>
+          {targets.includes("entities") && scope === "global" && <section><header><strong>单位类型</strong><button type="button" onClick={() => setEntityKinds([...entityKindOrder])}>全选</button></header>{entityKindOrder.map((kind) => <label key={kind}><input type="checkbox" checked={entityKinds.includes(kind)} onChange={(event) => toggleEntityKind(kind, event.target.checked)} /><Icon name={entityKindIcons[kind]} size={15} /><span>{entityKindLabels[kind]}</span></label>)}</section>}
+          {targets.includes("entities") && <section><header><strong>{scope === "current" ? `${entityKindLabels[currentEntityKind]}分类` : "单位用途"}</strong><button type="button" onClick={() => setEntityUsages(scope === "current" ? entityUsageOrder.filter((usage) => entityUsages.includes(usage) || currentUsageOptions.includes(usage)) : [...entityUsageOrder])}>全选</button></header>{(scope === "current" ? currentUsageOptions : entityUsageOrder).map((usage) => <label key={usage}><input type="checkbox" checked={(scope === "current" ? selectedCurrentUsages : entityUsages).includes(usage)} onChange={(event) => toggleEntityUsage(usage, event.target.checked)} /><span>{scope === "current" ? entityUsageLabel(currentEntityKind, usage) : entitySearchUsageLabels[usage]}</span>{scope === "current" && <em>{entityUsageFacets.find((facet) => facet.usage === usage)?.count || 0}</em>}</label>)}</section>}
+          {targets.includes("entities") && <section><header><strong>阵营</strong><button type="button" onClick={() => setEntitySide("")}>不限</button></header><label><input type="radio" name="catalog-search-side" checked={!entitySide} onChange={() => setEntitySide("")} /><span>不限阵营</span></label>{entitySides.map((side) => <label key={side.id}><input type="radio" name="catalog-search-side" checked={entitySide === side.id} onChange={() => setEntitySide(side.id)} /><span>{sideLabels[side.id] || side.id}</span><em>{side.count}</em></label>)}</section>}
+          {targets.includes("media") && scope === "global" && <section><header><strong>声音类型</strong><button type="button" onClick={() => setMediaKinds(["voice", "sound"])}>全选</button></header>{(["voice", "sound"] as SearchMediaKind[]).map((kind) => <label key={kind}><input type="checkbox" checked={mediaKinds.includes(kind)} onChange={(event) => toggleMediaKind(kind, event.target.checked)} /><Icon name={kind === "voice" ? "voice" : "sound"} size={15} /><span>{kind === "voice" ? "游戏语音" : "游戏音效"}</span></label>)}</section>}
+          {targets.includes("media") && <section><header><strong>{scope === "current" ? `${currentMediaKind === "voice" ? "语音" : "音效"}用途` : "声音用途"}</strong><button type="button" onClick={() => setMediaGroup("")}>不限</button></header><label><input type="radio" name="catalog-search-media-group" checked={!mediaGroup} onChange={() => setMediaGroup("")} /><span>不限用途</span></label>{visibleMediaGroups.map((group) => <label key={group.group}><input type="radio" name="catalog-search-media-group" checked={mediaGroup === group.group} onChange={() => setMediaGroup(group.group)} /><span>{mediaGroupLabels[group.group] || group.group}</span><em>{group.count}</em></label>)}</section>}
+          {targets.includes("media") && mediaEventTypes.length > 0 && <section className="catalog-search-event-section"><header><strong>声音事件</strong><button type="button" onClick={() => setMediaEventType("")}>不限</button></header><label><input type="radio" name="catalog-search-media-event" checked={!mediaEventType} onChange={() => setMediaEventType("")} /><span>不限事件</span></label>{mediaEventTypes.map((eventType) => <label key={eventType.event_type}><input type="radio" name="catalog-search-media-event" checked={mediaEventType === eventType.event_type} onChange={() => setMediaEventType(eventType.event_type)} /><span>{mediaSlotLabel(eventType.event_type)}</span><em>{eventType.count}</em></label>)}</section>}
+        </div>}
+      </div>
+      <button type="button" className="catalog-search-clear" disabled={!query} onClick={() => { setQuery(""); setCategoriesOpen(false); setSuggestionsOpen(false); inputRef.current?.focus(); }} aria-label="清除搜索" title="清除搜索"><Icon name="close" size={15} /></button>
+    </div>
+    <div className="entity-search-input">
+      <div className="search-box entity-search-box"><Icon name="search" /><input ref={inputRef} value={query} onPointerDown={() => setCategoriesOpen(false)} onFocus={() => setSuggestionsOpen(true)} onKeyDown={handleSearchKeyDown} onChange={(event) => { setQuery(event.target.value); setSuggestionsOpen(true); }} placeholder={`快捷键 Ctrl+K · 搜索${scope === "global" ? "全部" : "当前"}单位、声音、英文或拼音…`} aria-label="搜索单位和声音" role="combobox" aria-autocomplete="list" aria-expanded={suggestionsVisible} aria-controls="catalog-search-suggestions" aria-activedescendant={suggestionsVisible && suggestions[suggestionIndex] ? `catalog-suggestion-${suggestions[suggestionIndex].key.replace(/[^a-z0-9_-]/gi, "-")}` : undefined} /></div>
+      {suggestionsVisible && <div className="entity-search-suggestions" id="catalog-search-suggestions" role="listbox" aria-label="搜索建议" onMouseDown={(event) => event.preventDefault()}>
+        {suggestions.map((suggestion, index) => <button id={`catalog-suggestion-${suggestion.key.replace(/[^a-z0-9_-]/gi, "-")}`} type="button" role="option" aria-selected={index === suggestionIndex} className={index === suggestionIndex ? "active" : ""} key={suggestion.key} onMouseEnter={() => setSuggestionIndex(index)} onClick={() => selectSuggestion(suggestion)}><Icon name={suggestion.target === "entities" ? "unit" : "voice"} size={16} /><span><strong>{suggestion.title}</strong><small>{suggestion.subtitle}</small></span><em>{suggestion.meta}</em></button>)}
+        {suggestionsLoading && suggestions.length === 0 && <div className="catalog-search-loading"><span />正在检索单位和声音…</div>}
+      </div>}
+    </div>
+  </div>;
+}
+
+function MediaListPanel({ items, total, loading, search, groups, selectedGroup, setSelectedGroup, eventTypes, selectedEventType, setSelectedEventType, grouped, setGrouped, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore, scrollKey }: {
   items: MediaItem[];
   total: number;
   loading: boolean;
-  query: string;
-  setQuery: (value: string) => void;
+  search: CatalogSearchBarProps;
   groups: Array<{ group: string; count: number }>;
   selectedGroup: string;
   setSelectedGroup: (value: string) => void;
@@ -2145,7 +2544,7 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
   return (
     <section className="asset-panel media-panel panel">
       <div className="asset-toolbar">
-        <label className="search-box"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索说明、台词、事件、单位或文件名…" aria-label="搜索声音" />{query && <button onClick={() => setQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</label>
+        <CatalogSearchBar {...search} />
         <span className="result-count">显示 {items.length} / {total}</span>
         <LayoutToggle layout={layout} onChange={setLayout} />
       </div>
@@ -2171,55 +2570,108 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
           : items.map(renderMediaItem)}
         {items.length < total && <button className="load-more" disabled={loading} onClick={() => void onLoadMore()}>{loading ? "正在载入…" : `载入更多（剩余 ${(total - items.length).toLocaleString("zh-CN")}）`}</button>}
         {loading && items.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在建立声音关联…</strong></div>}
-        {!loading && items.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的声音</strong><button onClick={() => { setQuery(""); setSelectedGroup(""); setSelectedEventType(""); }}>清除筛选</button></div>}
+        {!loading && items.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的声音</strong><button onClick={() => { search.setQuery(""); setSelectedGroup(""); setSelectedEventType(""); }}>清除筛选</button></div>}
       </div>
     </section>
   );
 }
 
-function entitySuggestionScore(entity: EntitySummary, query: string) {
-  const raw = query.trim().toLocaleLowerCase();
-  const compact = [...raw].filter((character) => /[\p{L}\p{N}]/u.test(character)).join("");
-  if (!compact) return Number.POSITIVE_INFINITY;
-  const primary = [entity.display_name, entity.internal_name, entity.id, entity.image]
-    .map((value) => value.toLocaleLowerCase());
-  const aliases = [
-    entity.search_aliases?.pinyin_compact || "",
-    entity.search_aliases?.pinyin_initials || "",
-  ].map((value) => value.toLocaleLowerCase());
-  if (primary.some((value) => value === raw)) return 0;
-  if (primary.some((value) => value.startsWith(raw))) return 1;
-  if (aliases.some((value) => value.startsWith(compact))) return 2;
-  if (primary.some((value) => value.includes(raw))) return 3;
-  if (aliases.some((value) => value.includes(compact))) return 4;
-  const fuzzyValues = [...primary, ...aliases]
-    .map((value) => [...value].filter((character) => /[\p{L}\p{N}]/u.test(character)).join(""));
-  return fuzzyValues.some((value) => compact.length >= 2 && value.length <= Math.max(64, compact.length * 8) && (() => {
-    let cursor = -1;
-    const positions: number[] = [];
-    for (const character of compact) {
-      cursor = value.indexOf(character, cursor + 1);
-      if (cursor < 0) return false;
-      positions.push(cursor);
+function catalogSearchTokens(query: string) {
+  const tokens: string[] = [];
+  let current = "";
+  let currentKind: "han" | "other" | "" = "";
+  for (const character of query.trim().toLocaleLowerCase()) {
+    if (!/[\p{L}\p{N}]/u.test(character)) {
+      if (current) tokens.push(current);
+      current = "";
+      currentKind = "";
+      continue;
     }
-    return positions.at(-1)! - positions[0] + 1 <= Math.max(compact.length * 2, compact.length + 2);
-  })()) ? 5 : Number.POSITIVE_INFINITY;
+    const kind = /\p{Script=Han}/u.test(character) ? "han" : "other";
+    if (current && kind !== currentKind) tokens.push(current);
+    current = kind === currentKind ? `${current}${character}` : character;
+    currentKind = kind;
+  }
+  if (current) tokens.push(current);
+  return tokens;
 }
 
-function EntityListPanel({ entities, total, loading, query, setQuery, searchScope, setSearchScope, searchKinds, setSearchKinds, searchUsages, setSearchUsages, currentKind, usageFacets, sort, setSort, buildableFirst, setBuildableFirst, selectedId, setSelectedId, sourceId, sourceRevision, sides, selectedSide, setSelectedSide, searchSides, searchSide, setSearchSide, layout, setLayout, previewAngle, focusToken, scrollKey }: {
+function boundedSuggestionMatch(needle: string, haystack: string) {
+  if (needle.length < (/\p{Script=Han}/u.test(needle) ? 2 : 4)) return false;
+  let first = haystack.indexOf(needle[0]);
+  while (first >= 0) {
+    let cursor = first;
+    let matched = true;
+    for (const character of [...needle].slice(1)) {
+      cursor = haystack.indexOf(character, cursor + 1);
+      if (cursor < 0) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched && cursor - first + 1 <= Math.max(needle.length * 2, needle.length + 2)) return true;
+    first = haystack.indexOf(needle[0], first + 1);
+  }
+  return false;
+}
+
+function catalogSuggestionScore(query: string, primaryValues: string[], aliasValues: string[] = []) {
+  const raw = query.trim().toLocaleLowerCase();
+  const tokens = catalogSearchTokens(raw);
+  if (!tokens.length) return Number.POSITIVE_INFINITY;
+  const primary = primaryValues.map((value) => value.toLocaleLowerCase());
+  const aliases = aliasValues.map((value) => value.toLocaleLowerCase());
+  if (primary.some((value) => value === raw)) return 0;
+  let score = 0;
+  for (const token of tokens) {
+    const compact = [...token].filter((character) => /[\p{L}\p{N}]/u.test(character)).join("");
+    const normalizedPrimary = primary.map((value) => [...value].filter((character) => /[\p{L}\p{N}]/u.test(character)).join(""));
+    const normalizedAliases = aliases.map((value) => [...value].filter((character) => /[\p{L}\p{N}]/u.test(character)).join(""));
+    const primaryPrefixCount = primary.filter((value) => value.startsWith(token)).length;
+    const termScore = primary.some((value) => value === token) ? 0
+      : primaryPrefixCount > 0 ? 1 - Math.min(0.3, (primaryPrefixCount - 1) * 0.1)
+      : normalizedAliases.some((value) => value.startsWith(compact)) ? 2
+        : primary.some((value) => value.includes(token)) ? 3
+          : normalizedAliases.some((value) => value.includes(compact)) ? 4
+            : [...normalizedPrimary, ...normalizedAliases].some((value) => (
+              value.length <= Math.max(64, compact.length * 8) && boundedSuggestionMatch(compact, value)
+            )) ? 5 : Number.POSITIVE_INFINITY;
+    if (!Number.isFinite(termScore)) return termScore;
+    score += termScore;
+  }
+  return score;
+}
+
+function entitySuggestionScore(entity: EntitySummary, query: string) {
+  return catalogSuggestionScore(
+    query,
+    [entity.display_name, entity.internal_name, entity.id, entity.image, entity.ui_name || ""],
+    [entity.search_aliases?.pinyin_compact || "", entity.search_aliases?.pinyin_initials || ""],
+  );
+}
+
+function mediaSuggestionScore(item: MediaItem, query: string) {
+  return catalogSuggestionScore(
+    query,
+    [
+      item.asset.display_name,
+      item.description || "",
+      ...item.texts,
+      ...item.original_texts,
+      ...item.localized_texts,
+      ...item.events,
+      ...item.slots,
+      ...item.entities.flatMap((entity) => [entity.id, entity.display_name, entity.affiliation?.display_name || ""]),
+    ],
+    [...(item.search_aliases?.pinyin_compact || []), ...(item.search_aliases?.pinyin_initials || [])],
+  );
+}
+
+function EntityListPanel({ entities, total, loading, search, sort, setSort, buildableFirst, setBuildableFirst, selectedId, setSelectedId, sourceId, sourceRevision, sides, selectedSide, setSelectedSide, layout, setLayout, previewAngle, scrollKey }: {
   entities: EntitySummary[];
   total: number;
   loading: boolean;
-  query: string;
-  setQuery: (value: string) => void;
-  searchScope: EntitySearchScope;
-  setSearchScope: (value: EntitySearchScope) => void;
-  searchKinds: EntityKind[];
-  setSearchKinds: (value: EntityKind[]) => void;
-  searchUsages: EntityUsage[];
-  setSearchUsages: (value: EntityUsage[]) => void;
-  currentKind: EntityKind;
-  usageFacets: Array<{ usage: EntityUsage; count: number }>;
+  search: CatalogSearchBarProps;
   sort: EntitySort;
   setSort: (value: EntitySort) => void;
   buildableFirst: boolean;
@@ -2231,112 +2683,16 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
   sides: Array<{ id: string; count: number }>;
   selectedSide: string;
   setSelectedSide: (value: string) => void;
-  searchSides: Array<{ id: string; count: number }>;
-  searchSide: string;
-  setSearchSide: (value: string) => void;
   layout: LayoutMode;
   setLayout: (layout: LayoutMode) => void;
   previewAngle: PreviewAngle;
-  focusToken: number;
   scrollKey: string;
 }) {
   const listScroll = useRememberedScroll(scrollKey, entities.length);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [suggestionIndex, setSuggestionIndex] = useState(0);
-  const suggestions = useMemo(() => entities
-    .map((entity, index) => ({ entity, index, score: entitySuggestionScore(entity, query) }))
-    .filter((item) => Number.isFinite(item.score) || (!loading && Boolean(query.trim())))
-    .sort((left, right) => left.score - right.score || left.index - right.index)
-    .slice(0, 8)
-    .map((item) => item.entity), [entities, loading, query]);
-  const suggestionsVisible = searchOpen && Boolean(query.trim()) && suggestions.length > 0;
-  const currentUsageOptions = entityUsageOrder.filter(
-    (usage) => Boolean(entityUsageLabels[currentKind][usage]),
-  );
-  const selectedCurrentSearchUsages = currentUsageOptions.filter(
-    (usage) => searchUsages.includes(usage),
-  );
-  const effectiveCurrentSearchUsages = selectedCurrentSearchUsages.length > 0
-    ? selectedCurrentSearchUsages
-    : currentUsageOptions;
-  const activeSearchCategoryCount = searchScope === "global"
-    ? Number(searchKinds.length !== entityKindOrder.length)
-      + Number(searchUsages.length !== entityUsageOrder.length)
-      + Number(Boolean(searchSide))
-    : Number(effectiveCurrentSearchUsages.length !== currentUsageOptions.length)
-      + Number(Boolean(searchSide));
-  useEffect(() => setSuggestionIndex(0), [query, suggestions[0]?.id]);
-  useEffect(() => {
-    if (focusToken <= 0) return;
-    searchInputRef.current?.focus();
-    searchInputRef.current?.select();
-    setSearchOpen(Boolean(query.trim()));
-  }, [focusToken]);
-
-  function selectSuggestion(entity: EntitySummary) {
-    setQuery(entity.display_name);
-    setSelectedId(entity.id);
-    setSearchOpen(false);
-  }
-
-  function handleSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
-    if (event.key === "Escape") {
-      setSearchOpen(false);
-      return;
-    }
-    if (!suggestions.length || !["ArrowDown", "ArrowUp", "Enter"].includes(event.key)) return;
-    event.preventDefault();
-    if (event.key === "ArrowDown") {
-      setSearchOpen(true);
-      setSuggestionIndex((current) => (current + 1) % suggestions.length);
-    } else if (event.key === "ArrowUp") {
-      setSearchOpen(true);
-      setSuggestionIndex((current) => (current - 1 + suggestions.length) % suggestions.length);
-    } else {
-      selectSuggestion(suggestions[Math.min(suggestionIndex, suggestions.length - 1)]);
-    }
-  }
-
-  function toggleSearchKind(kind: EntityKind, checked: boolean) {
-    const next = entityKindOrder.filter((value) => value === kind ? checked : searchKinds.includes(value));
-    if (next.length > 0) setSearchKinds(next);
-  }
-  function toggleSearchUsage(usage: EntityUsage, checked: boolean) {
-    const selected = searchScope === "current"
-      ? entityUsageOrder.filter((value) => searchUsages.includes(value) || effectiveCurrentSearchUsages.includes(value))
-      : searchUsages;
-    const next = entityUsageOrder.filter((value) => value === usage ? checked : selected.includes(value));
-    const required = searchScope === "current" ? currentUsageOptions : entityUsageOrder;
-    if (next.some((value) => required.includes(value))) setSearchUsages(next);
-  }
   return (
     <section className="asset-panel entity-panel panel">
       <div className="asset-toolbar">
-        <div className="entity-search-cluster" role="search">
-          <div className="entity-search-options">
-            <div className="entity-search-scope" role="group" aria-label="单位搜索范围">
-              <button type="button" className={searchScope === "global" ? "active" : ""} aria-pressed={searchScope === "global"} onClick={() => setSearchScope("global")}>全局</button>
-              <button type="button" className={searchScope === "current" ? "active" : ""} aria-pressed={searchScope === "current"} onClick={() => setSearchScope("current")}>当前</button>
-            </div>
-            <details className="entity-search-filter">
-              <summary><Icon name="filter" size={15} /><span>分类</span>{activeSearchCategoryCount > 0 && <em>{activeSearchCategoryCount}</em>}</summary>
-              <div className={`entity-search-filter-popover ${searchScope}`}>
-                {searchScope === "global" ? <>
-                  <section><header><strong>单位类型</strong><button type="button" onClick={() => setSearchKinds([...entityKindOrder])}>全选</button></header>{entityKindOrder.map((kind) => <label key={kind}><input type="checkbox" checked={searchKinds.includes(kind)} onChange={(event) => toggleSearchKind(kind, event.target.checked)} /><Icon name={entityKindIcons[kind]} size={15} /><span>{entityKindLabels[kind]}</span></label>)}</section>
-                  <section><header><strong>单位用途</strong><button type="button" onClick={() => setSearchUsages([...entityUsageOrder])}>全选</button></header>{entityUsageOrder.map((usage) => <label key={usage}><input type="checkbox" checked={searchUsages.includes(usage)} onChange={(event) => toggleSearchUsage(usage, event.target.checked)} /><span>{entitySearchUsageLabels[usage]}</span></label>)}</section>
-                </> : <section><header><strong>{entityKindLabels[currentKind]}分类</strong><button type="button" onClick={() => setSearchUsages(entityUsageOrder.filter((usage) => searchUsages.includes(usage) || currentUsageOptions.includes(usage)))}>全选</button></header>{currentUsageOptions.map((usage) => <label key={usage}><input type="checkbox" checked={effectiveCurrentSearchUsages.includes(usage)} onChange={(event) => toggleSearchUsage(usage, event.target.checked)} /><span>{entityUsageLabel(currentKind, usage)}</span><em>{usageFacets.find((facet) => facet.usage === usage)?.count || 0}</em></label>)}</section>}
-                <section><header><strong>阵营</strong><button type="button" onClick={() => setSearchSide("")}>不限</button></header><label><input type="radio" name="entity-search-side" checked={!searchSide} onChange={() => setSearchSide("")} /><span>不限阵营</span></label>{searchSides.map((side) => <label key={side.id}><input type="radio" name="entity-search-side" checked={searchSide === side.id} onChange={() => setSearchSide(side.id)} /><span>{sideLabels[side.id] || side.id}</span><em>{side.count}</em></label>)}</section>
-              </div>
-            </details>
-          </div>
-          <div className="entity-search-input">
-            <div className="search-box entity-search-box"><Icon name="search" /><input ref={searchInputRef} value={query} onFocus={() => setSearchOpen(true)} onBlur={() => setSearchOpen(false)} onKeyDown={handleSearchKeyDown} onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }} placeholder={searchScope === "global" ? "搜索全部单位、英文或拼音… Ctrl+K" : "搜索当前分类、英文或拼音… Ctrl+K"} aria-label="搜索单位" role="combobox" aria-autocomplete="list" aria-expanded={suggestionsVisible} aria-controls="entity-search-suggestions" aria-activedescendant={suggestionsVisible ? `entity-suggestion-${suggestions[suggestionIndex]?.id}` : undefined} />{query && <button type="button" onClick={() => { setQuery(""); setSearchOpen(false); }} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</div>
-            {suggestionsVisible && <div className="entity-search-suggestions" id="entity-search-suggestions" role="listbox" aria-label="单位搜索建议" onMouseDown={(event) => event.preventDefault()}>
-              {suggestions.map((entity, index) => <button id={`entity-suggestion-${entity.id}`} type="button" role="option" aria-selected={index === suggestionIndex} className={index === suggestionIndex ? "active" : ""} key={entity.id} onMouseEnter={() => setSuggestionIndex(index)} onClick={() => selectSuggestion(entity)}><span><strong>{entity.display_name}</strong><small>{entity.internal_name}</small></span>{entity.search_aliases && <em>{entity.search_aliases.pinyin} · {entity.search_aliases.pinyin_initials}</em>}</button>)}
-            </div>}
-          </div>
-        </div>
+        <CatalogSearchBar {...search} />
         <span className="result-count">显示 {entities.length} / {total}</span>
         <LayoutToggle layout={layout} onChange={setLayout} />
       </div>
@@ -2370,15 +2726,15 @@ function EntityListPanel({ entities, total, loading, query, setQuery, searchScop
         )) : entities.map((entity) => <EntityGridCard key={entity.id} entity={entity} sourceId={sourceId} sourceRevision={sourceRevision} previewAngle={previewAngle} selected={selectedId === entity.id} onSelect={setSelectedId} />)}
         {loading && entities.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在解析规则实体…</strong></div>}
         {!loading && entities.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的单位</strong><button onClick={() => {
-          if (query.trim()) {
-            setQuery("");
-            setSearchSide("");
-            setSearchKinds([...entityKindOrder]);
-            setSearchUsages([...entityUsageOrder]);
+          if (search.query.trim()) {
+            search.setQuery("");
+            search.setEntitySide("");
+            search.setEntityKinds([...entityKindOrder]);
+            search.setEntityUsages([...entityUsageOrder]);
           } else {
             setSelectedSide("");
           }
-        }}>{query.trim() ? "清除搜索" : "清除筛选"}</button></div>}
+        }}>{search.query.trim() ? "清除搜索" : "清除筛选"}</button></div>}
       </div>
     </section>
   );
