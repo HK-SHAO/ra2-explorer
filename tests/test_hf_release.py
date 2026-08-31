@@ -6,6 +6,7 @@ from pathlib import Path
 
 from scripts.publish_hf_release import (
     _force_regular_upload,
+    _hub_error_detail,
     build_manifest,
     build_resource_part_manifest,
     space_sync_plan,
@@ -66,6 +67,16 @@ def test_hf_release_manifest_pins_archive_size_and_digest(tmp_path) -> None:
         "digest": "sha256:ee5b3346ede73ba6ea3e552775e029195fe8722044029111b2c3c02448807b19",
         "path": "releases/v0.8.0/RA2-Explorer-Web-x64.zip",
     }
+
+
+def test_hf_release_error_detail_does_not_dump_request_content() -> None:
+    class ExampleError(Exception):
+        response = type("Response", (), {"status_code": 503})()
+        request_id = "request-123"
+
+    assert _hub_error_detail(ExampleError("private request body")) == (
+        "ExampleError · HTTP 503 · request request-123"
+    )
 
 
 def test_space_sync_only_replaces_managed_runtime_files(tmp_path, monkeypatch) -> None:

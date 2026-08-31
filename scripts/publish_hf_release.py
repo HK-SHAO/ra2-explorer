@@ -6,6 +6,7 @@ import io
 import json
 import os
 import re
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -136,6 +137,10 @@ def publish_release(
             CommitOperationDelete(path_in_repo=path)
             for path in deletions
         )
+    print(
+        f"Uploading RA2 Explorer {normalized} to Hugging Face {resolved_repository_type}",
+        flush=True,
+    )
     api.create_commit(
         repo_id=resolved_repository,
         repo_type=resolved_repository_type,
@@ -312,10 +317,20 @@ def _prepare_hf_environment(*, disable_xet: bool = False) -> None:
     os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
     if disable_xet:
         os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
-    elif os.name != "nt":
-        os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
     else:
-        os.environ.pop("HF_XET_HIGH_PERFORMANCE", None)
+        os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
+
+
+def _hub_error_detail(error: Exception) -> str:
+    response = getattr(error, "response", None)
+    status = getattr(response, "status_code", None)
+    request_id = getattr(error, "request_id", None)
+    parts = [type(error).__name__]
+    if status is not None:
+        parts.append(f"HTTP {status}")
+    if request_id:
+        parts.append(f"request {request_id}")
+    return " · ".join(parts)
 
 
 def space_sync_plan(
@@ -406,4 +421,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except Exception as error:
+        print(f"Hugging Face release publish failed: {_hub_error_detail(error)}", file=sys.stderr)
+        raise SystemExit(1) from None
