@@ -46,8 +46,17 @@ import {
   staticPopoutUrl,
 } from "./api";
 import {
+  getAudioPlaybackState,
+  pauseAudioAsset,
+  subscribeAudioPlayback,
+  toggleAudioAsset,
+  useAudioPlayback,
+} from "./audioPlayback";
+import {
   hasLoadedCardPreview,
   pauseCardPreviewBackground,
+  preloadAudioResource,
+  preloadAudioResourceGroup,
   preloadCardPreview,
   preloadCardPreviewGroup,
 } from "./resourcePreload";
@@ -1188,6 +1197,7 @@ function ExplorerApp() {
   ]);
 
   function selectEntityKind(kind: EntityKind) {
+    pauseAudioAsset();
     if (kind !== entityKind) {
       setEntityQuery("");
       setEntitySide("");
@@ -1200,6 +1210,7 @@ function ExplorerApp() {
   }
 
   function selectAssetCategory(category: string) {
+    pauseAudioAsset();
     setView("assets");
     setAssetCategory(category);
     setAssetFormatTag("");
@@ -1218,6 +1229,11 @@ function ExplorerApp() {
   function selectAssetCard(id: string) {
     assetSelectionsRef.current.set(assetSelectionKey(sourceId, selectedCategoryId), id);
     setSelectedId(id);
+  }
+
+  function selectMediaCard(id: string) {
+    selectAssetCard(id);
+    toggleAudioAsset(id, api.mediaUrl(id));
   }
 
   function updateAutomaticUpdateCheck(next: boolean) {
@@ -1308,6 +1324,11 @@ function ExplorerApp() {
     if (!isStaticSnapshot && storedAutomaticUpdateCheck()) void checkLatestUpdate();
   }, []);
 
+  useEffect(() => subscribeAudioPlayback(() => {
+    const playback = getAudioPlaybackState();
+    setPlayingMediaId(playback.playing || playback.loading ? playback.assetId : "");
+  }), []);
+
   useEffect(() => {
     setSelected(null);
     setSelectedEntity(null);
@@ -1382,6 +1403,7 @@ function ExplorerApp() {
     setMediaItems([]);
     setMediaTotal(0);
     setPlayingMediaId("");
+    pauseAudioAsset();
     const timer = window.setTimeout(() => {
       api.media(sourceId, {
         query: assetQuery,
@@ -1413,6 +1435,13 @@ function ExplorerApp() {
       window.clearTimeout(timer);
     };
   }, [sourceId, sourceRevision, selectedCategoryId, assetQuery, mediaKind, mediaGroup, mediaEventType, mediaSort, gameLanguage, view, isMediaCategory]);
+
+  useEffect(() => {
+    if (view !== "assets" || !isMediaCategory || mediaItems.length === 0) return;
+    const urls = mediaItems.slice(0, 40).map((item) => api.mediaUrl(item.asset.id));
+    const timer = window.setTimeout(() => preloadAudioResourceGroup(urls), 80);
+    return () => window.clearTimeout(timer);
+  }, [view, isMediaCategory, mediaItems]);
 
   useEffect(() => {
     if (!sourceId || view !== "entities") return;
@@ -1746,7 +1775,7 @@ function ExplorerApp() {
               window.localStorage.setItem("ra2exp-media-grouped-v1", String(next));
             }}
             selectedId={selectedId}
-              onSelect={(id) => { selectAssetCard(id); setPlayingMediaId((current) => current === id ? "" : id); }}
+              onSelect={selectMediaCard}
             playingId={playingMediaId}
             sort={mediaSort}
             setSort={setMediaSort}
@@ -1807,8 +1836,6 @@ function ExplorerApp() {
             playerColors={playerColors}
             previewUrl={previewUrl}
             associations={associations}
-            audioActive={playingMediaId === selected?.id}
-            onAudioPlaybackChange={(active, assetId) => setPlayingMediaId((current) => active ? assetId : current === assetId ? "" : current)}
             wide={detailPlacement === "bottom"}
             scrollKey={`asset:${sourceId}:${selectedId}`}
             onPopout={() => window.open(staticPopoutUrl(new URLSearchParams({ detail: "asset", asset_id: selectedId })), `ra2exp-asset-${selectedId}`, "popup=yes,width=1100,height=780")}
@@ -2016,14 +2043,14 @@ function MediaListPanel({ items, total, loading, query, setQuery, groups, select
 
   function renderMediaItem(item: MediaItem) {
     if (layout === "list") {
-      return <button key={item.asset.id} className={`asset-row media-row ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onClick={() => onSelect(item.asset.id)}>
+      return <button key={item.asset.id} className={`asset-row media-row ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onPointerEnter={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onFocus={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onClick={() => onSelect(item.asset.id)}>
         <span className="file-icon format-audio"><Icon name={playingId === item.asset.id ? "pause" : "play"} /></span>
         <span className="asset-main"><strong>{mediaPrimaryText(item)}</strong>{(mediaSecondaryText(item) || item.texts.length > 1) && <small>{mediaSecondaryText(item)}{item.texts.length > 1 ? `${mediaSecondaryText(item) ? " · " : ""}${item.texts.length} 条文本` : ""}</small>}</span>
         <span className="media-links">{item.entities.slice(0, 2).map((entity) => entity.display_name).join(" · ") || item.slots.slice(0, 2).map(mediaSlotLabel).join(" · ") || "未关联"}</span>
         <Icon name="chevron" size={15} />
       </button>;
     }
-    return <button key={item.asset.id} className={`asset-card media-card ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onClick={() => onSelect(item.asset.id)}>
+    return <button key={item.asset.id} className={`asset-card media-card ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onPointerEnter={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onFocus={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onClick={() => onSelect(item.asset.id)}>
       <span className="asset-card-copy"><strong title={mediaPrimaryText(item)}>{mediaPrimaryText(item)}</strong>{mediaSecondaryText(item) && <small title={mediaSecondaryText(item)}>{mediaSecondaryText(item)}</small>}<em>{item.slots.slice(0, 2).map(mediaSlotLabel).join(" · ") || "未分类"}</em></span>
     </button>;
   }
@@ -2623,42 +2650,16 @@ function animationAssociationAliasTitle(association: MediaAssociation) {
   return `共用帧：${[association.event, ...association.aliases].map(animationEventLabel).join("、")}`;
 }
 
-function CompactAudioPlayer({ assetId, label, active, onPlaybackChange }: {
+function CompactAudioPlayer({ assetId, label }: {
   assetId: string;
   label: string;
-  active?: boolean;
-  onPlaybackChange?: (active: boolean, assetId: string) => void;
 }) {
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [localActive, setLocalActive] = useState(false);
-  const isActive = active ?? localActive;
-
-  function update(next: boolean) {
-    if (active === undefined) setLocalActive(next);
-    onPlaybackChange?.(next, assetId);
-  }
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || active === undefined) return;
-    if (active) void audio.play().catch(() => onPlaybackChange?.(false, assetId));
-    else audio.pause();
-  }, [active, assetId]);
-
-  useEffect(() => {
-    setLocalActive(false);
-  }, [assetId]);
-
-  function toggle() {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (audio.paused) void audio.play().catch(() => update(false));
-    else audio.pause();
-  }
+  const playback = useAudioPlayback();
+  const isActive = playback.assetId === assetId && (playback.playing || playback.loading);
+  const url = api.mediaUrl(assetId);
 
   return <span className="compact-audio-player">
-    <audio ref={audioRef} preload="none" src={api.mediaUrl(assetId)} onPlay={() => update(true)} onPause={() => update(false)} onEnded={() => update(false)} />
-    <button type="button" onClick={toggle} title={isActive ? `暂停 ${label}` : `播放 ${label}`} aria-label={isActive ? `暂停 ${label}` : `播放 ${label}`}><Icon name={isActive ? "pause" : "play"} size={15} /></button>
+    <button type="button" onPointerEnter={() => void preloadAudioResource(url, "foreground")} onFocus={() => void preloadAudioResource(url, "foreground")} onClick={() => toggleAudioAsset(assetId, url)} title={isActive ? `暂停 ${label}` : `播放 ${label}`} aria-label={isActive ? `暂停 ${label}` : `播放 ${label}`}><Icon name={isActive ? "pause" : "play"} size={15} /></button>
   </span>;
 }
 
@@ -3647,7 +3648,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   );
 }
 
-function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, frame, setFrame, playing, setPlaying, palettes, paletteId, setPaletteId, playerColors, previewUrl, associations, audioActive, onAudioPlaybackChange, wide = false, onPopout, scrollKey = "" }: {
+function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, frame, setFrame, playing, setPlaying, palettes, paletteId, setPaletteId, playerColors, previewUrl, associations, wide = false, onPopout, scrollKey = "" }: {
   asset: Asset | null;
   metadata: AssetMetadata | null;
   textAsset: TextAsset | null;
@@ -3663,8 +3664,6 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   playerColors: PlayerColor[];
   previewUrl: string;
   associations: AssetAssociationPage | null;
-  audioActive?: boolean;
-  onAudioPlaybackChange?: (active: boolean, assetId: string) => void;
   wide?: boolean;
   onPopout?: () => void;
   scrollKey?: string;
@@ -3784,7 +3783,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
           {onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}
           {isAudio
             ? <div className="audio-header-player">
-              <CompactAudioPlayer assetId={asset.id} label={assetDisplayName(asset)} active={audioActive} onPlaybackChange={onAudioPlaybackChange} />
+              <CompactAudioPlayer assetId={asset.id} label={assetDisplayName(asset)} />
               <span className="audio-header-meta" title={metadata?.audio_codec || ""}>{metadata?.duration_seconds !== undefined ? formatDuration(metadata.duration_seconds) : ""}</span>
               <AudioDownloadAction assetId={asset.id} label={assetDisplayName(asset)} />
             </div>

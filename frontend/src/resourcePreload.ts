@@ -107,3 +107,107 @@ export function pauseCardPreviewBackground() {
     drainCardPreviewQueue();
   };
 }
+
+interface AudioJob {
+  url: string;
+  priority: ResourcePriority;
+  resolve: (cachedUrl: string | null) => void;
+  promise: Promise<string | null>;
+}
+
+interface CachedAudioResource {
+  objectUrl: string;
+  size: number;
+}
+
+const cachedAudioResources = new Map<string, CachedAudioResource>();
+const pendingAudioResources = new Map<string, AudioJob>();
+const audioQueue: AudioJob[] = [];
+const cachedAudioResourceLimit = 256;
+const cachedAudioByteLimit = 64 * 1024 * 1024;
+const audioPreloadConcurrency = 3;
+let activeAudioPreloads = 0;
+let cachedAudioBytes = 0;
+
+function retainAudioResource(url: string, cachedUrl: string, size: number) {
+  if (size > cachedAudioByteLimit) {
+    URL.revokeObjectURL(cachedUrl);
+    return null;
+  }
+  const previous = cachedAudioResources.get(url);
+  if (previous) {
+    cachedAudioBytes -= previous.size;
+    URL.revokeObjectURL(previous.objectUrl);
+    cachedAudioResources.delete(url);
+  }
+  cachedAudioResources.set(url, { objectUrl: cachedUrl, size });
+  cachedAudioBytes += size;
+  while (cachedAudioResources.size > cachedAudioResourceLimit || cachedAudioBytes > cachedAudioByteLimit) {
+    const oldest = cachedAudioResources.keys().next().value;
+    if (oldest === undefined) break;
+    const cached = cachedAudioResources.get(oldest);
+    cachedAudioResources.delete(oldest);
+    if (cached) {
+      cachedAudioBytes -= cached.size;
+      URL.revokeObjectURL(cached.objectUrl);
+    }
+  }
+  return cachedUrl;
+}
+
+function drainAudioQueue() {
+  while (activeAudioPreloads < audioPreloadConcurrency && audioQueue.length > 0) {
+    const foregroundIndex = audioQueue.findIndex((job) => job.priority === "foreground");
+    const [job] = audioQueue.splice(foregroundIndex >= 0 ? foregroundIndex : 0, 1);
+    activeAudioPreloads += 1;
+    void fetch(job.url, { cache: "force-cache" })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Audio preload failed (${response.status})`);
+        return response.blob();
+      })
+      .then((blob) => {
+        const cachedUrl = URL.createObjectURL(blob);
+        job.resolve(retainAudioResource(job.url, cachedUrl, blob.size));
+      })
+      .catch(() => job.resolve(null))
+      .finally(() => {
+        activeAudioPreloads = Math.max(0, activeAudioPreloads - 1);
+        pendingAudioResources.delete(job.url);
+        drainAudioQueue();
+      });
+  }
+}
+
+export function cachedAudioResourceUrl(url: string) {
+  const cached = cachedAudioResources.get(url);
+  if (!cached) return null;
+  cachedAudioResources.delete(url);
+  cachedAudioResources.set(url, cached);
+  return cached.objectUrl;
+}
+
+export function preloadAudioResource(url: string, priority: ResourcePriority = "background") {
+  if (!url) return Promise.resolve(null);
+  const cachedUrl = cachedAudioResourceUrl(url);
+  if (cachedUrl) return Promise.resolve(cachedUrl);
+  const pending = pendingAudioResources.get(url);
+  if (pending) {
+    if (priority === "foreground") pending.priority = "foreground";
+    drainAudioQueue();
+    return pending.promise;
+  }
+
+  let resolveJob: (cachedUrl: string | null) => void = () => {};
+  const promise = new Promise<string | null>((resolve) => { resolveJob = resolve; });
+  const job: AudioJob = { url, priority, resolve: resolveJob, promise };
+  pendingAudioResources.set(url, job);
+  audioQueue.push(job);
+  drainAudioQueue();
+  return promise;
+}
+
+export function preloadAudioResourceGroup(urls: string[]) {
+  for (const url of new Set(urls.filter(Boolean))) {
+    void preloadAudioResource(url, "background");
+  }
+}
