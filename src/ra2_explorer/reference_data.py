@@ -26,6 +26,22 @@ AUDIO_TRANSCRIPT_SOURCE_URL = (
     "https://forums.cncnet.org/topic/12109-in-game-audio-database-transcript/"
 )
 
+# The community workbook rotates both retail harvester voice groups by one row.
+# These filename-to-line bindings were verified against the decoded English BAG
+# samples; keep the override in code so a future reference sync cannot restore
+# the bad alignment.
+_VERIFIED_AUDIO_TRANSCRIPT_CORRECTIONS = {
+    "vchrhaa": "You'll get the cash in a flash",
+    "vchrhab": "It's in the bank",
+    "vchrhac": "Mining",
+    "vchrhad": "Ah, there it is",
+    "vchrhae": "Rolling with a chrono convoy",
+    "vwarhaa": "Equal share for everyone",
+    "vwarhab": "Let's keep the ore moving",
+    "vwarhac": "Da, we will need that",
+    "vwarhad": "Looks like good place to mine",
+}
+
 BUILTIN_NAMES = (
     "ra2.mix",
     "language.mix",
@@ -123,6 +139,11 @@ def load_audio_transcript(
             pass
     for supplement_path in supplement_paths:
         entries.update(_load_audio_transcript_supplement(supplement_path))
+    for file_id, text in _VERIFIED_AUDIO_TRANSCRIPT_CORRECTIONS.items():
+        current = entries.get(file_id)
+        if current is None:
+            continue
+        entries[file_id] = {**current, "text": text, "original_text": text}
     return entries
 
 

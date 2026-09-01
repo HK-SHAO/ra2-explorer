@@ -102,7 +102,69 @@ def test_audio_transcript_merges_multiple_supplements(tmp_path) -> None:
     assert entries["cevau06"]["original_text"].startswith("The V3")
 
 
-def _audio_transcript_workbook() -> bytes:
+def test_audio_transcript_corrects_verified_rotated_harvest_groups(tmp_path) -> None:
+    path = tmp_path / "audio-transcript.xlsx"
+    path.write_bytes(
+        _audio_transcript_workbook(
+            (
+                ("$vchrhaa.wav", "It's in the bank", "Chrono Miner", "Harvest", "", "Allied"),
+                ("$vchrhab.wav", "Mining", "Chrono Miner", "Harvest", "", "Allied"),
+                ("$vchrhac.wav", "Ah, there it is", "Chrono Miner", "Harvest", "", "Allied"),
+                (
+                    "$vchrhad.wav",
+                    "Rolling with a chrono convoy",
+                    "Chrono Miner",
+                    "Harvest",
+                    "",
+                    "Allied",
+                ),
+                (
+                    "$vchrhae.wav",
+                    "You'll get the cash in a flash",
+                    "Chrono Miner",
+                    "Harvest",
+                    "",
+                    "Allied",
+                ),
+                ("$vwarhaa.wav", "Let's keep the ore moving", "War Miner", "Harvest", "", "Soviet"),
+                ("$vwarhab.wav", "Da, we will need that", "War Miner", "Harvest", "", "Soviet"),
+                (
+                    "$vwarhac.wav",
+                    "Looks like good place to mine",
+                    "War Miner",
+                    "Harvest",
+                    "",
+                    "Soviet",
+                ),
+                ("$vwarhad.wav", "Equal share for everyone", "War Miner", "Harvest", "", "Soviet"),
+            )
+        )
+    )
+
+    entries = load_audio_transcript(path)
+
+    assert [entries[f"vchrha{suffix}"]["original_text"] for suffix in "abcde"] == [
+        "You'll get the cash in a flash",
+        "It's in the bank",
+        "Mining",
+        "Ah, there it is",
+        "Rolling with a chrono convoy",
+    ]
+    assert [entries[f"vwarha{suffix}"]["original_text"] for suffix in "abcd"] == [
+        "Equal share for everyone",
+        "Let's keep the ore moving",
+        "Da, we will need that",
+        "Looks like good place to mine",
+    ]
+    assert entries["vwarhaa"]["unit"] == "War Miner"
+
+
+def _audio_transcript_workbook(
+    rows: tuple[tuple[str, str, str, str, str, str], ...] | None = None,
+) -> bytes:
+    selected_rows = rows or (
+        ("$giselea.wav", "Sir, yes sir!", "GI", "Select", "", "Allied"),
+    )
     shared = ("File", "Line", "Unit", "Category", "Comments", "Faction")
     output = BytesIO()
     with ZipFile(output, "w", ZIP_DEFLATED) as workbook:
@@ -139,13 +201,16 @@ def _audio_transcript_workbook() -> bytes:
                 for index, column in enumerate("ABCDEF")
             )
             + "</row>"
-            "<row r='2'>"
-            "<c r='A2' t='inlineStr'><is><t>$giselea.wav</t></is></c>"
-            "<c r='B2' t='inlineStr'><is><t>Sir, yes sir!</t></is></c>"
-            "<c r='C2' t='inlineStr'><is><t>GI</t></is></c>"
-            "<c r='D2' t='inlineStr'><is><t>Select</t></is></c>"
-            "<c r='F2' t='inlineStr'><is><t>Allied</t></is></c>"
-            "</row>"
-            "</sheetData></worksheet>",
+            + "".join(
+                f"<row r='{row_index}'>"
+                + "".join(
+                    f"<c r='{column}{row_index}' t='inlineStr'><is><t>{value}</t></is></c>"
+                    for column, value in zip("ABCDEF", row, strict=True)
+                    if value
+                )
+                + "</row>"
+                for row_index, row in enumerate(selected_rows, 2)
+            )
+            + "</sheetData></worksheet>",
         )
     return output.getvalue()
