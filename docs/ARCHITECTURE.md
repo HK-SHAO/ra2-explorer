@@ -59,7 +59,7 @@ Pages 不运行 Python、FastAPI 或 SQLite。构建阶段把允许公开的语�
 
 ### 单位
 
-实体来自 RULES 的 `VehicleTypes`、`AircraftTypes`、`InfantryTypes` 和 `BuildingTypes`。规则节的 `Image`（缺省为实体 ID）选择 Techno ART 节；ART 再决定 VXL/SHP、剧场扩展、Cameo、炮塔、炮管、HVA 和动画图层。
+实体来自 RULES 的 `VehicleTypes`、`AircraftTypes`、`InfantryTypes` 和 `BuildingTypes`。规则节的 `Image`（缺省为实体 ID）选择 Techno ART 节；ART 再决定 VXL/SHP、剧场扩展、Cameo、炮塔、炮管、HVA 和动画图层。海豚 `DLPH` 与巨型乌贼 `SQD` 在零售规则中都属于 `VehicleTypes` 且设置 `Naval=yes`，因此目录保持“载具”主类型，并用海军属性继续细分，不按外观改成人为类型。
 
 `rulesmd.ini` 是尤里的复仇完整规则集；存在时以它作为当前版本输入，不与红警 2 的 `rules.ini` 做字段级合并。只有来源没有 `rulesmd.ini` 时才回退到 `rules.ini`，避免单位继承另一游戏版本的阵营或建造限制。
 

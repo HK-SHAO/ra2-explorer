@@ -3674,13 +3674,17 @@ function EntityGridCard({ entity, sourceId, sourceRevision, previewAngle, select
 }
 
 function entityCardPlayerColor(entity: EntitySummary) {
-  const side = entity.sides.length === 1
-    ? entity.sides[0]
-    : entity.sides.length === 0 && entity.affiliation?.kind === "side"
-      ? entity.affiliation.id : "";
+  const side = entityAffiliationSide(entity);
   return side === "GDI" ? "blue"
     : side === "Nod" ? "red"
       : side === "ThirdSide" ? "purple" : "";
+}
+
+function entityAffiliationSide(entity: EntitySummary) {
+  return entity.sides.length === 1
+    ? entity.sides[0]
+    : entity.sides.length === 0 && entity.affiliation?.kind === "side"
+      ? entity.affiliation.id : "";
 }
 
 function entityCardPreviewUrl(entity: EntitySummary, sourceId: string, previewAngle: PreviewAngle, sourceRevision: string, compact = false) {
@@ -3752,6 +3756,7 @@ function useThumbnailAtlasUrl(primaryUrl: string, fallbackUrl: string) {
 
 function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle, compact = false }: { entity: EntitySummary; sourceId: string; sourceRevision: string; previewAngle: PreviewAngle; compact?: boolean }) {
   const previewRef = useRef<HTMLSpanElement>(null);
+  const affiliationSide = entityAffiliationSide(entity);
   const atlas = isStaticSnapshot ? entity.thumbnail_atlas : undefined;
   const requestedFacing = entity.body_format === "shp" && entity.kind === "infantry"
     ? entityFacingForPreviewAngle(entity.body_format, previewAngle)
@@ -3820,7 +3825,7 @@ function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle, com
         }} />
         : readyUrl && <img decoding="async" fetchPriority="low" src={readyUrl} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
       : <Icon name="unit" size={34} />}
-    {!compact && entity.affiliation && <span className={`entity-affiliation-badge affiliation-${entity.affiliation.kind} affiliation-${affiliationClassId(entity.affiliation.id)}`} title={entity.affiliation.display_name}>
+    {!compact && entity.affiliation && <span className={`entity-affiliation-badge affiliation-${entity.affiliation.kind} affiliation-${affiliationClassId(entity.affiliation.id)} ${affiliationSide ? `affiliation-${affiliationClassId(affiliationSide)}` : ""}`} title={entity.affiliation.display_name}>
       {entity.affiliation.display_name}
     </span>}
   </span>;
