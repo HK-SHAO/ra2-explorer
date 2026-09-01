@@ -39,7 +39,7 @@ from ra2_explorer.storage import Database
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
 ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
 UNAFFILIATED_SIDE = "unaffiliated"
-SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v12",)
+SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v13",)
 _PLANNING_SIDE_IDS = ("GDI", "Nod", "ThirdSide")
 _TYPE_SECTIONS = {
     "vehicle": "VehicleTypes",
@@ -1500,7 +1500,11 @@ class SemanticLibrary:
         asset_index = _index_assets(assets)
 
         warnings = []
-        rules_assets = _named_inputs(asset_index.by_name, ("rules.ini", "rulesmd.ini"))
+        rules_assets = _edition_ini_inputs(
+            asset_index.by_name,
+            "rules.ini",
+            "rulesmd.ini",
+        )
         art_assets = _named_inputs(asset_index.by_name, ("art.ini", "artmd.ini"))
         sound_assets = _named_inputs(asset_index.by_name, ("sound.ini", "soundmd.ini"))
         eva_assets = _named_inputs(asset_index.by_name, ("eva.ini", "evamd.ini"))
@@ -2608,6 +2612,15 @@ def _named_inputs(
     for name in names:
         assets.extend(by_name.get(name.casefold(), ()))
     return sorted(assets, key=_config_precedence)
+
+
+def _edition_ini_inputs(
+    by_name: dict[str, list[dict[str, Any]]],
+    base_name: str,
+    expansion_name: str,
+) -> list[dict[str, Any]]:
+    expansion = _named_inputs(by_name, (expansion_name,))
+    return expansion or _named_inputs(by_name, (base_name,))
 
 
 def _merge_ini_inputs(

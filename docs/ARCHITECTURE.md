@@ -61,6 +61,8 @@ Pages 不运行 Python、FastAPI 或 SQLite。构建阶段把允许公开的语�
 
 实体来自 RULES 的 `VehicleTypes`、`AircraftTypes`、`InfantryTypes` 和 `BuildingTypes`。规则节的 `Image`（缺省为实体 ID）选择 Techno ART 节；ART 再决定 VXL/SHP、剧场扩展、Cameo、炮塔、炮管、HVA 和动画图层。
 
+`rulesmd.ini` 是尤里的复仇完整规则集；存在时以它作为当前版本输入，不与红警 2 的 `rules.ini` 做字段级合并。只有来源没有 `rulesmd.ini` 时才回退到 `rules.ini`，避免单位继承另一游戏版本的阵营或建造限制。
+
 目录列出全部规则实体，不以“当前能否预览”作为隐藏条件。`Owner`、`AIBasePlanningSide`、`TechLevel`、`BuildLimit`、`Capturable`、`Civilian` 等字段共同计算单位用途和唯一显示归属；缺少可靠归属的对象进入“无阵营”，不会同时命中所有阵营。
 
 武器关系从 `Primary`、`Secondary` 和精英槽位继续追踪到 Weapon、Projectile 与 Warhead。详情保留解析状态和关键规则，但不会把孤立开火闪光、命中特效或随机残骸冒充完整战斗动画。

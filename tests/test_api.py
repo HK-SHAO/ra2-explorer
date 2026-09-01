@@ -24,6 +24,7 @@ from ra2_explorer.semantic import (
     _AssetIndex,
     _build_eva_events,
     _build_media_items,
+    _edition_ini_inputs,
     _effective_entity_countries,
     _entity_animation_role,
     _entity_usage,
@@ -1301,3 +1302,29 @@ def test_effective_entity_countries_follow_house_restrictions() -> None:
     assert _effective_entity_countries(
         {"owner": owners, "requiredhouses": "British"}
     ) == ("British",)
+
+
+def test_expansion_rules_replace_the_base_edition() -> None:
+    base = {
+        "id": "base",
+        "display_name": "rules.ini",
+        "virtual_path": "ra2.mix::rules.ini",
+        "storage_kind": "mix",
+    }
+    expansion = {
+        "id": "expansion",
+        "display_name": "rulesmd.ini",
+        "virtual_path": "ra2md.mix::rulesmd.ini",
+        "storage_kind": "mix",
+    }
+
+    assert _edition_ini_inputs(
+        {"rules.ini": [base], "rulesmd.ini": [expansion]},
+        "rules.ini",
+        "rulesmd.ini",
+    ) == [expansion]
+    assert _edition_ini_inputs(
+        {"rules.ini": [base]},
+        "rules.ini",
+        "rulesmd.ini",
+    ) == [base]
