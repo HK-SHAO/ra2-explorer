@@ -5105,6 +5105,29 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
       revision: sourceRevision,
     })
     : "";
+  const animationCardPreviewUrl = (association: MediaAssociation, sample: MediaSample) => {
+    if (!sample.asset || !["shp", "tmp", "pcx"].includes(sample.asset.format)) return "";
+    if (entity.kind === "building" && association.role === "operation" && sample.asset.format === "shp") {
+      return api.entityPreviewUrl(sourceId, entity.id, {
+        frame: 0,
+        facing: renderFacing,
+        playerColor,
+        scale: 2,
+        effectAssetId: sample.asset.id,
+        effectFrame: sample.animation?.start_frame || 0,
+        effectPalette: sample.palette || undefined,
+        revision: sourceRevision,
+      });
+    }
+    return api.previewUrl(
+      sample.asset.id,
+      sample.animation?.start_frame || 0,
+      "",
+      2,
+      playerColor,
+      { palette: sample.palette || undefined },
+    );
+  };
   const effectAnchor = animationEffectAnchor(
     activeAnimation?.role || null,
     entity.art,
@@ -5202,7 +5225,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
                 <div className={`animation-association-list ${associationLayout === "grid" ? "animation-association-grid" : ""}`}>
                   {group === "body" && hasRawBodyAnimation && <button type="button" className={!activeAnimation ? "active" : ""} onClick={() => { setActiveAnimation(null); setFrameMode("sequence"); setPlaying(true); }}><span className="animation-thumbnail body-action"><Icon name="unit" size={24} /></span><span><strong>{rawBodyAnimationTitle}</strong><small>{rawBodyAnimationMeta}</small></span><Icon name="play" size={16} /></button>}
                   {animationGroups[group].flatMap((association) => animationCardSamples(association, facing).map((sample, index) => <button type="button" disabled={!sample.asset} className={activeAnimation?.event === association.event && activeAnimation.slot === association.slot && activeAnimation.source === association.source && activeAnimation.ruleField === association.rule_field && activeAnimation.sample.name === sample.name ? "active" : ""} onClick={() => { if (!sample.asset) return; setPlaying(false); setActiveAnimation({ event: association.event, slot: association.slot, source: association.source, ruleField: association.rule_field, role: association.role, sample }); }} key={`${association.slot}-${association.source}-${association.rule_field}-${association.event}-${sample.name}-${index}`}>
-                    <span className={`animation-thumbnail ${association.role === "body" || association.role === "construction" ? "body-action" : ""}`}>{sample.asset && ["shp", "tmp", "pcx"].includes(sample.asset.format) ? <DeferredPreviewImage src={api.previewUrl(sample.asset.id, sample.animation?.start_frame || 0, "", 2, playerColor, { palette: sample.palette || undefined })} /> : <Icon name="image" size={24} />}</span>
+                    <span className={`animation-thumbnail ${association.role === "body" || association.role === "construction" ? "body-action" : ""}`}>{animationCardPreviewUrl(association, sample) ? <DeferredPreviewImage src={animationCardPreviewUrl(association, sample)} /> : <Icon name="image" size={24} />}</span>
                     <span><strong>{animationAssociationTitle(association)}</strong><small title={animationAssociationAliasTitle(association)}>{animationAssociationMeta(association, sample)}</small></span><Icon name="play" size={16} />
                   </button>))}
                 </div>
