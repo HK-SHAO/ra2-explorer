@@ -351,11 +351,21 @@ const mediaSlotLabels: Record<string, string> = {
   activeanimfour: "运转层四",
   productionanim: "生产",
   idleanim: "待机",
-  specialanim: "特殊",
-  deployinganim: "展开",
-  underdooranim: "门体",
+  idleanimtwo: "待机层二",
+  idleanimthree: "待机层三",
+  idleanimfour: "待机层四",
+  specialanim: "特殊动作开始",
+  specialanimtwo: "特殊动作持续",
+  specialanimthree: "特殊动作结束",
+  specialanimfour: "特殊动作附加",
+  superanim: "未充能待机",
+  superanimtwo: "充能启动",
+  superanimthree: "充能就绪",
+  superanimfour: "发射后复位",
+  deployinganim: "生产展开",
+  underdooranim: "下层门体",
   roofdeployinganim: "屋顶展开",
-  underroofdooranim: "屋顶门",
+  underroofdooranim: "屋顶门体",
   bibshape: "地基",
   taunt: "多人嘲讽",
   ambient: "场景播报",
@@ -495,8 +505,23 @@ function ruleFieldName(ruleField: string | null) {
     "arttype.activeanimtwo": "运行层二",
     "arttype.activeanimthree": "运行层三",
     "arttype.activeanimfour": "运行层四",
+    "arttype.idleanim": "待机层一",
+    "arttype.idleanimtwo": "待机层二",
+    "arttype.idleanimthree": "待机层三",
+    "arttype.idleanimfour": "待机层四",
     "arttype.productionanim": "生产",
-    "arttype.specialanim": "特殊运行",
+    "arttype.specialanim": "特殊动作开始",
+    "arttype.specialanimtwo": "特殊动作持续",
+    "arttype.specialanimthree": "特殊动作结束",
+    "arttype.specialanimfour": "特殊动作附加",
+    "arttype.superanim": "未充能待机",
+    "arttype.superanimtwo": "充能启动",
+    "arttype.superanimthree": "充能就绪",
+    "arttype.superanimfour": "发射后复位",
+    "arttype.deployinganim": "生产展开",
+    "arttype.underdooranim": "下层门体",
+    "arttype.roofdeployinganim": "屋顶展开",
+    "arttype.underroofdooranim": "屋顶门体",
     "weapontype.anim": "开火效果",
     "warheadtype.animlist": "命中特效",
     "warheadtype.splashlist": "水面命中特效",
@@ -4011,7 +4036,10 @@ function animationSourceFramesFromTotal(sample: MediaSample | undefined, totalFr
   const frameStep = Math.max(1, playback.frame_step || 1);
   const frames = Array.from({ length: Math.max(1, count) }, (_, index) => start + index * frameStep)
     .filter((frame) => contentTotal === 0 || frame < contentTotal);
-  return frames.length > 0 ? frames : [Math.min(Math.max(0, start), Math.max(0, contentTotal - 1))];
+  const available = frames.length > 0
+    ? frames
+    : [Math.min(Math.max(0, start), Math.max(0, contentTotal - 1))];
+  return playback.reverse ? [...available].reverse() : available;
 }
 
 function animationSourceFrames(sample: MediaSample | undefined, metadata: AssetMetadata | null, facing: number) {
@@ -4053,12 +4081,22 @@ function preferredBodySequence(associations: MediaAssociation[]) {
     || null;
 }
 
-function defaultBuildingOperationSamples(associations: MediaAssociation[], facing: number) {
+function defaultBuildingOperationSamples(
+  associations: MediaAssociation[],
+  facing: number,
+  activeAnimation: ActiveEntityAnimation | null = null,
+) {
   const seen = new Set<string>();
   const samples: MediaSample[] = [];
+  const excludedAssetId = activeAnimation?.sample.asset?.id;
+  const excludesSuperFamily = activeAnimation?.slot.toLowerCase().startsWith("superanim") || false;
   for (const association of associations) {
+    const slot = association.slot.toLowerCase();
+    const persistent = /^(?:active|idle)anim(?:two|three|four)?$/.test(slot)
+      || slot === "superanim";
+    if (!persistent || (excludesSuperFamily && slot.startsWith("superanim"))) continue;
     for (const sample of animationCardSamples(association, facing)) {
-      if (!sample.asset || sample.asset.format !== "shp" || seen.has(sample.asset.id)) continue;
+      if (!sample.asset || sample.asset.format !== "shp" || sample.asset.id === excludedAssetId || seen.has(sample.asset.id)) continue;
       seen.add(sample.asset.id);
       samples.push(sample);
     }
@@ -4683,7 +4721,11 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   const operationAnimationAssociations = animationAssociations.filter(
     (association) => animationAssociationGroup(entityKind, association) === "operation",
   );
-  const defaultOperationSamples = defaultBuildingOperationSamples(operationAnimationAssociations, facing);
+  const defaultOperationSamples = defaultBuildingOperationSamples(
+    operationAnimationAssociations,
+    facing,
+    activeAnimation,
+  );
   const defaultOperationAssetKey = defaultOperationSamples.map((sample) => sample.asset?.id).join(":");
   const weaponAnimationAssociations = animationAssociations.filter(
     (association) => animationAssociationGroup(entityKind, association) === "weapon",
@@ -4751,6 +4793,15 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   const activeAnimationFrameCount = activeAnimation
     ? Math.max(activeAnimationFrames.length, effectBodyFrames.length, 1)
     : activeAnimationFrames.length;
+  const activeAnimationLoops = activeAnimationIsBody
+    || activeAnimation?.sample.animation?.loop_count === -1;
+  const activeAnimationLoopStart = (() => {
+    if (!activeAnimationLoops) return 0;
+    const sourceFrame = activeAnimation?.sample.animation?.loop_start;
+    if (sourceFrame === null || sourceFrame === undefined) return 0;
+    const index = activeAnimationFrames.indexOf(sourceFrame);
+    return index >= 0 ? index : 0;
+  })();
   const activeAnimationSourceFrame = activeAnimationFrames[Math.min(animationFrame, activeAnimationFrames.length - 1)] || 0;
   const activeAnimationShadowFrame = animationShadowFrame(
     activeAnimation?.sample,
@@ -4885,17 +4936,27 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
       return;
     }
     if (!animationMetadata && (sample.animation?.shadow || sample.animation?.frame_count === null)) return;
-    const frameUrls = activeAnimationFrames.map((sourceFrame) => api.previewUrl(
-      asset.id,
-      sourceFrame,
-      "",
-      5,
-      playerColor,
-      {
-        palette: sample.palette || undefined,
-        shadowFrame: animationShadowFrame(sample, animationMetadata, sourceFrame),
-      },
-    ));
+    const compositeBuildingOperation = entity?.kind === "building"
+      && activeAnimation.role === "operation";
+    const frameUrls = activeAnimationFrames.map((sourceFrame) => {
+      const shadowFrame = animationShadowFrame(sample, animationMetadata, sourceFrame);
+      return compositeBuildingOperation && entity
+        ? api.entityPreviewUrl(sourceId, entity.id, {
+          frame,
+          facing: renderFacing,
+          playerColor,
+          scale: 4,
+          effectAssetId: asset.id,
+          effectFrame: sourceFrame,
+          effectShadowFrame: shadowFrame,
+          effectPalette: sample.palette || undefined,
+          revision: sourceRevision,
+        })
+        : api.previewUrl(asset.id, sourceFrame, "", 5, playerColor, {
+          palette: sample.palette || undefined,
+          shadowFrame,
+        });
+    });
     if (frameUrls.length === 0) return;
     let cancelled = false;
     const firstFrames = frameUrls.slice(0, 2).map((url) => preloadDecodedImageFrame(url, "high"));
@@ -4909,7 +4970,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
       for (const url of frameUrls.slice(2)) void preloadDecodedImageFrame(url, "low");
     });
     return () => { cancelled = true; };
-  }, [activeAnimation, activeAnimationFrameCount, activeAnimationFrames, animationMetadata, playerColor]);
+  }, [activeAnimation, activeAnimationFrameCount, activeAnimationFrames, animationMetadata, entity, frame, renderFacing, playerColor, sourceId, sourceRevision]);
 
   useEffect(() => {
     if (!activeAnimation) return;
@@ -4933,7 +4994,13 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
     if (!animationPlaying || activeAnimationFrameCount < 2) return;
     const requestedRate = activeAnimation?.sample.animation?.rate_ms || 140;
     const interval = Math.min(1000, Math.max(60, requestedRate));
-    const nextFrame = (animationFrame + 1) % activeAnimationFrameCount;
+    if (animationFrame >= activeAnimationFrameCount - 1 && !activeAnimationLoops) {
+      setAnimationPlaying(false);
+      return;
+    }
+    const nextFrame = animationFrame >= activeAnimationFrameCount - 1
+      ? activeAnimationLoopStart
+      : animationFrame + 1;
     const advance = () => setAnimationFrame((current) => current === animationFrame ? nextFrame : current);
     const animationSample = activeAnimation?.sample;
     const animationAsset = animationSample?.asset;
@@ -4948,7 +5015,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
     }
     const timer = window.setTimeout(advance, interval);
     return () => window.clearTimeout(timer);
-  }, [animationPlaying, animationFrame, activeAnimationFrameCount, activeAnimation, activeAnimationFrames, animationMetadata, playerColor]);
+  }, [animationPlaying, animationFrame, activeAnimationFrameCount, activeAnimationLoops, activeAnimationLoopStart, activeAnimation, activeAnimationFrames, animationMetadata, playerColor]);
 
   if (loading && !entity) return <aside className="detail-panel panel empty-detail"><div className="radar small"><span /></div><strong>正在读取单位详情…</strong></aside>;
   if (!entity) return <aside className="detail-panel panel empty-detail"><div className="empty-detail-icon"><Icon name="unit" size={30} /></div><strong>选择单位</strong></aside>;
@@ -4983,7 +5050,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   const animationGroupLabels: Record<EntityAnimationGroup, string> = {
     body: entity.voxel ? "模型姿态" : "主体动作",
     construction: "建造",
-    operation: "运行",
+    operation: "运转与状态",
     weapon: "开火效果",
     impact: "命中特效",
     destruction: "摧毁爆炸",
@@ -5023,19 +5090,19 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
       palette: effectBodySample?.palette || undefined,
     })
     : "";
-  const buildingOperationPreviewUrl = !isStaticSnapshot
-    && entity.kind === "building"
+  const buildingOperationPreviewUrl = entity.kind === "building"
     && activeAnimation?.role === "operation"
     && activeAnimationAsset?.format === "shp"
     ? api.entityPreviewUrl(sourceId, entity.id, {
       frame,
-      facing,
+      facing: renderFacing,
       playerColor,
       scale: 4,
       effectAssetId: activeAnimationAsset.id,
       effectFrame: activeAnimationSourceFrame,
       effectShadowFrame: activeAnimationShadowFrame,
       effectPalette: activeAnimation.sample.palette || undefined,
+      revision: sourceRevision,
     })
     : "";
   const effectAnchor = animationEffectAnchor(
@@ -5090,7 +5157,10 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
                     </div>}
             {(activeAnimationAsset || hasRawBodyAnimation) && <div className="entity-preview-controls">
               {activeAnimationAsset && activeAnimationFrameCount > 1
-                ? <div className="frame-controls"><FrameTransport frame={animationFrame} count={activeAnimationFrameCount} playing={animationPlaying} onPlayingChange={setAnimationPlaying} onFrameChange={setAnimationFrame} label="帧" /></div>
+                ? <div className="frame-controls"><FrameTransport frame={animationFrame} count={activeAnimationFrameCount} playing={animationPlaying} onPlayingChange={(next) => {
+                  if (next && animationFrame >= activeAnimationFrameCount - 1 && !activeAnimationLoops) setAnimationFrame(0);
+                  setAnimationPlaying(next);
+                }} onFrameChange={setAnimationFrame} label="帧" /></div>
                 : !activeAnimationAsset && hasRawBodyAnimation && <div className="frame-controls">
                   {frameMode === "sequence" && <FrameTransport frame={frame} count={frameCount} playing={playing} onPlayingChange={setPlaying} onFrameChange={setFrame} label="帧" />}
                   <div className="frame-mode-toggle"><button className={frameMode === "sequence" ? "active" : ""} onClick={() => setFrameMode("sequence")} title="顺序播放"><Icon name="play" size={14} /></button><button className={frameMode === "grid" ? "active" : ""} onClick={() => { setPlaying(false); setFrameMode("grid"); }} title="全部帧"><Icon name="grid" size={14} /></button></div>
