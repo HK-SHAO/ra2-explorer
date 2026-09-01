@@ -18,6 +18,7 @@ from ra2_explorer.pages_snapshot import (
     _AssetUsage,
     _composite_entity_preview_layers,
     _directory_stats,
+    _entity_operation_effect_tasks,
     _entity_player_color,
     _entity_thumbnail_atlas_cell,
     _EntityPreviewTask,
@@ -202,6 +203,58 @@ def test_animation_frame_requests_support_interleaved_unit_actions() -> None:
     assert ("unit", 17, 49) in requests
     assert ("unit", 24, 56) not in requests
     assert ("unit", 8, None) in requests
+
+
+def test_pages_exports_precomposited_building_operation_frames(tmp_path: Path) -> None:
+    entities = [
+        {
+            "id": "SUPERBUILDING",
+            "kind": "building",
+            "renderable": True,
+            "sides": ["GDI"],
+            "preview": {"supports_facing": False},
+            "media": [
+                {
+                    "kind": "animation",
+                    "role": "operation",
+                    "slot": "superanimtwo",
+                    "samples": [
+                        {
+                            "asset": {"id": "effect", "format": "shp"},
+                            "palette": "unit",
+                            "animation": {
+                                "start_frame": 0,
+                                "frame_count": 2,
+                                "facing_step": 0,
+                                "frame_step": 1,
+                                "shadow": True,
+                                "reverse": False,
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    metadata = {
+        "effect": {
+            "frame_count": 4,
+            "frames": [
+                {"index": 0, "paired_shadow_frame": 2},
+                {"index": 1, "paired_shadow_frame": 3},
+            ],
+        }
+    }
+
+    tasks = _entity_operation_effect_tasks(tmp_path, "source", entities, metadata)
+
+    assert len(tasks) == 3
+    paired = next(task for task in tasks if task.params.get("effect_shadow_frame") == 2)
+    assert paired.params["player_color"] == "blue"
+    assert paired.output == (
+        tmp_path
+        / "previews/entities/SUPERBUILDING/effects/effect/unit/0/0-shadow-2.webp"
+    )
 
 
 def test_snapshot_identity_excludes_local_display_values() -> None:
@@ -426,12 +479,12 @@ def test_pages_exports_one_thumbnail_atlas_request_per_entity_kind(
         {"x": 10, "y": 22, "width": 124, "height": 83}
     ] * 8
     assert metadata["SOLDIER"]["path"] == (
-        "previews/entity-atlases/infantry/{facing}-r7.webp"
+        "previews/entity-atlases/infantry/{facing}-r8.webp"
     )
-    assert (tmp_path / "previews/entity-atlases/vehicle/7-r7.webp").is_file()
-    assert (tmp_path / "previews/entity-atlases/building/7-r7.webp").is_file()
-    assert (tmp_path / "previews/entity-atlases/infantry/7-r7.webp").is_file()
-    with Image.open(tmp_path / "previews/entity-atlases/infantry/0-r7.webp") as atlas:
+    assert (tmp_path / "previews/entity-atlases/vehicle/7-r8.webp").is_file()
+    assert (tmp_path / "previews/entity-atlases/building/7-r8.webp").is_file()
+    assert (tmp_path / "previews/entity-atlases/infantry/7-r8.webp").is_file()
+    with Image.open(tmp_path / "previews/entity-atlases/infantry/0-r8.webp") as atlas:
         assert atlas.size == (144, 135)
 
 

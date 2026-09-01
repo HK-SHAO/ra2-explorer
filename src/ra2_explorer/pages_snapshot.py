@@ -40,7 +40,7 @@ from ra2_explorer.config import Settings
 from ra2_explorer.errors import Ra2ExplorerError
 
 PAGES_SNAPSHOT_SCHEMA_VERSION = 2
-PAGES_RENDER_REVISION = 7
+PAGES_RENDER_REVISION = 8
 PAGES_ASSET_BUNDLE_REVISION = 4
 _SAFE_FILENAME = re.compile(r"^[A-Za-z0-9_.~$-]+$")
 _AUDIO_FORMATS = {"aud", "bag_audio", "wav"}
@@ -60,6 +60,7 @@ class _AnimationVariant:
     facing_step: int
     frame_step: int
     shadow: bool
+    reverse: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -354,6 +355,7 @@ def _asset_usages(
                         facing_step=int(playback.get("facing_step") or 0),
                         frame_step=max(1, int(playback.get("frame_step") or 1)),
                         shadow=bool(playback.get("shadow")),
+                        reverse=bool(playback.get("reverse")),
                     )
                 )
     usages = {
@@ -566,6 +568,96 @@ def _entity_tasks(
                     output=output,
                 )
     return list(images.values()), list(models.values())
+
+
+def _entity_operation_effect_tasks(
+    root: Path,
+    source_id: str,
+    entities: list[dict[str, Any]],
+    metadata: dict[str, dict[str, Any]],
+) -> list[_ExportTask]:
+    tasks: dict[Path, _ExportTask] = {}
+    for entity in entities:
+        if entity.get("kind") != "building" or not entity.get("renderable"):
+            continue
+        entity_id = str(entity["id"])
+        safe_entity_id = _safe_filename(entity_id)
+        preview = entity.get("preview") or {}
+        facings = range(8) if preview.get("supports_facing") else range(1)
+        player_color = _entity_player_color(entity)
+        for association in entity.get("media", []):
+            if association.get("kind") != "animation" or association.get("role") != "operation":
+                continue
+            for sample in association.get("samples", []):
+                asset = sample.get("asset")
+                if not asset or asset.get("format") != "shp":
+                    continue
+                asset_id = str(asset["id"])
+                safe_asset_id = _safe_filename(asset_id)
+                playback = sample.get("animation") or {}
+                palette = str(sample.get("palette") or "auto")
+                variant = _AnimationVariant(
+                    palette=palette,
+                    start_frame=int(playback.get("start_frame") or 0),
+                    frame_count=(
+                        int(playback["frame_count"])
+                        if playback.get("frame_count") is not None
+                        else None
+                    ),
+                    facing_step=int(playback.get("facing_step") or 0),
+                    frame_step=max(1, int(playback.get("frame_step") or 1)),
+                    shadow=bool(playback.get("shadow")),
+                    reverse=bool(playback.get("reverse")),
+                )
+                asset_metadata = metadata.get(asset_id, {})
+                frame_count = max(1, int(asset_metadata.get("frame_count") or 1))
+                paired_shadows = {
+                    int(frame["index"]): int(frame["paired_shadow_frame"])
+                    for frame in asset_metadata.get("frames", [])
+                    if frame.get("paired_shadow_frame") is not None
+                }
+                usage = _AssetUsage(asset=asset, variants=frozenset({variant}))
+                requests = _animation_frame_requests(usage, frame_count, paired_shadows)
+                for facing in facings:
+                    for _palette, effect_frame, shadow_frame in requests:
+                        effect_name = (
+                            f"{effect_frame}-shadow-"
+                            f"{shadow_frame if shadow_frame is not None else 'none'}.webp"
+                        )
+                        output = (
+                            root
+                            / "previews"
+                            / "entities"
+                            / safe_entity_id
+                            / "effects"
+                            / safe_asset_id
+                            / palette
+                            / str(facing)
+                            / effect_name
+                        )
+                        params: dict[str, object] = {
+                            "frame": 0,
+                            "facing": facing,
+                            "scale": 4,
+                            "effect_asset_id": asset_id,
+                            "effect_frame": effect_frame,
+                        }
+                        if player_color:
+                            params["player_color"] = player_color
+                        if shadow_frame is not None:
+                            params["effect_shadow_frame"] = shadow_frame
+                        if palette != "auto":
+                            params["effect_palette_kind"] = palette
+                        tasks[output] = _ExportTask(
+                            path=(
+                                f"/api/entities/{quote(source_id, safe='')}/"
+                                f"{quote(entity_id, safe='')}/preview.png"
+                            ),
+                            params=params,
+                            output=output,
+                            kind="image",
+                        )
+    return list(tasks.values())
 
 
 def _export_entity_previews(
@@ -1130,6 +1222,12 @@ def build_pages_snapshot(
             animation_usages,
             metadata,
         )
+        entity_effect_images = _entity_operation_effect_tasks(
+            staging,
+            source_id,
+            details_cn,
+            metadata,
+        )
         _export_shp_animation_previews(
             app.state.services,
             staging,
@@ -1149,7 +1247,7 @@ def build_pages_snapshot(
             _write_json(staging / "catalog" / f"entities.{language}.json", entities)
         _export_render_tasks(
             client,
-            animation_images,
+            animation_images + entity_effect_images,
             workers=workers,
             label="生成 WebP 预览",
         )
