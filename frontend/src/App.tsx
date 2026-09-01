@@ -4900,13 +4900,17 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
 
       {associations && (isAudio ? audioRelationshipItems : associations.items).length > 0 && (!isAudio || activeAudioDetailTab === "associations") && <div className="asset-associations" role={isAudio ? "tabpanel" : undefined} id={isAudio ? "audio-associations-panel" : undefined} aria-labelledby={isAudio ? "audio-associations-tab" : undefined}>
         <h3>关联事件</h3>
-        <div>{(isAudio ? audioRelationshipItems : associations.items).map((item, index) => <article key={`${item.scope}-${item.event}-${item.slot}-${index}`}>
-          <span>{mediaSlotLabel(item.slot)}</span>
-          <strong>{item.entity?.display_name || item.event}</strong>
-          {item.entity && <code>{item.event}</code>}
-          {(item.original_text || item.text) && <p><b>原文</b>{item.original_text || item.text}</p>}
-          {item.localized_text && item.localized_text !== (item.original_text || item.text) && <p><b>中文</b>{item.localized_text}</p>}
-        </article>)}</div>
+        <div>{(isAudio ? audioRelationshipItems : associations.items).map((item, index) => {
+          const originalText = cleanAudioText(item.original_text || item.text || "");
+          const localizedText = cleanAudioText(item.localized_text || "");
+          return <article key={`${item.scope}-${item.event}-${item.slot}-${index}`}>
+            <span>{mediaSlotLabel(item.slot)}</span>
+            <strong>{item.entity?.display_name || item.event}</strong>
+            {item.entity && <code>{item.event}</code>}
+            {originalText && <p><b>原文</b>{originalText}</p>}
+            {localizedText && localizedText !== originalText && <p><b>中文</b>{localizedText}</p>}
+          </article>;
+        })}</div>
       </div>}
 
       {!canPreview && !isText && !isAudio && !isModel && asset.format !== "video" && <div className="unsupported-preview"><Icon name={assetIcon(asset.format)} size={34} /><strong>{formatLabels[asset.format] || asset.format.toUpperCase()}</strong></div>}

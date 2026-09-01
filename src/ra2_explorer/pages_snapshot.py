@@ -39,6 +39,7 @@ from ra2_explorer.errors import Ra2ExplorerError
 
 PAGES_SNAPSHOT_SCHEMA_VERSION = 1
 PAGES_RENDER_REVISION = 4
+PAGES_ASSET_BUNDLE_REVISION = 2
 _SAFE_FILENAME = re.compile(r"^[A-Za-z0-9_.~$-]+$")
 _AUDIO_FORMATS = {"aud", "bag_audio", "wav"}
 _MODEL_FORMATS = {"hva", "vxl"}
@@ -378,8 +379,9 @@ def _export_asset_bundles(
         output = root / "assets" / f"{safe_id}.json"
         if output.is_file():
             bundle = json.loads(output.read_text(encoding="utf-8"))
-            metadata[asset_id] = bundle["metadata"]
-            return
+            if bundle.get("bundle_revision") == PAGES_ASSET_BUNDLE_REVISION:
+                metadata[asset_id] = bundle["metadata"]
+                return
         asset = _request_json(client, f"/api/assets/{quote(asset_id, safe='')}")
         inspected = _request_json(client, f"/api/assets/{quote(asset_id, safe='')}/metadata")
         empty = {
@@ -401,7 +403,12 @@ def _export_asset_bundles(
             }
         _write_json(
             output,
-            {"asset": asset, "metadata": inspected, "associations": associations},
+            {
+                "bundle_revision": PAGES_ASSET_BUNDLE_REVISION,
+                "asset": asset,
+                "metadata": inspected,
+                "associations": associations,
+            },
         )
         metadata[asset_id] = inspected
 
@@ -1180,6 +1187,7 @@ def build_pages_snapshot(
         manifest = {
             "schema_version": PAGES_SNAPSHOT_SCHEMA_VERSION,
             "render_revision": PAGES_RENDER_REVISION,
+            "asset_bundle_revision": PAGES_ASSET_BUNDLE_REVISION,
             "snapshot_id": snapshot_id,
             "created_at": generated_at,
             "app_version": __version__,

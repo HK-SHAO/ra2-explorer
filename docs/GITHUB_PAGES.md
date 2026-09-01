@@ -52,7 +52,7 @@ Pages workflow 从固定 GitHub 数据 Release 并行下载最多四个分片，
 .venv\Scripts\ra2exp.exe pages export SOURCE_ID --audio-bitrate 24k --workers 4 --overwrite
 ```
 
-该命令会原子替换快照目录并自动生成 `.runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip`。渲染算法升级时必须递增 render revision，使图集和预览路径改变而不复用旧版 WebP；压缩过程每 2,000 个文件输出一次进度，避免长时间没有反馈。中断构建保留在同目录的暂存结果，下一次运行会先复用完整文件。
+该命令会原子替换快照目录并自动生成 `.runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip`。渲染算法升级时必须递增 render revision，使图集和预览路径改变而不复用旧版 WebP；资产信息或关联结构变化时递增 asset bundle revision，只重建 JSON 而继续复用声音、模型和预览。压缩过程每 2,000 个文件输出一次进度，避免长时间没有反馈。中断构建保留在同目录的暂存结果，下一次运行会先复用完整文件。
 
 审计最终 ZIP：
 

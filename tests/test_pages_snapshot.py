@@ -9,6 +9,7 @@ from PIL import Image
 
 from ra2_explorer.errors import Ra2ExplorerError
 from ra2_explorer.pages_snapshot import (
+    PAGES_ASSET_BUNDLE_REVISION,
     PAGES_RENDER_REVISION,
     _animation_frame_requests,
     _AnimationVariant,
@@ -18,6 +19,7 @@ from ra2_explorer.pages_snapshot import (
     _directory_stats,
     _entity_player_color,
     _entity_thumbnail_atlas_cell,
+    _export_asset_bundles,
     _export_entity_thumbnail_atlases,
     _pages_audio_stats,
     _prune_reused_exports,
@@ -57,6 +59,49 @@ def test_pages_prune_removes_only_stale_reused_exports(tmp_path: Path) -> None:
     assert removed == 1
     assert expected.read_bytes() == b"expected"
     assert not stale.exists()
+
+
+def test_pages_asset_bundle_reuse_requires_current_revision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "assets" / "sample.json"
+    output.parent.mkdir(parents=True)
+    output.write_text(
+        json.dumps({"metadata": {"stale": True}}),
+        encoding="utf-8",
+    )
+    requests: list[str] = []
+
+    def request(_client: object, path: str, **_kwargs: object) -> dict[str, object]:
+        requests.append(path)
+        if path.endswith("/metadata"):
+            return {"fresh": True}
+        return {"id": "sample", "format": "wav"}
+
+    monkeypatch.setattr("ra2_explorer.pages_snapshot._request_json", request)
+    metadata = _export_asset_bundles(
+        object(),  # type: ignore[arg-type]
+        tmp_path,
+        {"sample": {"id": "sample"}},
+        set(),
+        workers=1,
+    )
+
+    assert metadata == {"sample": {"fresh": True}}
+    assert requests == ["/api/assets/sample", "/api/assets/sample/metadata"]
+    bundle = json.loads(output.read_text(encoding="utf-8"))
+    assert bundle["bundle_revision"] == PAGES_ASSET_BUNDLE_REVISION
+
+    requests.clear()
+    assert _export_asset_bundles(
+        object(),  # type: ignore[arg-type]
+        tmp_path,
+        {"sample": {"id": "sample"}},
+        set(),
+        workers=1,
+    ) == {"sample": {"fresh": True}}
+    assert requests == []
 
 
 def test_pages_asset_usages_exclude_incomplete_combat_effects() -> None:
