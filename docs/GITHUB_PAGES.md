@@ -10,37 +10,37 @@ Pages 不运行 Python、FastAPI 或 SQLite。发布前由本地解析器把真�
 
 ## 数据边界与实测体积
 
-当前固定快照 `ra2md-slim-0c56a01b33e8` 包含：
+当前固定快照 `ra2md-slim-ea3843b6e399` 包含：
 
 | 内容 | 数量或字节 | 约合 |
 | --- | ---: | ---: |
 | 单位 | 559 | — |
 | 声音 | 3,322 | — |
 | 发布文件 | 28,978 | — |
-| 解包后的 Pages 数据 | 146,251,850 字节 | 139.5 MiB |
-| 固定数据 ZIP | 80,459,434 字节 | 76.7 MiB |
-| ZIP SHA-256 | `d3fdfe55dc4dd64b7ae6fa22a5863c69e915fdad6904a32aaf6297281a6827d9` | — |
+| 解包后的 Pages 数据 | 146,746,567 字节 | 140.0 MiB |
+| 固定数据 ZIP | 80,523,928 字节 | 76.8 MiB |
+| ZIP SHA-256 | `a7c88d2321813a692784992540a4784f8988c5a18dcdc7668017cca7889ee274` | — |
 
 解包数据按用途分布如下：
 
 | 目录 | 字节 | 用途 |
 | --- | ---: | --- |
-| `previews` | 40,673,250 | 单位图集、主体动作与建筑图层 WebP |
-| `models` | 41,886,903 | 可交互 VXL/HVA 场景 JSON |
+| `previews` | 40,693,858 | 单位图集、主体动作与建筑图层 WebP |
+| `models` | 42,010,670 | 可交互 VXL/HVA 场景 JSON |
 | `audio` | 24,774,611 | Opus 声音 |
-| `assets` | 19,228,101 | 资产元数据和关联 |
+| `assets` | 19,578,443 | 资产元数据和关联 |
 | `entities` | 13,412,042 | 简体/繁体单位详情 |
 | `catalog` | 6,276,770 | 简体/繁体单位与声音目录、任务分组、图集位置及搜索别名 |
 
-站点不会启动时下载整套 139.5 MiB 数据，也不会把发布 ZIP 或 npm tarball 发送给访客。单位页启动只读取 482,710 字节的当前语言单位目录和当前分类的一张图集；本次车辆图集为 193,492 字节，把原先冷启动的 45 条缩略图请求合并为 1 条。HTML 会先建立 CDN 连接，并预取启动清单、默认简体单位目录和车辆图集，使三者与应用 bundle 并行。几 KB 的快照清单直接携带声音类型、用途和事件计数，因此侧栏无需预读约 2.5 MiB 的当前语言声音目录。交互模型、详情和声音仍按操作加载；搜索时单位结果先到先显示，不等待较大的声音索引。
+站点不会启动时下载整套 140.0 MiB 数据，也不会把发布 ZIP 或 npm tarball 发送给访客。单位页启动只读取 482,710 字节的当前语言单位目录和当前分类的一张图集；本次车辆图集为 198,982 字节，把原先冷启动的 45 条缩略图请求合并为 1 条。HTML 会先建立 CDN 连接，并预取启动清单、默认简体单位目录和车辆图集，使三者与应用 bundle 并行。几 KB 的快照清单直接携带声音类型、用途和事件计数，因此侧栏无需预读约 2.5 MiB 的当前语言声音目录。交互模型、详情和声音仍按操作加载；搜索时单位结果先到先显示，不等待较大的声音索引。
 
-启动清单、四份双语目录和 11 张单位卡片图集还组成独立的 `ra2-explorer-pages-data@0.12.0` npm 包：16 个数据文件合计 7,377,708 字节，npm 压缩包为 1,809,696 字节。浏览器通过 jsDelivr 请求其中的单个文件，不下载整包；CDN 不可用、超时或返回错误时，JSON 与图集自动回退到 Pages 内的同路径副本。模型、详情、动画和声音继续从 Pages 同源按需读取。双来源能并行建立连接并利用不同地区的边缘缓存，但真实流量仍取决于访问路径和浏览器缓存；完整遍历所有资源的理论上界约为 139.5 MiB。
+启动清单、四份双语目录和 11 张单位卡片图集还组成独立的 `ra2-explorer-pages-data@0.12.3` npm 包：16 个数据文件合计 7,389,452 字节，npm 压缩包为 1,821,540 字节。浏览器通过 jsDelivr 请求其中的单个文件，不下载整包；CDN 不可用、超时或返回错误时，JSON 与图集自动回退到 Pages 内的同路径副本。模型、详情、动画和声音继续从 Pages 同源按需读取。双来源能并行建立连接并利用不同地区的边缘缓存，但真实流量仍取决于访问路径和浏览器缓存；完整遍历所有资源的理论上界约为 140.0 MiB。
 
 GitHub 官方给出的 Pages 限制包括：发布站点最大 1 GB、每月 100 GB 软带宽限制、部署最长 10 分钟。当前站点约占容量上限的 14%；实际可服务会话数取决于用户打开的分类和 CDN 缓存，不用“ZIP 大小 × 访问量”代替真实监控。[GitHub Pages 限制](https://docs.github.com/en/enterprise-cloud@latest/pages/getting-started-with-github-pages/github-pages-limits)
 
 ## 为什么大数据不进入主分支
 
-主分支只追踪前端、导出器、审计脚本和两个小型锁定清单。76.7 MiB ZIP 分为 10 个不超过 8 MiB 的资产，存放在独立的 [`pages-data-0.12.0` GitHub Release](https://github.com/Hansimov/ra2-explorer/releases/tag/pages-data-0.12.0)。`packaging/pages-data.json` 固定 tag、分片名称、每片大小与 SHA-256，以及合并后整包大小与 SHA-256；高频启动文件存放在 npm，`packaging/pages-cdn.json` 记录精确版本、内容摘要和 jsDelivr 基址。Vite 直接读取 CDN 锁，不在多个环境文件中重复版本。
+主分支只追踪前端、导出器、审计脚本和两个小型锁定清单。76.8 MiB ZIP 分为 10 个不超过 8 MiB 的资产，存放在独立的 [`pages-data-0.12.3` GitHub Release](https://github.com/Hansimov/ra2-explorer/releases/tag/pages-data-0.12.3)。`packaging/pages-data.json` 固定 tag、每片大小与 SHA-256，以及合并后整包大小与 SHA-256；高频启动文件存放在 npm，`packaging/pages-cdn.json` 记录精确版本、内容摘要和 jsDelivr 基址。Vite 直接读取 CDN 锁，不在多个环境文件中重复版本。
 
 Pages workflow 从固定 GitHub 数据 Release 并行下载最多四个分片，逐片校验后按顺序合并，再依次验证整包字节数、SHA-256、ZIP 路径安全、文件类型白名单、原始游戏格式禁令、清单计数和隐私扫描；全部通过后才允许解包进站点 artifact。代码版本更新不会重新上传数据；只有解析结果、模型或声音实际变化时才创建新的数据 tag 并更新锁定清单。
 
@@ -63,8 +63,8 @@ Pages workflow 从固定 GitHub 数据 Release 并行下载最多四个分片，
 只有数据发生变化时才上传，并原子更新小型锁定清单：
 
 ```bat
-.venv\Scripts\python.exe scripts\publish_pages_snapshot.py ".runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip" --tag pages-data-0.12.0
-.venv\Scripts\python.exe scripts\publish_pages_cdn.py ".runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip" --version 0.12.0 --overwrite --publish
+.venv\Scripts\python.exe scripts\publish_pages_snapshot.py ".runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip" --tag pages-data-0.12.3
+.venv\Scripts\python.exe scripts\publish_pages_cdn.py ".runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip" --version 0.12.3 --overwrite --publish
 ```
 
 第一条发布命令从 `.secrets\local.env` 或进程环境读取 `GITHUB_TOKEN_RA2_EXPLORER`，先审计 ZIP，再把它拆为 8 MiB 分片上传；中断后重跑会校验并跳过已完成分片。第二条命令只提取清单、目录和卡片图集，`NPM_TOKEN` 同样只从本机凭据文件或进程环境读取。两个发布器都不会把令牌写入命令输出、包内容或锁定清单。npm 版本和数据 tag 不覆盖旧内容，每次数据变化必须使用新版本并同步提交两个锁。
@@ -77,7 +77,7 @@ npm run build:pages
 npm run preview:pages -- --host 127.0.0.1 --port 46131 --strictPort
 ```
 
-Pages 构建写入独立的 `frontend\dist-pages`，普通本地应用继续使用 `frontend\dist`。两种验证可以依次执行而不会用 `/ra2-explorer/` 的静态入口覆盖本机后台正在提供的根路径，也不会让自动化误等一个实际已经损坏的页面。
+Pages 构建写入独立的 `frontend\dist-pages`，普通本地应用继续使用 `frontend\dist`。构建器会先把已解包的 `dist-pages\data` 原子暂存到 `.runtime\RA2MD-Ext`，只清理前端产物，完成后再恢复数据；这样在 Windows 上不会因为同步删除约三万个小文件而长时间无输出。构建中断后，下次运行也会自动识别并恢复暂存目录。两种验证可以依次执行而不会用 `/ra2-explorer/` 的静态入口覆盖本机后台正在提供的根路径，也不会让自动化误等一个实际已经损坏的页面。
 
 `.github\workflows\pages.yml` 在 `master` 的 Pages 前端、数据锁或部署脚本发生变化时运行，也会在推送 `v*` 稳定标签时重建，并支持手动触发。它使用官方 `configure-pages@v5`、`upload-pages-artifact@v4` 和 `deploy-pages@v4`；上传前会同时确认静态入口、前端 bundle 和数据清单存在，避免只发布数据目录。工作流会完整取回标签：当前提交正好对应 `v*` 标签时，设置正文顶部的信息栏显示稳定版标签；其他提交显示八位 commit。版本文字链接到对应的 GitHub commit，并显示该构建相对最新稳定标签提前或落后的提交数及提交时间。部署 job 具有 `pages: write` 与 `id-token: write`，并使用 `github-pages` environment。[GitHub 自定义 Pages workflow](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
 
