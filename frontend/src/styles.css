@@ -466,10 +466,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .entity-detail-body { min-width: 0; min-height: 0; }
 .entity-preview-column, .entity-detail-sections { min-width: 0; }
 .entity-detail-sections { container-type: inline-size; }
-.entity-detail-wide { overflow-y: hidden; }
+.entity-detail-wide { padding-right: 0; overflow-y: hidden; scrollbar-gutter: auto; }
 .entity-detail-wide .entity-detail-body { height: 100%; min-height: 0; display: grid; grid-template-columns: minmax(300px, .85fr) minmax(360px, 1.15fr); grid-template-rows: minmax(0, 1fr); align-items: start; gap: 20px; }
 .entity-detail-wide .entity-preview-column { height: 100%; min-height: 0; align-self: stretch; }
-.entity-detail-wide .entity-detail-sections { height: 100%; min-height: 0; align-self: stretch; padding-right: 4px; overflow-y: scroll; scrollbar-color: #555b66 #17191d; scrollbar-width: auto; scrollbar-gutter: stable; }
+.entity-detail-wide .entity-detail-sections { height: 100%; min-height: 0; align-self: stretch; padding-right: 14px; overflow-y: scroll; scrollbar-color: #555b66 #17191d; scrollbar-width: auto; scrollbar-gutter: stable; }
 .entity-detail-wide .entity-preview { height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .entity-detail-wide .entity-preview > .preview-stage, .entity-detail-wide .entity-preview > .voxel-viewer, .entity-detail-wide .entity-preview > .frame-grid, .entity-detail-wide .entity-preview > .entity-composite-stage { height: auto; min-height: 180px; flex: 1 1 auto; }
 .entity-detail-narrow .entity-preview-column, .entity-detail-narrow .entity-preview { width: 100%; }
