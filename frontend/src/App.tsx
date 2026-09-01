@@ -526,16 +526,14 @@ const mediaGroupLabels: Record<string, string> = {
   ambient_voice: "场景播报",
   other_voice: "其他语音",
   weapon_sound: "武器开火",
-  combat_sound: "战斗音效",
   death_sound: "阵亡与毁坏",
   movement_sound: "移动与机械",
-  action_sound: "部署与操作",
+  action_sound: "单位动作与操作",
   impact_sound: "撞击与坠毁",
   destruction_sound: "爆炸与摧毁",
   unit_sound: "单位动作",
   ambient_sound: "环境音效",
-  notification_sound: "提示音效",
-  pickup_sound: "箱子与升级",
+  notification_sound: "提示与奖励",
   structure_sound: "建筑运转",
   superweapon_sound: "超级武器",
   interface_sound: "界面与过场",
@@ -547,8 +545,8 @@ const mediaGroupOrder = [
   "selection_voice", "movement_voice", "combat_voice", "feedback_voice", "death_voice", "ability_voice",
   "unit_voice", "eva_voice", "unit_intel_voice", "world_domination_voice", "mission_voice",
   "multiplayer_voice", "taunt_voice", "ambient_voice", "other_voice",
-  "weapon_sound", "combat_sound", "death_sound", "movement_sound", "action_sound", "impact_sound",
-  "destruction_sound", "superweapon_sound", "structure_sound", "pickup_sound", "unit_sound",
+  "weapon_sound", "death_sound", "movement_sound", "action_sound", "impact_sound",
+  "destruction_sound", "superweapon_sound", "structure_sound", "unit_sound",
   "notification_sound", "ambient_sound", "interface_sound", "other_sound",
   "unclassified",
 ];
@@ -668,6 +666,10 @@ function staticBuildInfo(currentVersion: string) {
       ? `预览版 ${commit.slice(0, 8)}`
       : `本地版 v${currentVersion || "—"}`;
   const commitUrl = commit && repositoryUrl ? `${repositoryUrl}/commit/${commit}` : "";
+  const revisionUrl = tag && repositoryUrl
+    ? `${repositoryUrl}/releases/tag/${encodeURIComponent(tag)}`
+    : commitUrl;
+  const revisionTitle = tag || commit || revision;
   const stableDistance = stableTag && Number.isFinite(ahead) && Number.isFinite(behind)
     ? ahead === 0 && behind === 0
       ? `与最新稳定版 ${stableTag} 一致`
@@ -688,7 +690,7 @@ function staticBuildInfo(currentVersion: string) {
       }).format(date);
     }
   }
-  return { revision, commit, commitUrl, stableDistance, updated };
+  return { revision, revisionUrl, revisionTitle, stableDistance, updated };
 }
 const previewAngleOptions: Array<{ value: PreviewAngle; label: string }> = [
   { value: 0, label: "正面" },
@@ -1479,11 +1481,11 @@ function ExplorerApp() {
     if (kind !== entityKind) {
       setEntitySide("");
     }
+    const queryChanges = kind !== entityKind || Boolean(entityUsage);
     setView("entities");
     setEntityKind(kind);
     setEntityUsage("");
-    setEntityLoading(true);
-    setEntities([]);
+    if (queryChanges) setEntityLoading(true);
     setSelectedEntityId(entitySelectionsRef.current.get(entitySelectionKey(sourceId, kind)) || "");
   }
 
@@ -1492,8 +1494,7 @@ function ExplorerApp() {
     setSearchResultsOpen(false);
     const next = entityUsage === usage ? "" : usage;
     setEntityUsage(next);
-    setEntityLoading(true);
-    setEntities([]);
+    if (next !== entityUsage) setEntityLoading(true);
     setSelectedEntityId(entityKind
       ? entitySelectionsRef.current.get(entitySelectionKey(sourceId, entityKind, next)) || ""
       : "");
@@ -1603,8 +1604,7 @@ function ExplorerApp() {
       setEntityKind(entity.kind);
       setEntityUsage("");
       setEntitySide("");
-      setEntityLoading(true);
-      setEntities([]);
+      if (entity.kind !== entityKind || entityUsage || entitySide) setEntityLoading(true);
       rememberEntityCard(entity.id, entity.kind, "");
       setSelectedEntityId(entity.id);
       return;
@@ -1747,6 +1747,8 @@ function ExplorerApp() {
     setAssets([]);
     setEntities([]);
     setEntityTotal(0);
+    setEntityKinds([]);
+    setEntityUsages([]);
     setEntitySides([]);
     setMediaItems([]);
     setMediaGroups([]);
@@ -1877,7 +1879,10 @@ function ExplorerApp() {
   }, [view, isMediaCategory, mediaItems]);
 
   useEffect(() => {
-    if (!sourceId || view !== "entities") return;
+    if (!sourceId) {
+      setEntityLoading(false);
+      return;
+    }
     let cancelled = false;
     setEntityLoading(true);
     const timer = window.setTimeout(() => {
@@ -1902,9 +1907,7 @@ function ExplorerApp() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [
-    sourceId, sourceRevision, entityKind, entityUsage, entitySide, gameLanguage, view,
-  ]);
+  }, [sourceId, sourceRevision, entityKind, entityUsage, entitySide, gameLanguage]);
 
   useEffect(() => {
     if (!sourceId || !searchQuery.trim()) {
@@ -2544,18 +2547,36 @@ function AssetGridCard({ asset, selected, onSelect }: { asset: Asset; selected: 
   );
 }
 
+function cleanAudioText(value: string) {
+  return value.trim().replace(/^\*+\s*/, "").replace(/\s*\*+$/, "").trim();
+}
+
+function uniqueAudioTexts(values: Array<string | null | undefined>) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (!value) continue;
+    const cleaned = cleanAudioText(value);
+    const key = cleaned.replace(/\s+/g, " ").toLocaleLowerCase();
+    if (!cleaned || seen.has(key)) continue;
+    seen.add(key);
+    result.push(cleaned);
+  }
+  return result;
+}
+
 function mediaPrimaryText(item: MediaItem) {
-  return item.localized_texts[0]
+  return cleanAudioText(item.localized_texts[0]
     || item.description
     || item.original_texts[0]
-    || assetDisplayName(item.asset);
+    || assetDisplayName(item.asset));
 }
 
 function mediaSecondaryText(item: MediaItem) {
   const primary = mediaPrimaryText(item);
-  return [...new Set([item.original_texts.find((text) => text !== primary), assetDisplayName(item.asset)])]
-    .filter((text): text is string => Boolean(text))
-    .filter((text) => text !== primary)
+  const primaryKey = primary.replace(/\s+/g, " ").toLocaleLowerCase();
+  return uniqueAudioTexts([...item.original_texts, assetDisplayName(item.asset)])
+    .filter((text) => text.replace(/\s+/g, " ").toLocaleLowerCase() !== primaryKey)
     .join(" · ");
 }
 
@@ -2572,7 +2593,59 @@ function mediaEntityGroupLabels(entities: MediaItem["entities"]) {
   }))];
 }
 
-function mediaSectionIdentity(item: MediaItem) {
+function normalizedMediaEvents(item: MediaItem) {
+  return item.events.map((event) => event.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "")).join(" ");
+}
+
+function semanticSoundSectionIdentity(item: MediaItem, selectedGroup: string) {
+  const events = normalizedMediaEvents(item);
+  const section = (key: string, label: string) => ({ key: `semantic:${selectedGroup}:${key}`, label, subtitle: "" });
+  if (selectedGroup === "superweapon_sound") {
+    if (events.includes("forceshield")) return section("force-shield", "力场护盾");
+    if (events.includes("geneticmutator")) return section("genetic-mutator", "基因突变器");
+    if (events.includes("ironcurtain")) return section("iron-curtain", "铁幕装置");
+    if (events.includes("nuke") || events.includes("nuclear")) return section("nuclear", "核弹");
+    if (events.includes("psychicdominator")) return section("psychic-dominator", "心灵控制器");
+    if (events.includes("weather")) return section("weather-control", "天气控制器");
+    if (events.includes("chronosphere")) return section("chronosphere", "超时空传送");
+    return section("other", "其他超级武器");
+  }
+  if (selectedGroup === "notification_sound") {
+    if (["crate", "bonus", "credit", "upgrade", "heal"].some((token) => events.includes(token))) {
+      return section("reward", "箱子、资源与升级");
+    }
+    if (["camera", "radar", "beacon", "detected", "flare"].some((token) => events.includes(token))) {
+      return section("recon", "侦察与雷达");
+    }
+    if (["player", "join", "game", "cheer", "garrison", "repair"].some((token) => events.includes(token))) {
+      return section("status", "玩家与状态");
+    }
+    if (["warning", "alarm", "siren", "mindcleared", "bombtick", "ready"].some((token) => events.includes(token))) {
+      return section("alert", "警报与就绪");
+    }
+    return section("other", "其他提示");
+  }
+  if (selectedGroup === "interface_sound") {
+    if (["menu", "options", "commandbar", "mouse", "tab", "click", "scroll"].some((token) => events.includes(token))) {
+      return section("controls", "菜单与操作");
+    }
+    if (["movie", "intro", "map", "wipe"].some((token) => events.includes(token))) {
+      return section("transition", "过场与切换");
+    }
+    if (["score", "bargraph", "bestbox", "efficien"].some((token) => events.includes(token))) {
+      return section("score", "结算界面");
+    }
+    if (["message", "text", "type"].some((token) => events.includes(token))) {
+      return section("message", "文字与消息");
+    }
+    return section("other", "其他界面");
+  }
+  return null;
+}
+
+function mediaSectionIdentity(item: MediaItem, selectedGroup: string) {
+  const semanticSection = semanticSoundSectionIdentity(item, selectedGroup);
+  if (semanticSection) return semanticSection;
   if (item.entities.length === 1) {
     const entity = item.entities[0];
     return { key: `entity:${entity.id}`, label: entity.display_name, subtitle: entity.id };
@@ -2912,13 +2985,13 @@ function MediaListPanel({ items, total, loading, search, groups, selectedGroup, 
   const sections = useMemo(() => {
     const groupedItems = new Map<string, { label: string; subtitle: string; items: MediaItem[] }>();
     for (const item of items) {
-      const identity = mediaSectionIdentity(item);
+      const identity = mediaSectionIdentity(item, selectedGroup);
       const section = groupedItems.get(identity.key) || { label: identity.label, subtitle: identity.subtitle, items: [] };
       section.items.push(item);
       groupedItems.set(identity.key, section);
     }
     return [...groupedItems.entries()].map(([key, section]) => ({ key, ...section }));
-  }, [items]);
+  }, [items, selectedGroup]);
   const allSectionsExpanded = sections.every((section) => !collapsedSections.has(section.key));
 
   useEffect(() => {
@@ -2945,10 +3018,11 @@ function MediaListPanel({ items, total, loading, search, groups, selectedGroup, 
   }
 
   function renderMediaItem(item: MediaItem) {
+    const textCount = uniqueAudioTexts(item.texts).length;
     if (layout === "list") {
       return <button key={item.asset.id} className={`asset-row media-row ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onPointerEnter={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onFocus={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onClick={() => onSelect(item.asset.id)}>
         <span className="file-icon format-audio"><Icon name={playingId === item.asset.id ? "pause" : "play"} /></span>
-        <span className="asset-main"><strong>{mediaPrimaryText(item)}</strong>{(mediaSecondaryText(item) || item.texts.length > 1) && <small>{mediaSecondaryText(item)}{item.texts.length > 1 ? `${mediaSecondaryText(item) ? " · " : ""}${item.texts.length} 条文本` : ""}</small>}</span>
+        <span className="asset-main"><strong>{mediaPrimaryText(item)}</strong>{(mediaSecondaryText(item) || textCount > 1) && <small>{mediaSecondaryText(item)}{textCount > 1 ? `${mediaSecondaryText(item) ? " · " : ""}${textCount} 条文本` : ""}</small>}</span>
         <span className="media-links">{item.entities.slice(0, 2).map((entity) => entity.display_name).join(" · ") || item.slots.slice(0, 2).map(mediaSlotLabel).join(" · ") || "未关联"}</span>
         <Icon name="chevron" size={15} />
       </button>;
@@ -4704,18 +4778,18 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   const activeLimb = metadata?.limbs?.[frame];
   const hasFrameControl = ["shp", "tmp", "hva"].includes(asset.format) && frameCount > 1;
   const canChoosePalette = ["shp", "vxl", "hva", "tmp"].includes(asset.format) && palettes.length > 0;
-  const originalTexts = [...new Set([
+  const originalTexts = uniqueAudioTexts([
     ...(associations?.original_texts || []),
     ...(associations?.items || []).map((item) => item.original_text || (item.localized_text ? null : item.text)).filter((item): item is string => Boolean(item)),
     ...(associations && associations.original_texts.length === 0 && associations.localized_texts.length === 0
       ? associations.texts
       : []),
-  ])];
+  ]);
   const originalTextKeys = new Set(originalTexts.map((item) => item.trim().replace(/\s+/g, " ").toLocaleLowerCase()));
-  const localizedTexts = [...new Set([
+  const localizedTexts = uniqueAudioTexts([
     ...(associations?.localized_texts || []),
     ...(associations?.items || []).map((item) => item.localized_text).filter((item): item is string => Boolean(item)),
-  ])]
+  ])
     .filter((item) => !originalTextKeys.has(item.trim().replace(/\s+/g, " ").toLocaleLowerCase()));
   const metadataRows: Array<{ label: string; value: string; tone?: string; span?: 1 | 2 | 3 }> = isAudio
     ? []
@@ -4956,8 +5030,8 @@ function SettingsDialog({
             {isStaticSnapshot && <div className="settings-build-info" role="status">
               <Icon name="info" size={17} />
               <span><strong>精简网页版</strong><small className="settings-build-meta">
-                {buildInfo.commitUrl
-                  ? <a href={buildInfo.commitUrl} target="_blank" rel="noreferrer" title={buildInfo.commit}>{buildInfo.revision}</a>
+                {buildInfo.revisionUrl
+                  ? <a href={buildInfo.revisionUrl} target="_blank" rel="noreferrer" title={buildInfo.revisionTitle}>{buildInfo.revision}</a>
                   : <span>{buildInfo.revision}</span>}
                 {buildInfo.stableDistance && <span>· {buildInfo.stableDistance}</span>}
                 {buildInfo.updated && <span>· 更新于 {buildInfo.updated}</span>}
