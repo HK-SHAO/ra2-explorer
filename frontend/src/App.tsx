@@ -2266,6 +2266,9 @@ function ExplorerApp() {
     onSelectSuggestion: selectCatalogSuggestion,
     onSubmit: submitCatalogSearch,
     focusToken: searchFocusToken,
+    sourceId,
+    sourceRevision,
+    previewAngle,
   };
 
   if (loading) {
@@ -2680,12 +2683,15 @@ type CatalogSearchBarProps = {
   onSelectSuggestion: (suggestion: CatalogSearchSuggestion) => void;
   onSubmit: () => void;
   focusToken: number;
+  sourceId: string;
+  sourceRevision: string;
+  previewAngle: PreviewAngle;
 };
 
 function CatalogSearchBar(props: CatalogSearchBarProps) {
   const {
     query, setQuery, targets, setTargets, suggestions, suggestionsLoading,
-    onSelectSuggestion, onSubmit, focusToken,
+    onSelectSuggestion, onSubmit, focusToken, sourceId, sourceRevision, previewAngle,
   } = props;
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -2780,7 +2786,16 @@ function CatalogSearchBar(props: CatalogSearchBarProps) {
     <div className="entity-search-input">
       <div className="search-box entity-search-box"><Icon name="search" /><input ref={inputRef} value={query} onFocus={() => setSuggestionsOpen(true)} onKeyDown={handleSearchKeyDown} onChange={(event) => { setQuery(event.target.value); setSuggestionsOpen(true); }} placeholder={placeholder} aria-label={searchLabel} role="combobox" aria-autocomplete="list" aria-expanded={suggestionsVisible} aria-controls="catalog-search-suggestions" aria-activedescendant={suggestionsVisible && suggestionIndex >= 0 && suggestions[suggestionIndex] ? `catalog-suggestion-${suggestions[suggestionIndex].key.replace(/[^a-z0-9_-]/gi, "-")}` : undefined} /></div>
       {suggestionsVisible && <div className="entity-search-suggestions" id="catalog-search-suggestions" role="listbox" aria-label="搜索建议" onMouseDown={(event) => event.preventDefault()}>
-        {suggestions.map((suggestion, index) => <button id={`catalog-suggestion-${suggestion.key.replace(/[^a-z0-9_-]/gi, "-")}`} type="button" role="option" aria-selected={index === suggestionIndex} className={index === suggestionIndex ? "active" : ""} key={suggestion.key} onMouseEnter={() => setSuggestionIndex(index)} onClick={() => selectSuggestion(suggestion)}><Icon name={suggestion.target === "entities" ? "unit" : "voice"} size={16} /><span><strong>{suggestion.title}</strong><small>{suggestion.subtitle}</small></span><em>{suggestion.meta}</em></button>)}
+        {suggestions.map((suggestion, index) => {
+          const mediaVisualKind = suggestion.media?.kind === "voice" ? "voice" : "sound";
+          return <button id={`catalog-suggestion-${suggestion.key.replace(/[^a-z0-9_-]/gi, "-")}`} type="button" role="option" aria-selected={index === suggestionIndex} className={`${index === suggestionIndex ? "active " : ""}catalog-suggestion-${suggestion.target === "entities" ? "entity" : mediaVisualKind}`} key={suggestion.key} onMouseEnter={() => setSuggestionIndex(index)} onClick={() => selectSuggestion(suggestion)}>
+            {suggestion.entity
+              ? <EntityCardPreview entity={suggestion.entity} sourceId={sourceId} sourceRevision={sourceRevision} previewAngle={previewAngle} compact />
+              : <span className={`catalog-suggestion-icon catalog-suggestion-icon-${mediaVisualKind}`}><Icon name={mediaVisualKind} size={18} /></span>}
+            <span className="catalog-suggestion-copy"><strong>{suggestion.title}</strong><small>{suggestion.subtitle}</small></span>
+            <em>{suggestion.meta}</em>
+          </button>;
+        })}
         {suggestionsLoading && suggestions.length === 0 && <div className="catalog-search-loading"><span />正在检索单位和声音…</div>}
       </div>}
     </div>
@@ -3322,7 +3337,7 @@ function useThumbnailAtlasUrl(primaryUrl: string, fallbackUrl: string) {
   return resolvedUrl;
 }
 
-function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle }: { entity: EntitySummary; sourceId: string; sourceRevision: string; previewAngle: PreviewAngle }) {
+function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle, compact = false }: { entity: EntitySummary; sourceId: string; sourceRevision: string; previewAngle: PreviewAngle; compact?: boolean }) {
   const previewRef = useRef<HTMLSpanElement>(null);
   const atlas = isStaticSnapshot ? entity.thumbnail_atlas : undefined;
   const requestedFacing = entity.body_format === "shp" && entity.kind === "infantry"
@@ -3336,6 +3351,9 @@ function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle }: {
   const readyAtlasUrl = useThumbnailAtlasUrl(atlasUrl, atlasFallbackUrl);
   const atlasColumn = atlas ? atlas.index % atlas.columns : 0;
   const atlasRow = atlas ? Math.floor(atlas.index / atlas.columns) : 0;
+  const atlasScale = compact && atlas
+    ? Math.min(36 / atlas.cell_width, 36 / atlas.cell_height)
+    : 1;
   const url = entity.renderable && !atlas
     ? entityCardPreviewUrl(entity, sourceId, previewAngle, sourceRevision)
     : "";
@@ -3374,7 +3392,7 @@ function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle }: {
     };
   }, [url]);
 
-  return <span ref={previewRef} className={`asset-card-preview entity-card-preview format-${entity.body_format || "unknown"} ${entity.renderable ? "ready" : "missing"}`}>
+  return <span ref={previewRef} className={`asset-card-preview entity-card-preview format-${entity.body_format || "unknown"} ${entity.renderable ? "ready" : "missing"} ${compact ? "catalog-suggestion-thumbnail" : ""}`}>
     {entity.renderable
       ? atlas
         ? <span className="entity-thumbnail-atlas" aria-hidden="true" style={{
@@ -3382,10 +3400,11 @@ function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle }: {
           height: atlas.cell_height,
           backgroundImage: `url("${readyAtlasUrl}")`,
           backgroundPosition: `${-atlasColumn * atlas.cell_width}px ${-atlasRow * atlas.cell_height}px`,
+          transform: atlasScale === 1 ? undefined : `scale(${atlasScale})`,
         }} />
         : readyUrl && <img decoding="async" fetchPriority="low" src={readyUrl} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
       : <Icon name="unit" size={34} />}
-    {entity.affiliation && <span className={`entity-affiliation-badge affiliation-${entity.affiliation.kind} affiliation-${affiliationClassId(entity.affiliation.id)}`} title={entity.affiliation.display_name}>
+    {!compact && entity.affiliation && <span className={`entity-affiliation-badge affiliation-${entity.affiliation.kind} affiliation-${affiliationClassId(entity.affiliation.id)}`} title={entity.affiliation.display_name}>
       {entity.affiliation.display_name}
     </span>}
   </span>;
