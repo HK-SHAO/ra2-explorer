@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import threading
 from collections import Counter, OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, replace
 from typing import Any
 
@@ -37,7 +39,7 @@ from ra2_explorer.storage import Database
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
 ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
 UNAFFILIATED_SIDE = "unaffiliated"
-SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v6",)
+SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v8",)
 _PLANNING_SIDE_IDS = ("GDI", "Nod", "ThirdSide")
 _TYPE_SECTIONS = {
     "vehicle": "VehicleTypes",
@@ -718,6 +720,14 @@ class SemanticLibrary:
         self.database = database
         self.reader = reader
         self.voice_transcripts = voice_transcripts or {}
+        self._voice_transcript_revision = hashlib.sha256(
+            json.dumps(
+                self.voice_transcripts,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()[:16]
         self._cache: dict[str, tuple[tuple[object, ...], SemanticCatalog]] = {}
         self._parsed_cache: OrderedDict[str, object] = OrderedDict()
         self._shp_frame_cache: dict[str, tuple[int, ...]] = {}
@@ -725,7 +735,12 @@ class SemanticLibrary:
 
     def catalog(self, source_id: str) -> SemanticCatalog:
         source = self.database.get_source(source_id)
-        token = (source.get("scanned_at"), source.get("asset_count"), source.get("state"))
+        token = (
+            source.get("scanned_at"),
+            source.get("asset_count"),
+            source.get("state"),
+            self._voice_transcript_revision,
+        )
         with self._lock:
             cached = self._cache.get(source_id)
             if cached and cached[0] == token:
@@ -739,6 +754,12 @@ class SemanticLibrary:
             self._cache[source_id] = (token, catalog)
             return catalog
 
+    def catalog_snapshot_path(self, source_id: str):
+        """Return the exact persisted snapshot selected by this library instance."""
+        source = self.database.get_source(source_id)
+        self.catalog(source_id)
+        return self._catalog_snapshot_path(source)
+
     def _catalog_snapshot_path(self, source: dict[str, object]):
         if self.reader.derived is None:
             return None
@@ -746,7 +767,10 @@ class SemanticLibrary:
             "metadata",
             source_id=source["id"],
             revision=source.get("scanned_at") or source["created_at"],
-            identity=SEMANTIC_CATALOG_CACHE_IDENTITY,
+            identity=(
+                *SEMANTIC_CATALOG_CACHE_IDENTITY,
+                self._voice_transcript_revision,
+            ),
             extension="json",
         )
 
@@ -1889,6 +1913,172 @@ def _refined_media_groups(
     return refined
 
 
+def _mission_number(value: str) -> int | None:
+    folded = value.casefold()
+    if folded.isdigit():
+        return int(folded)
+    if len(folded) == 1 and "a" <= folded <= "c":
+        return 10 + ord(folded) - ord("a")
+    return None
+
+
+def _mission_context(
+    asset_stem: str,
+    events: Iterable[str],
+) -> dict[str, object] | None:
+    def context(game: str, campaign: str, number_value: str) -> dict[str, object] | None:
+        number = _mission_number(number_value)
+        if number is None:
+            return None
+        return {
+            "key": f"{game}:{campaign}:{number}",
+            "game": game,
+            "campaign": campaign,
+            "number": number,
+        }
+
+    for raw_event in events:
+        event = raw_event.casefold()
+        coop_match = re.match(r"^coop_x[asy](\d{2})_", event)
+        if coop_match:
+            return context("yr", "coop", coop_match.group(1))
+        mission_match = re.match(r"^mis_(x?)([ast])(\d+|[a-c])_", event)
+        if mission_match:
+            return context(
+                "yr" if mission_match.group(1) else "ra2",
+                {"a": "allied", "s": "soviet", "t": "tutorial"}[
+                    mission_match.group(2)
+                ],
+                mission_match.group(3),
+            )
+        briefing_match = re.match(r"^([as])(\d{2})[_-]p\d+$", event)
+        if briefing_match:
+            return context(
+                "yr",
+                {"a": "allied", "s": "soviet"}[briefing_match.group(1)],
+                briefing_match.group(2),
+            )
+
+    stem = asset_stem.casefold()
+    coop_stem_match = re.match(r"^xc([0-3])", stem)
+    if coop_stem_match:
+        return context("yr", "coop", coop_stem_match.group(1))
+    expansion_stem_match = re.match(r"^x([as])([1-7])", stem)
+    if expansion_stem_match:
+        return context(
+            "yr",
+            {"a": "allied", "s": "soviet"}[expansion_stem_match.group(1)],
+            expansion_stem_match.group(2),
+        )
+    original_stem_match = re.match(r"^m([ast])([1-9a-c])", stem)
+    if original_stem_match:
+        return context(
+            "ra2",
+            {"a": "allied", "s": "soviet", "t": "tutorial"}[
+                original_stem_match.group(1)
+            ],
+            original_stem_match.group(2),
+        )
+    briefing_stem_match = re.match(r"^([as])(\d{2})[_-]p\d+$", stem)
+    if briefing_stem_match:
+        return context(
+            "yr",
+            {"a": "allied", "s": "soviet"}[briefing_stem_match.group(1)],
+            briefing_stem_match.group(2),
+        )
+    return None
+
+
+def _mission_description(mission: dict[str, object]) -> str:
+    game = "红色警戒 2" if mission["game"] == "ra2" else "尤里的复仇"
+    campaign = {
+        "allied": "盟军战役",
+        "soviet": "苏军战役",
+        "tutorial": "教程",
+        "coop": "合作任务",
+    }[str(mission["campaign"])]
+    number = int(mission["number"])
+    display_number = number + 1 if mission["campaign"] == "coop" else number
+    return f"{game} · {campaign} · 第 {display_number} 关"
+
+
+def _mission_event_slot(asset_stem: str, events: Iterable[str]) -> str:
+    tokens = " ".join((asset_stem, *events)).casefold()
+    if re.search(r"(?:briefing|[_-]p\d+)", tokens):
+        return "mission_briefing"
+    if any(
+        marker in tokens
+        for marker in (
+            "dead",
+            "lost",
+            "fail",
+            "abort",
+            "nopowerleft",
+            "destroyed",
+        )
+    ):
+        return "mission_failure"
+    if any(
+        marker in tokens
+        for marker in (
+            "warn",
+            "lookout",
+            "underattack",
+            "under_attack",
+            "threat",
+            "ambush",
+            "prepared",
+            "defensesahead",
+            "strangereadings",
+        )
+    ):
+        return "mission_warning"
+    if any(
+        marker in tokens
+        for marker in (
+            "capture",
+            "capt",
+            "rescue",
+            "destroy",
+            "protect",
+            "find",
+            "getromanov",
+            "savetimemach",
+            "donot",
+            "needpower",
+            "oilfieldstoeast",
+        )
+    ):
+        return "mission_objective"
+    if any(
+        marker in tokens
+        for marker in (
+            "intro",
+            "described",
+            "notice",
+            "discovered",
+        )
+    ):
+        return "mission_introduction"
+    if any(
+        marker in tokens
+        for marker in (
+            "ready",
+            "online",
+            "welldone",
+            "good",
+            "found",
+            "gone",
+            "enoughpower",
+            "command",
+            "inbound",
+            "rescued",
+        )
+    ):
+        return "mission_progress"
+    return "mission_dialogue"
+
+
 def _build_media_items(
     assets: list[dict[str, Any]],
     entities: tuple[GameEntity, ...],
@@ -2009,18 +2199,36 @@ def _build_media_items(
             if sample.name.rsplit(".", 1)[0].casefold() == "dummy":
                 continue
             event_name = association.event.casefold()
-            if event_name.startswith(("mis_", "coop_")):
+            asset_stem = sample.name.rsplit(".", 1)[0].casefold()
+            mission = _mission_context(asset_stem, (association.event,))
+            if mission is not None:
                 kind, group = "voice", "mission_voice"
+                slot: str | tuple[str, ...] = (
+                    f"mission:{mission['key']}",
+                    _mission_event_slot(asset_stem, (association.event,)),
+                )
+            elif event_name.startswith(("unit_eva_", "unit_sofia_")):
+                kind, group = "voice", "unit_intel_voice"
+                slot = (
+                    "advisor_eva"
+                    if event_name.startswith("unit_eva_")
+                    else "advisor_sofia"
+                )
+            elif event_name.startswith(("wwd_", "wwd-")):
+                kind, group = "voice", "world_domination_voice"
+                slot = association.slot
             elif sample.text is None:
                 kind, group = "sound", "notification_sound"
+                slot = association.slot
             else:
                 kind, group = "voice", "eva_voice"
+                slot = association.slot
             add_sample(
                 sample,
                 kind=kind,
                 group=group,
                 event=association.event,
-                slot=association.slot,
+                slot=slot,
             )
 
     for event, samples in audio_events.items():
@@ -2084,8 +2292,27 @@ def _build_media_items(
                 )
             taunt_match = re.fullmatch(r"tau([a-z]{2})(\d{2})", stem)
             if taunt_match:
-                state["groups"].add("taunt_voice")
-                state["slots"].add("taunt")
+                line_number = int(taunt_match.group(2))
+                if line_number <= 4:
+                    state["groups"].add("multiplayer_voice")
+                    state["slots"].add(
+                        {
+                            1: "multiplayer_funds",
+                            2: "multiplayer_attack",
+                            3: "multiplayer_help",
+                            4: "multiplayer_coordination",
+                        }[line_number]
+                    )
+                else:
+                    state["groups"].add("taunt_voice")
+                    state["slots"].add(
+                        {
+                            5: "taunt_surrender",
+                            6: "taunt_laugh",
+                            7: "taunt_retort",
+                            8: "taunt_victory",
+                        }.get(line_number, "taunt")
+                    )
                 affiliation = _TAUNT_AFFILIATIONS.get(taunt_match.group(1))
                 if affiliation:
                     country, side = affiliation
@@ -2131,6 +2358,13 @@ def _build_media_items(
     items = []
     for state in states.values():
         kind = "voice" if state["voice"] else "sound" if state["sound"] else "unknown"
+        asset_stem = str(state["asset"]["display_name"]).rsplit(".", 1)[0].casefold()
+        events = sorted(state["events"], key=str.casefold)
+        mission = _mission_context(asset_stem, events) if kind == "voice" else None
+        if mission is not None:
+            state["slots"].difference_update({"eva_allied", "eva_soviet", "eva_yuri"})
+            state["slots"].add(f"mission:{mission['key']}")
+            state["slots"].add(_mission_event_slot(asset_stem, events))
         refined_groups = _refined_media_groups(
             kind,
             state["groups"],
@@ -2148,33 +2382,38 @@ def _build_media_items(
             groups.remove("other_sound")
         if kind == "unknown":
             groups = ["unclassified"]
-        asset_stem = str(state["asset"]["display_name"]).rsplit(".", 1)[0].casefold()
-        mission_match = re.match(r"^([a-z])(\d{2})[_-]p(\d+)", asset_stem)
-        if kind == "voice" and mission_match and not state["entities"]:
-            if "other_voice" in groups:
-                groups.remove("other_voice")
+        if kind == "voice" and mission is not None and not state["entities"]:
+            groups = [
+                group
+                for group in groups
+                if group not in {"eva_voice", "other_voice"}
+            ]
             if "mission_voice" not in groups:
                 groups.append("mission_voice")
                 groups.sort()
+        for specific_group in (
+            "unit_intel_voice",
+            "world_domination_voice",
+            "multiplayer_voice",
+            "taunt_voice",
+        ):
+            if specific_group in groups:
+                groups = [
+                    group
+                    for group in groups
+                    if group not in {"eva_voice", "other_voice"}
+                    or group == specific_group
+                ]
         texts = sorted(state["texts"], key=str.casefold)
         original_texts = sorted(state["original_texts"], key=str.casefold)
         localized_texts = sorted(state["localized_texts"], key=str.casefold)
-        events = sorted(state["events"], key=str.casefold)
         entity_refs = sorted(
             state["entities"].values(),
             key=lambda item: (item["display_name"].casefold(), item["id"].casefold()),
         )
         description = texts[0] if texts else None
-        if description is None and mission_match:
-            campaign = {
-                "a": "盟军",
-                "s": "苏军",
-                "y": "尤里",
-            }.get(mission_match.group(1), "战役")
-            description = (
-                f"{campaign}任务 {int(mission_match.group(2))}"
-                f" · 第 {int(mission_match.group(3))} 段"
-            )
+        if description is None and mission is not None:
+            description = _mission_description(mission)
         elif description is None and entity_refs:
             description = str(entity_refs[0]["display_name"])
             if events:
@@ -2198,6 +2437,7 @@ def _build_media_items(
                 "entities": entity_refs,
                 "countries": sorted(state["countries"], key=str.casefold),
                 "sides": sorted(state["sides"], key=str.casefold),
+                "mission": mission,
                 "description": description,
             }
         )
@@ -3310,6 +3550,7 @@ def _entity_pinyin_search_values(entity: GameEntity) -> tuple[str | None, ...]:
 def _media_search_text(item: dict[str, object]) -> str:
     asset = item["asset"]
     entities = item["entities"]
+    mission = item.get("mission")
     return "\n".join(
         (
             str(asset["display_name"]),  # type: ignore[index]
@@ -3321,6 +3562,11 @@ def _media_search_text(item: dict[str, object]) -> str:
             *(str(value) for value in item["slots"]),  # type: ignore[union-attr]
             *(str(value) for value in item["countries"]),  # type: ignore[union-attr]
             *(str(value) for value in item["sides"]),  # type: ignore[union-attr]
+            *(
+                (str(value) for value in mission.values())
+                if isinstance(mission, dict)
+                else ()
+            ),
             *(
                 f"{entity['id']} {entity['display_name']} "
                 f"{_media_entity_affiliation_name(entity)}"

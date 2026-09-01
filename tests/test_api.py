@@ -644,6 +644,8 @@ def test_eva_media_groups_separate_missions_and_nonverbal_prompts() -> None:
     mission_asset = asset("XA1EV01")
     prompt_asset = asset("SPSYREAD")
     dummy_asset = asset("DUMMY")
+    unit_intel_asset = asset("CEVAU08")
+    world_domination_asset = asset("WWD01")
     events = (
         MediaAssociation(
             "voice",
@@ -666,12 +668,32 @@ def test_eva_media_groups_separate_missions_and_nonverbal_prompts() -> None:
             "eva",
             (MediaSample("DUMMY", None, dummy_asset),),
         ),
+        MediaAssociation(
+            "voice",
+            "eva_allied",
+            "unit_eva_kirov",
+            "eva",
+            (MediaSample("CEVAU08", "Kirov briefing", unit_intel_asset),),
+        ),
+        MediaAssociation(
+            "voice",
+            "eva_allied",
+            "wwd_allied_win",
+            "eva",
+            (MediaSample("WWD01", "Allied victory", world_domination_asset),),
+        ),
     )
 
     items = {
         item["asset"]["display_name"]: item
         for item in _build_media_items(
-            [mission_asset, prompt_asset, dummy_asset],
+            [
+                mission_asset,
+                prompt_asset,
+                dummy_asset,
+                unit_intel_asset,
+                world_domination_asset,
+            ],
             (),
             {},
             events,
@@ -681,10 +703,23 @@ def test_eva_media_groups_separate_missions_and_nonverbal_prompts() -> None:
 
     assert items["XA1EV01.WAV"]["kind"] == "voice"
     assert items["XA1EV01.WAV"]["groups"] == ["mission_voice"]
+    assert items["XA1EV01.WAV"]["mission"] == {
+        "key": "yr:allied:1",
+        "game": "yr",
+        "campaign": "allied",
+        "number": 1,
+    }
+    assert items["XA1EV01.WAV"]["slots"] == [
+        "mission:yr:allied:1",
+        "mission_briefing",
+    ]
     assert items["SPSYREAD.WAV"]["kind"] == "sound"
     assert items["SPSYREAD.WAV"]["groups"] == ["notification_sound"]
     assert items["SPSYREAD.WAV"]["description"] == "心灵揭示就绪提示音"
     assert "eva_voice" not in items["DUMMY.WAV"]["groups"]
+    assert items["CEVAU08.WAV"]["groups"] == ["unit_intel_voice"]
+    assert items["CEVAU08.WAV"]["slots"] == ["advisor_eva"]
+    assert items["WWD01.WAV"]["groups"] == ["world_domination_voice"]
 
 
 def test_unassociated_voice_keeps_catalog_transcript_in_asset_data(
@@ -725,8 +760,8 @@ def test_unassociated_voice_keeps_catalog_transcript_in_asset_data(
     ).json()
     assert media["total"] == 1
     item = media["items"][0]
-    assert item["groups"] == ["taunt_voice"]
-    assert item["slots"] == ["taunt"]
+    assert item["groups"] == ["multiplayer_voice"]
+    assert item["slots"] == ["multiplayer_attack"]
     assert item["countries"] == ["Africans"]
     assert item["sides"] == ["Nod"]
     asset = item["asset"]
@@ -744,6 +779,88 @@ def test_unassociated_voice_keeps_catalog_transcript_in_asset_data(
         "original_texts": ["The order is given. Attack!"],
         "localized_texts": ["下达指令了：攻击！"],
     }
+
+
+def test_multiplayer_taunts_are_separated_from_team_communications() -> None:
+    def asset(name: str) -> dict[str, object]:
+        return {
+            "id": name.casefold(),
+            "display_name": f"{name}.wav",
+            "format": "wav",
+            "virtual_path": f"audio.mix::{name}.wav",
+            "size": 1024,
+            "storage_kind": "mix",
+        }
+
+    communication = asset("tauli03")
+    taunt = asset("tauli06")
+    items = {
+        item["asset"]["display_name"]: item
+        for item in _build_media_items(
+            [communication, taunt],
+            (),
+            {},
+            (),
+            {
+                "tauli03": VoiceText("TRANSCRIPT:tauli03", "Help me!", "Help me!", None),
+                "tauli06": VoiceText("TRANSCRIPT:tauli06", "Ha ha ha!", "Ha ha ha!", None),
+            },
+        )
+    }
+
+    assert items["tauli03.wav"]["groups"] == ["multiplayer_voice"]
+    assert items["tauli03.wav"]["slots"] == ["multiplayer_help"]
+    assert items["tauli06.wav"]["groups"] == ["taunt_voice"]
+    assert items["tauli06.wav"]["slots"] == ["taunt_laugh"]
+
+
+def test_mission_audio_exposes_mission_and_event_facets() -> None:
+    def asset(name: str) -> dict[str, object]:
+        return {
+            "id": name.casefold(),
+            "display_name": f"{name}.wav",
+            "format": "wav",
+            "virtual_path": f"audio.mix::{name}.wav",
+            "size": 1024,
+            "storage_kind": "mix",
+        }
+
+    briefing = asset("XS5SO01")
+    warning = asset("XS5SO13")
+    items = {
+        item["asset"]["display_name"]: item
+        for item in _build_media_items(
+            [briefing, warning],
+            (),
+            {},
+            (
+                MediaAssociation(
+                    "voice",
+                    "eva_soviet",
+                    "mis_xs5_zofiabriefing01",
+                    "eva",
+                    (MediaSample("XS5SO01", "Approaching the island", briefing),),
+                ),
+                MediaAssociation(
+                    "voice",
+                    "eva_soviet",
+                    "mis_xs5_zofiastrangereadings",
+                    "eva",
+                    (MediaSample("XS5SO13", "Strange readings", warning),),
+                ),
+            ),
+            {},
+        )
+    }
+
+    assert items["XS5SO01.wav"]["slots"] == [
+        "mission:yr:soviet:5",
+        "mission_briefing",
+    ]
+    assert items["XS5SO13.wav"]["slots"] == [
+        "mission:yr:soviet:5",
+        "mission_warning",
+    ]
 
 
 def test_orphaned_retail_audio_keeps_evidence_based_categories() -> None:

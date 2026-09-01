@@ -28,7 +28,12 @@ def test_cached_catalog_does_not_rewrite_snapshot(monkeypatch) -> None:
         media_items=(),
     )
     library._cache["source"] = (
-        ("2026-08-30T12:00:00Z", 1, "ready"),
+        (
+            "2026-08-30T12:00:00Z",
+            1,
+            "ready",
+            library._voice_transcript_revision,
+        ),
         catalog,
     )
 

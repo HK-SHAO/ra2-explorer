@@ -14,7 +14,6 @@ from ra2_explorer import __version__
 from ra2_explorer.derived import DERIVED_SCHEMA_VERSION, DerivedStore
 from ra2_explorer.errors import Ra2ExplorerError
 from ra2_explorer.semantic import (
-    SEMANTIC_CATALOG_CACHE_IDENTITY,
     SemanticLibrary,
     deserialize_semantic_catalog,
 )
@@ -49,15 +48,8 @@ def create_resource_pack(
     revision = source.get("scanned_at")
     if not revision:
         raise Ra2ExplorerError("资源目录尚未完成扫描")
-    semantic.catalog(source_id)
-    catalog_path = derived.artifact_path(
-        "metadata",
-        source_id=source_id,
-        revision=revision,
-        identity=SEMANTIC_CATALOG_CACHE_IDENTITY,
-        extension="json",
-    )
-    if not catalog_path.is_file():
+    catalog_path = semantic.catalog_snapshot_path(source_id)
+    if catalog_path is None or not catalog_path.is_file():
         raise Ra2ExplorerError("语义索引尚未准备完成")
 
     revision_root = derived.source_revision_root(source_id, revision)
