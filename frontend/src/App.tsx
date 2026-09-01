@@ -971,6 +971,31 @@ function readStoredNumber(key: string, fallback: number, minimum: number, maximu
   return Number.isFinite(parsed) ? Math.min(maximum, Math.max(minimum, parsed)) : fallback;
 }
 
+const AUDIO_DETAIL_BOTTOM_SIZE_KEY = "ra2exp-detail-bottom-audio-size-v2";
+const LEGACY_AUDIO_DETAIL_BOTTOM_SIZE_KEY = "ra2exp-detail-bottom-audio-size";
+const LEGACY_AUDIO_DETAIL_BOTTOM_DEFAULT = 270;
+
+function defaultAudioDetailBottomSize() {
+  const preferred = Math.max(320, Math.round(window.innerHeight * 0.36));
+  return Math.min(600, Math.max(180, Math.min(window.innerHeight - 246, preferred)));
+}
+
+function readStoredAudioDetailBottomSize() {
+  const fallback = defaultAudioDetailBottomSize();
+  const current = window.localStorage.getItem(AUDIO_DETAIL_BOTTOM_SIZE_KEY);
+  if (current !== null) {
+    return readStoredNumber(AUDIO_DETAIL_BOTTOM_SIZE_KEY, fallback, 180, 600);
+  }
+  const legacy = Number.parseInt(
+    window.localStorage.getItem(LEGACY_AUDIO_DETAIL_BOTTOM_SIZE_KEY) || "",
+    10,
+  );
+  if (Number.isFinite(legacy) && legacy !== LEGACY_AUDIO_DETAIL_BOTTOM_DEFAULT) {
+    return Math.min(600, Math.max(180, legacy));
+  }
+  return fallback;
+}
+
 function audioDisplayName(value: string) {
   return value.replace(/\.(?:wav|aud)$/i, "");
 }
@@ -1384,7 +1409,7 @@ function ExplorerApp() {
     () => readStoredNumber("ra2exp-detail-bottom-size", Math.round(window.innerHeight * 0.42), 220, 900),
   );
   const [audioDetailBottomSize, setAudioDetailBottomSize] = useState(
-    () => readStoredNumber("ra2exp-detail-bottom-audio-size", 270, 180, 600),
+    readStoredAudioDetailBottomSize,
   );
   const [detailRightSize, setDetailRightSize] = useState(
     () => readStoredNumber("ra2exp-detail-right-size", 430, 320, 900),
@@ -1567,7 +1592,7 @@ function ExplorerApp() {
     else setDetailRightSize(value);
     if (persist) {
       const key = placement === "bottom" && audioCompact
-        ? "ra2exp-detail-bottom-audio-size"
+        ? AUDIO_DETAIL_BOTTOM_SIZE_KEY
         : `ra2exp-detail-${placement}-size`;
       window.localStorage.setItem(key, String(value));
     }
