@@ -336,6 +336,9 @@ def test_pages_exports_one_thumbnail_atlas_request_per_entity_kind(
 
     assert metadata["TANK"]["facing_count"] == 1
     assert metadata["SOLDIER"]["facing_count"] == 8
+    assert metadata["SOLDIER"]["content_bounds"] == [
+        {"x": 10, "y": 22, "width": 124, "height": 83}
+    ] * 8
     assert metadata["SOLDIER"]["path"] == (
         "previews/entity-atlases/infantry/{facing}-r4.webp"
     )

@@ -37,7 +37,7 @@ from ra2_explorer.codecs.shp import parse_shp
 from ra2_explorer.config import Settings
 from ra2_explorer.errors import Ra2ExplorerError
 
-PAGES_SNAPSHOT_SCHEMA_VERSION = 1
+PAGES_SNAPSHOT_SCHEMA_VERSION = 2
 PAGES_RENDER_REVISION = 4
 PAGES_ASSET_BUNDLE_REVISION = 3
 _SAFE_FILENAME = re.compile(r"^[A-Za-z0-9_.~$-]+$")
@@ -713,6 +713,7 @@ def _export_entity_thumbnail_atlases(
                 "cell_width": _ENTITY_ATLAS_CELL_WIDTH,
                 "cell_height": _ENTITY_ATLAS_CELL_HEIGHT,
                 "facing_count": facing_count,
+                "content_bounds": [None] * facing_count,
             }
 
         for facing in range(sheet_facing_count):
@@ -743,6 +744,17 @@ def _export_entity_thumbnail_atlases(
                         image,
                         str(item.get("body_format") or item.get("preview", {}).get("format") or ""),
                     )
+                bounds = cell.getchannel("A").getbbox()
+                if bounds is None:
+                    bounds = (0, 0, _ENTITY_ATLAS_CELL_WIDTH, _ENTITY_ATLAS_CELL_HEIGHT)
+                content_bounds = metadata[str(item["id"])]["content_bounds"]
+                if isinstance(content_bounds, list):
+                    content_bounds[source_facing] = {
+                        "x": bounds[0],
+                        "y": bounds[1],
+                        "width": bounds[2] - bounds[0],
+                        "height": bounds[3] - bounds[1],
+                    }
                 atlas.alpha_composite(
                     cell,
                     (

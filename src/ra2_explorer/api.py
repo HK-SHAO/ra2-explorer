@@ -417,6 +417,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         palette_id: str | None = None,
         scale: int = Query(default=4, ge=1, le=12),
         thumbnail: bool = False,
+        compact: bool = False,
         effect_asset_id: str | None = None,
         effect_frame: int = Query(default=0, ge=0),
         effect_shadow_frame: int | None = Query(default=None, ge=0),
@@ -440,6 +441,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             f"palette-{palette_id or 'auto'}",
             f"scale-{scale}",
             f"thumbnail-{thumbnail}",
+            f"compact-{compact}",
             f"effect-{effect_asset_id or 'none'}",
             f"effect-frame-{effect_frame}",
             f"effect-shadow-{effect_shadow_frame if effect_shadow_frame is not None else 'none'}",
@@ -532,8 +534,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if thumbnail:
             image = _crop_transparent_preview(
                 image,
-                padding_ratio=0.42 if semantic_entity.kind == "infantry" else 0.08,
-                focus_bounds=focus_bounds,
+                padding_ratio=(
+                    0.08
+                    if compact
+                    else 0.42 if semantic_entity.kind == "infantry" else 0.08
+                ),
+                focus_bounds=None if compact else focus_bounds,
             )
         output = io.BytesIO()
         image.save(output, format="PNG")

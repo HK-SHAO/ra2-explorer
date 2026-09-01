@@ -3596,7 +3596,7 @@ function entityCardPlayerColor(entity: EntitySummary) {
       : side === "ThirdSide" ? "purple" : "";
 }
 
-function entityCardPreviewUrl(entity: EntitySummary, sourceId: string, previewAngle: PreviewAngle, sourceRevision: string) {
+function entityCardPreviewUrl(entity: EntitySummary, sourceId: string, previewAngle: PreviewAngle, sourceRevision: string, compact = false) {
   const staticFacing = entity.body_format === "shp" && entity.kind === "infantry"
     ? entityFacingForPreviewAngle(entity.body_format, previewAngle)
     : 0;
@@ -3607,6 +3607,7 @@ function entityCardPreviewUrl(entity: EntitySummary, sourceId: string, previewAn
     facing,
     scale: 2,
     thumbnail: true,
+    compact,
     playerColor: entityCardPlayerColor(entity),
     revision: sourceRevision,
   });
@@ -3676,11 +3677,14 @@ function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle, com
   const readyAtlasUrl = useThumbnailAtlasUrl(atlasUrl, atlasFallbackUrl);
   const atlasColumn = atlas ? atlas.index % atlas.columns : 0;
   const atlasRow = atlas ? Math.floor(atlas.index / atlas.columns) : 0;
+  const atlasContentBounds = compact && atlas ? atlas.content_bounds?.[atlasFacing] : undefined;
+  const atlasContentWidth = atlasContentBounds?.width ?? atlas?.cell_width ?? 1;
+  const atlasContentHeight = atlasContentBounds?.height ?? atlas?.cell_height ?? 1;
   const atlasScale = compact && atlas
-    ? Math.min(36 / atlas.cell_width, 36 / atlas.cell_height)
+    ? Math.min(34 / atlasContentWidth, 34 / atlasContentHeight)
     : 1;
   const url = entity.renderable && !atlas
-    ? entityCardPreviewUrl(entity, sourceId, previewAngle, sourceRevision)
+    ? entityCardPreviewUrl(entity, sourceId, previewAngle, sourceRevision, compact)
     : "";
   const [readyUrl, setReadyUrl] = useState(() => hasLoadedCardPreview(url) ? url : "");
 
@@ -3721,10 +3725,10 @@ function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle, com
     {entity.renderable
       ? atlas
         ? <span className="entity-thumbnail-atlas" aria-hidden="true" style={{
-          width: atlas.cell_width,
-          height: atlas.cell_height,
+          width: atlasContentWidth,
+          height: atlasContentHeight,
           backgroundImage: `url("${readyAtlasUrl}")`,
-          backgroundPosition: `${-atlasColumn * atlas.cell_width}px ${-atlasRow * atlas.cell_height}px`,
+          backgroundPosition: `${-(atlasColumn * atlas.cell_width + (atlasContentBounds?.x ?? 0))}px ${-(atlasRow * atlas.cell_height + (atlasContentBounds?.y ?? 0))}px`,
           transform: atlasScale === 1 ? undefined : `scale(${atlasScale})`,
         }} />
         : readyUrl && <img decoding="async" fetchPriority="low" src={readyUrl} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />

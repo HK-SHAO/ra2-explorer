@@ -233,6 +233,12 @@ export interface EntitySummary {
     cell_width: number;
     cell_height: number;
     facing_count: number;
+    content_bounds?: Array<{
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    }>;
   };
 }
 
@@ -454,6 +460,7 @@ export interface EntityPreviewOptions {
   paletteId?: string;
   scale?: number;
   thumbnail?: boolean;
+  compact?: boolean;
   effectAssetId?: string;
   effectFrame?: number;
   effectShadowFrame?: number;
@@ -663,6 +670,7 @@ export const api = {
     if (options.playerColor) params.set("player_color", options.playerColor);
     if (options.paletteId) params.set("palette_id", options.paletteId);
     if (options.thumbnail) params.set("thumbnail", "true");
+    if (options.compact) params.set("compact", "true");
     if (options.effectAssetId) params.set("effect_asset_id", options.effectAssetId);
     if (options.effectFrame !== undefined) params.set("effect_frame", String(options.effectFrame));
     if (options.effectShadowFrame !== undefined) params.set("effect_shadow_frame", String(options.effectShadowFrame));

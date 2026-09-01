@@ -495,6 +495,19 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
             visible_width / thumbnail.width,
             visible_height / thumbnail.height,
         ) <= 0.56
+    infantry_compact_thumbnail = client.get(
+        f"/api/entities/{source['id']}/DemoInfantry/preview.png",
+        params={"frame": 2, "thumbnail": "true", "compact": "true"},
+    )
+    with Image.open(io.BytesIO(infantry_compact_thumbnail.content)) as thumbnail:
+        visible_bounds = thumbnail.convert("RGBA").getchannel("A").getbbox()
+        assert visible_bounds is not None
+        visible_width = visible_bounds[2] - visible_bounds[0]
+        visible_height = visible_bounds[3] - visible_bounds[1]
+        assert max(
+            visible_width / thumbnail.width,
+            visible_height / thumbnail.height,
+        ) >= 0.8
 
     entity_preview = client.get(
         f"/api/entities/{source['id']}/DemoVehicle/preview.png",
