@@ -28,7 +28,7 @@ interface StaticAssetBundle {
 }
 
 interface StaticSnapshotManifest {
-  schema_version: 1;
+  schema_version: 1 | 2;
   snapshot_id: string;
   created_at: string;
   app_version: string;
