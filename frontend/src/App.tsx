@@ -3501,6 +3501,10 @@ function catalogSearchTokens(query: string) {
   return tokens;
 }
 
+function normalizeCatalogSearchText(value: string) {
+  return value.toLocaleLowerCase().replaceAll("砲", "炮");
+}
+
 function boundedSuggestionMatch(needle: string, haystack: string) {
   if (needle.length < (/\p{Script=Han}/u.test(needle) ? 2 : 4)) return false;
   let first = haystack.indexOf(needle[0]);
@@ -3520,12 +3524,49 @@ function boundedSuggestionMatch(needle: string, haystack: string) {
   return false;
 }
 
+function singleSuggestionEditOrTransposition(left: string, right: string) {
+  if (Math.abs(left.length - right.length) > 1) return false;
+  if (left.length === right.length) {
+    const differences = [...left].map((character, index) => character === right[index] ? -1 : index)
+      .filter((index) => index >= 0);
+    if (differences.length <= 1) return true;
+    return differences.length === 2
+      && differences[1] === differences[0] + 1
+      && left[differences[0]] === right[differences[1]]
+      && left[differences[1]] === right[differences[0]];
+  }
+  const [shorter, longer] = left.length < right.length ? [left, right] : [right, left];
+  let mismatch = 0;
+  let shortIndex = 0;
+  for (const character of longer) {
+    if (shortIndex < shorter.length && shorter[shortIndex] === character) {
+      shortIndex += 1;
+      continue;
+    }
+    mismatch += 1;
+    if (mismatch > 1) return false;
+  }
+  return true;
+}
+
+function nearbySuggestionEdit(needle: string, haystack: string) {
+  if (needle.length < (/\p{Script=Han}/u.test(needle) ? 3 : 5)) return false;
+  for (let width = Math.max(1, needle.length - 1); width <= needle.length + 1; width += 1) {
+    for (let start = 0; start + width <= haystack.length; start += 1) {
+      if (singleSuggestionEditOrTransposition(needle, haystack.slice(start, start + width))) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function catalogSuggestionScore(query: string, primaryValues: string[], aliasValues: string[] = []) {
-  const raw = query.trim().toLocaleLowerCase();
+  const raw = normalizeCatalogSearchText(query.trim());
   const tokens = catalogSearchTokens(raw);
   if (!tokens.length) return Number.POSITIVE_INFINITY;
-  const primary = primaryValues.map((value) => value.toLocaleLowerCase());
-  const aliases = aliasValues.map((value) => value.toLocaleLowerCase());
+  const primary = primaryValues.map(normalizeCatalogSearchText);
+  const aliases = aliasValues.map(normalizeCatalogSearchText);
   if (primary.some((value) => value === raw)) return 0;
   let score = 0;
   for (const token of tokens) {
@@ -3539,7 +3580,8 @@ function catalogSuggestionScore(query: string, primaryValues: string[], aliasVal
         : primary.some((value) => value.includes(token)) ? 3
           : normalizedAliases.some((value) => value.includes(compact)) ? 4
             : [...normalizedPrimary, ...normalizedAliases].some((value) => (
-              value.length <= Math.max(64, compact.length * 8) && boundedSuggestionMatch(compact, value)
+              value.length <= Math.max(64, compact.length * 8)
+              && (boundedSuggestionMatch(compact, value) || nearbySuggestionEdit(compact, value))
             )) ? 5 : Number.POSITIVE_INFINITY;
     if (!Number.isFinite(termScore)) return termScore;
     score += termScore;
@@ -5205,6 +5247,14 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   const audioRelationshipItems = isAudio
     ? (associations?.items || []).filter((item) => item.entity !== null)
     : [];
+  const unitIntroEntity = isAudio
+    ? audioRelationshipItems.find((item) => /^unit_(?:eva|sofia)_/i.test(item.event))?.entity ?? null
+    : null;
+  const detailHeading = unitIntroEntity
+    ? [unitIntroEntity.display_name, unitIntroEntity.internal_name]
+      .filter((value, index, values) => Boolean(value) && values.indexOf(value) === index)
+      .join(" · ")
+    : assetDisplayName(asset);
   const hasAudioRelationshipTabs = isAudio && audioRelationshipItems.length > 0;
   const activeAudioDetailTab = audioDetailTab === "associations" && !hasAudioRelationshipTabs
     ? "data"
@@ -5288,7 +5338,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   return (
     <aside ref={detailScroll.ref} onScroll={detailScroll.remember} className={`detail-panel asset-detail panel ${wide ? "detail-panel-wide" : "detail-panel-narrow"}`}>
       <div className={`detail-title ${isAudio ? "audio-detail-title" : ""}`}>
-        <div className="detail-heading-line"><span className="format-pill">{formatLabels[asset.format] || asset.format.toUpperCase()}</span><h2 title={assetDisplayName(asset)}>{assetDisplayName(asset)}</h2></div>
+        <div className="detail-heading-line"><span className="format-pill">{formatLabels[asset.format] || asset.format.toUpperCase()}</span><h2 title={detailHeading}>{detailHeading}</h2></div>
         <div className="detail-actions">
           {onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}
           {isAudio
