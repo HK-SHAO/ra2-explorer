@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
@@ -19,7 +20,9 @@ from ra2_explorer.pages_snapshot import (
     _directory_stats,
     _entity_player_color,
     _entity_thumbnail_atlas_cell,
+    _EntityPreviewTask,
     _export_asset_bundles,
+    _export_entity_previews,
     _export_entity_thumbnail_atlases,
     _pages_audio_stats,
     _prune_reused_exports,
@@ -273,6 +276,87 @@ def test_pages_building_preview_focus_includes_every_visible_main_layer() -> Non
     assert focus == (90, 40, 190, 60)
 
 
+def test_pages_entity_preview_includes_the_shared_voxel_turret_composite(
+    tmp_path: Path,
+) -> None:
+    body = {"format": "shp", "source_id": "source"}
+
+    class Entity:
+        kind = "building"
+        rules: dict[str, str] = {}
+        media: tuple[object, ...] = ()
+
+        @staticmethod
+        def component(role: str) -> dict[str, str] | None:
+            return body if role == "body" else None
+
+    entity = Entity()
+    base = Image.new("RGBA", (40, 40), (255, 0, 0, 255))
+    turret = Image.new("RGBA", (10, 10), (0, 0, 255, 255))
+    semantic = SimpleNamespace(
+        catalog=lambda _source_id: SimpleNamespace(get=lambda _entity_id: entity),
+        render=lambda *_args, **_kwargs: (entity, base, (0, 0, 40, 40)),
+        render_building_voxel_turret=lambda *_args, **_kwargs: (turret, (5, 5)),
+    )
+    services = SimpleNamespace(
+        semantic=semantic,
+        database=SimpleNamespace(palette_assets=lambda _source_id: []),
+    )
+    output = tmp_path / "building.webp"
+
+    _export_entity_previews(
+        services,  # type: ignore[arg-type]
+        "source",
+        [_EntityPreviewTask("BUILDING", 0, 0, 2, False, None, output)],
+        workers=1,
+    )
+
+    with Image.open(output) as rendered:
+        assert rendered.convert("RGBA").getpixel((20, 20))[:3] == (0, 0, 255)
+
+
+def test_pages_infantry_thumbnail_uses_the_shared_card_framing(tmp_path: Path) -> None:
+    body = {"format": "shp", "source_id": "source"}
+
+    class Entity:
+        kind = "infantry"
+        rules: dict[str, str] = {}
+        media: tuple[object, ...] = ()
+
+        @staticmethod
+        def component(role: str) -> dict[str, str] | None:
+            return body if role == "body" else None
+
+    entity = Entity()
+    base = Image.new("RGBA", (20, 40), (255, 0, 0, 255))
+    semantic = SimpleNamespace(
+        catalog=lambda _source_id: SimpleNamespace(get=lambda _entity_id: entity),
+        render=lambda *_args, **_kwargs: (entity, base, (0, 0, 20, 40)),
+        render_building_voxel_turret=lambda *_args, **_kwargs: None,
+    )
+    services = SimpleNamespace(
+        semantic=semantic,
+        database=SimpleNamespace(palette_assets=lambda _source_id: []),
+    )
+    output = tmp_path / "infantry.webp"
+
+    _export_entity_previews(
+        services,  # type: ignore[arg-type]
+        "source",
+        [_EntityPreviewTask("INFANTRY", 0, 0, 2, True, None, output)],
+        workers=1,
+    )
+
+    with Image.open(output) as rendered:
+        bounds = rendered.convert("RGBA").getchannel("A").getbbox()
+        assert bounds is not None
+        visible_ratio = max(
+            (bounds[2] - bounds[0]) / rendered.width,
+            (bounds[3] - bounds[1]) / rendered.height,
+        )
+        assert 0.68 <= visible_ratio <= 0.75
+
+
 def test_pages_thumbnail_atlas_cell_matches_card_dimensions() -> None:
     source = Image.new("RGBA", (20, 10), (255, 0, 0, 255))
 
@@ -340,11 +424,11 @@ def test_pages_exports_one_thumbnail_atlas_request_per_entity_kind(
         {"x": 10, "y": 22, "width": 124, "height": 83}
     ] * 8
     assert metadata["SOLDIER"]["path"] == (
-        "previews/entity-atlases/infantry/{facing}-r5.webp"
+        "previews/entity-atlases/infantry/{facing}-r6.webp"
     )
-    assert (tmp_path / "previews/entity-atlases/vehicle/0-r5.webp").is_file()
-    assert (tmp_path / "previews/entity-atlases/infantry/7-r5.webp").is_file()
-    with Image.open(tmp_path / "previews/entity-atlases/infantry/0-r5.webp") as atlas:
+    assert (tmp_path / "previews/entity-atlases/vehicle/0-r6.webp").is_file()
+    assert (tmp_path / "previews/entity-atlases/infantry/7-r6.webp").is_file()
+    with Image.open(tmp_path / "previews/entity-atlases/infantry/0-r6.webp") as atlas:
         assert atlas.size == (144, 135)
 
 

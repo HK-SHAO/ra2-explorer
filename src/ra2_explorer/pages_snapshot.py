@@ -26,9 +26,11 @@ from ra2_explorer import __version__
 from ra2_explorer.api import (
     Services,
     _alpha_composite_centered,
+    _composite_building_voxel_turret,
     _composite_focus_bounds,
     _crop_transparent_preview,
     _default_entity_operation_samples,
+    _entity_thumbnail_padding,
     _render_entity_shp_layer,
     _select_palette,
     create_app,
@@ -38,7 +40,7 @@ from ra2_explorer.config import Settings
 from ra2_explorer.errors import Ra2ExplorerError
 
 PAGES_SNAPSHOT_SCHEMA_VERSION = 2
-PAGES_RENDER_REVISION = 5
+PAGES_RENDER_REVISION = 6
 PAGES_ASSET_BUNDLE_REVISION = 4
 _SAFE_FILENAME = re.compile(r"^[A-Za-z0-9_.~$-]+$")
 _AUDIO_FORMATS = {"aud", "bag_audio", "wav"}
@@ -629,10 +631,22 @@ def _export_entity_previews(
                         shadow_layers,
                         main_layers,
                     )
+            image, focus_bounds = _composite_building_voxel_turret(
+                services,
+                source_id,
+                semantic_entity,
+                image,
+                focus_bounds,
+                palette=palette,
+                frame=request.frame,
+                facing=request.facing,
+                player_color=request.player_color,
+                scale=request.scale,
+            )
             if request.thumbnail:
                 image = _crop_transparent_preview(
                     image,
-                    padding_ratio=0.42 if semantic_entity.kind == "infantry" else 0.08,
+                    padding_ratio=_entity_thumbnail_padding(semantic_entity, compact=False),
                     focus_bounds=focus_bounds,
                 )
             _save_webp(image, request.output)

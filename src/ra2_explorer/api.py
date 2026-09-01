@@ -525,35 +525,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 main_layers,
                 image.size,
             )
-        turret = services.semantic.render_building_voxel_turret(
+        image, focus_bounds = _composite_building_voxel_turret(
+            services,
             source_id,
             semantic_entity,
+            image,
+            focus_bounds,
             palette=palette,
             frame=frame,
             facing=facing,
             player_color=player_color,
             scale=scale,
         )
-        if turret is not None:
-            turret_image, turret_origin = turret
-            image, focus_bounds = _alpha_composite_anchored(
-                image,
-                turret_image,
-                overlay_anchor=turret_origin,
-                target_anchor=(
-                    image.width // 2
-                    + _safe_int(semantic_entity.rules.get("turret_anim_x")) * scale,
-                    image.height // 2
-                    + _safe_int(semantic_entity.rules.get("turret_anim_y")) * scale,
-                ),
-                base_focus=focus_bounds,
-            )
         if thumbnail:
             image = _crop_transparent_preview(
                 image,
-                padding_ratio=(
-                    0.08 if compact else 0.20 if semantic_entity.kind == "infantry" else 0.08
-                ),
+                padding_ratio=_entity_thumbnail_padding(semantic_entity, compact=compact),
                 focus_bounds=None if compact else focus_bounds,
             )
         output = io.BytesIO()
@@ -1047,6 +1034,10 @@ def _crop_transparent_preview(
     )
 
 
+def _entity_thumbnail_padding(entity: GameEntity, *, compact: bool) -> float:
+    return 0.08 if compact or entity.kind != "infantry" else 0.20
+
+
 def _default_entity_operation_samples(
     entity: GameEntity,
     *,
@@ -1302,6 +1293,43 @@ def _alpha_composite_anchored(
         min(bounds[1] for bounds in candidates),
         max(bounds[2] for bounds in candidates),
         max(bounds[3] for bounds in candidates),
+    )
+
+
+def _composite_building_voxel_turret(
+    services: Services,
+    source_id: str,
+    entity: GameEntity,
+    image: Image.Image,
+    focus_bounds: tuple[int, int, int, int] | None,
+    *,
+    palette: object,
+    frame: int,
+    facing: int,
+    player_color: str | None,
+    scale: int,
+) -> tuple[Image.Image, tuple[int, int, int, int] | None]:
+    turret = services.semantic.render_building_voxel_turret(
+        source_id,
+        entity,
+        palette=palette,
+        frame=frame,
+        facing=facing,
+        player_color=player_color,
+        scale=scale,
+    )
+    if turret is None:
+        return image, focus_bounds
+    turret_image, turret_origin = turret
+    return _alpha_composite_anchored(
+        image,
+        turret_image,
+        overlay_anchor=turret_origin,
+        target_anchor=(
+            image.width // 2 + _safe_int(entity.rules.get("turret_anim_x")) * scale,
+            image.height // 2 + _safe_int(entity.rules.get("turret_anim_y")) * scale,
+        ),
+        base_focus=focus_bounds,
     )
 
 
