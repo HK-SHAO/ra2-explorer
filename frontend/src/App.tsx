@@ -1503,6 +1503,7 @@ function ExplorerApp() {
     pauseAudioAsset();
     setSearchResultsOpen(false);
     setMediaGroup(next);
+    setMediaEventType("");
     setMediaLoading(true);
     setMediaItems([]);
     setSelectedId(assetSelectionsRef.current.get(assetSelectionKey(sourceId, selectedCategoryId, next)) || "");
