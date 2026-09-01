@@ -340,11 +340,11 @@ def test_pages_exports_one_thumbnail_atlas_request_per_entity_kind(
         {"x": 10, "y": 22, "width": 124, "height": 83}
     ] * 8
     assert metadata["SOLDIER"]["path"] == (
-        "previews/entity-atlases/infantry/{facing}-r4.webp"
+        "previews/entity-atlases/infantry/{facing}-r5.webp"
     )
-    assert (tmp_path / "previews/entity-atlases/vehicle/0-r4.webp").is_file()
-    assert (tmp_path / "previews/entity-atlases/infantry/7-r4.webp").is_file()
-    with Image.open(tmp_path / "previews/entity-atlases/infantry/0-r4.webp") as atlas:
+    assert (tmp_path / "previews/entity-atlases/vehicle/0-r5.webp").is_file()
+    assert (tmp_path / "previews/entity-atlases/infantry/7-r5.webp").is_file()
+    with Image.open(tmp_path / "previews/entity-atlases/infantry/0-r5.webp") as atlas:
         assert atlas.size == (144, 135)
 
 
