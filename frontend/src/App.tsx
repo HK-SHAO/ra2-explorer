@@ -756,6 +756,32 @@ type BrowsingLocation = {
 const audioFormats = ["bag_audio", "wav", "aud"];
 const imageFormats = ["shp", "tmp", "pcx", "pal", "map"];
 const defaultVisibleFormats = ["bag_audio", "wav", "aud"];
+
+function preloadEntityAudioResources(entity: GameEntity) {
+  const primaryUrls: string[] = [];
+  const remainingUrls: string[] = [];
+  const seen = new Set<string>();
+  for (const association of entity.media) {
+    if (association.kind !== "voice" && association.kind !== "sound") continue;
+    let foundPrimary = false;
+    for (const sample of association.samples) {
+      if (!sample.asset || !audioFormats.includes(sample.asset.format)) continue;
+      const url = api.mediaUrl(sample.asset.id);
+      if (seen.has(url)) continue;
+      seen.add(url);
+      if (!foundPrimary) {
+        primaryUrls.push(url);
+        foundPrimary = true;
+      } else {
+        remainingUrls.push(url);
+      }
+    }
+  }
+  for (const url of primaryUrls.slice(0, 8)) {
+    void preloadAudioResource(url, "foreground");
+  }
+  preloadAudioResourceGroup([...primaryUrls.slice(8), ...remainingUrls]);
+}
 const assetCategories: Array<{
   id: string;
   label: string;
@@ -2297,7 +2323,11 @@ function ExplorerApp() {
     let cancelled = false;
     setEntityDetailLoading(true);
     api.entity(sourceId, selectedEntityId, gameLanguage, sourceRevision)
-      .then((entity) => !cancelled && setSelectedEntity(entity))
+      .then((entity) => {
+        if (cancelled) return;
+        preloadEntityAudioResources(entity);
+        setSelectedEntity(entity);
+      })
       .catch((reason: Error) => {
         if (cancelled) return;
         setSelectedEntity(null);
@@ -4132,7 +4162,7 @@ function CompactAudioPlayer({ assetId, label }: {
   const url = api.mediaUrl(assetId);
 
   return <span className="compact-audio-player">
-    <button type="button" onPointerEnter={() => void preloadAudioResource(url, "foreground")} onFocus={() => void preloadAudioResource(url, "foreground")} onClick={() => toggleAudioAsset(assetId, url)} title={isActive ? `暂停 ${label}` : `播放 ${label}`} aria-label={isActive ? `暂停 ${label}` : `播放 ${label}`}><Icon name={isActive ? "pause" : "play"} size={15} /></button>
+    <button type="button" data-audio-asset-id={assetId} onPointerEnter={() => void preloadAudioResource(url, "foreground")} onFocus={() => void preloadAudioResource(url, "foreground")} onClick={() => toggleAudioAsset(assetId, url)} title={isActive ? `暂停 ${label}` : `播放 ${label}`} aria-label={isActive ? `暂停 ${label}` : `播放 ${label}`}><Icon name={isActive ? "pause" : "play"} size={15} /></button>
   </span>;
 }
 
@@ -5579,6 +5609,7 @@ function DetachedEntityDetail({ sourceId, entityId }: { sourceId: string; entity
       isStaticSnapshot ? Promise.resolve([] as PlayerColor[]) : api.playerColors(),
     ])
       .then(([nextEntity, nextColors]) => {
+        preloadEntityAudioResources(nextEntity);
         setEntity(nextEntity);
         setColors(nextColors);
         document.title = `${nextEntity.display_name} · RA2 Explorer`;
