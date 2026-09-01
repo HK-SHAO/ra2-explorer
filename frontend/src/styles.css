@@ -159,7 +159,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .entity-search-input { position: relative; min-width: 150px; flex: 1 1 auto; }
 .entity-search-input .search-box { width: 100%; }
 .entity-search-options { flex: 0 0 auto; display: flex; align-items: center; gap: 5px; }
-.entity-search-suggestions { position: absolute; z-index: 35; top: calc(100% + 6px); left: 0; right: 0; max-height: min(380px, 55vh); padding: 5px; overflow-y: auto; border: 1px solid #42464f; border-radius: 4px; background: #17191e; box-shadow: 0 14px 34px rgba(0,0,0,.48); scrollbar-gutter: stable; }
+.entity-search-suggestions, .catalog-search-history { position: absolute; z-index: 35; top: calc(100% + 6px); left: 0; right: 0; max-height: min(430px, 58vh); padding: 5px; overflow-y: auto; border: 1px solid #42464f; border-radius: 4px; background: #17191e; box-shadow: 0 14px 34px rgba(0,0,0,.48); scrollbar-gutter: stable; }
 .entity-search-suggestions > button { width: 100%; min-height: 52px; display: grid; grid-template-columns: 42px minmax(100px, .7fr) minmax(130px, 1fr); align-items: center; gap: 9px; padding: 5px 9px 5px 6px; border: 1px solid transparent; border-left-width: 2px; border-radius: 3px; color: #b7bbc2; background: transparent; text-align: left; cursor: pointer; }
 .entity-search-suggestions > button.catalog-suggestion-entity { border-left-color: var(--entity-accent); }
 .entity-search-suggestions > button.catalog-suggestion-voice { border-left-color: var(--voice-accent); }
@@ -177,6 +177,26 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .catalog-suggestion-icon { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid currentColor; border-radius: 4px; background: #13161a; }
 .catalog-suggestion-icon-voice { color: var(--voice-accent); background: #211927; }
 .catalog-suggestion-icon-sound { color: var(--sound-accent); background: #211d15; }
+.catalog-search-history { padding: 6px; }
+.catalog-search-history section + section { margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--line-soft); }
+.catalog-search-history section > header { height: 30px; display: flex; align-items: center; justify-content: space-between; padding: 0 5px 0 7px; }
+.catalog-search-history section > header strong { color: #aeb3bc; font-size: 12px; font-weight: 600; }
+.catalog-search-history section > header button { min-width: 42px; height: 26px; padding: 0 7px; border: 1px solid transparent; border-radius: 3px; color: #858b95; background: transparent; font-size: 12px; cursor: pointer; }
+.catalog-search-history section > header button:hover { border-color: #4d535d; color: #e1e3e6; background: #202329; }
+.catalog-history-list { display: grid; gap: 2px; }
+.catalog-history-item { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 32px; align-items: stretch; border: 1px solid transparent; border-left-width: 2px; border-radius: 3px; }
+.catalog-history-item:hover { background: #1d2025; }
+.catalog-history-entity { border-left-color: var(--entity-accent); }
+.catalog-history-voice { border-left-color: var(--voice-accent); }
+.catalog-history-sound { border-left-color: var(--sound-accent); }
+.catalog-history-target { min-width: 0; min-height: 48px; display: grid; grid-template-columns: 42px minmax(100px, .7fr) minmax(120px, 1fr); align-items: center; gap: 9px; padding: 5px 7px 5px 5px; border: 0; color: #b7bbc2; background: transparent; text-align: left; cursor: pointer; }
+.catalog-history-target > em { min-width: 0; overflow: hidden; color: #8f789b; font-size: 12px; font-style: normal; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.catalog-history-remove { width: 28px; height: 28px; align-self: center; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 3px; color: #656b75; background: transparent; cursor: pointer; }
+.catalog-history-remove:hover { border-color: #6b3a38; color: #e06a64; background: #281b1d; }
+.catalog-query-history .catalog-history-target { min-height: 38px; grid-template-columns: 28px minmax(0, 1fr); }
+.catalog-query-history .catalog-history-target > strong { overflow: hidden; color: #d5d8dc; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.catalog-history-query-icon { width: 28px; height: 28px; display: grid; place-items: center; color: #7d8590; }
+.catalog-history-empty { min-height: 64px; display: grid; place-items: center; color: #737984; font-size: 12px; }
 .catalog-search-targets { height: 36px; display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid #353940; border-radius: 18px; background: #15171b; }
 .catalog-search-targets label { min-width: 50px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 9px; border: 1px solid transparent; border-radius: 14px; color: #777d87; font-size: 12px; cursor: pointer; }
 .catalog-search-targets label:hover { color: #d2d5d9; }
@@ -803,10 +823,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .video-preview video { width: 100%; max-height: 360px; display: block; }
 .video-error { color: #d97570; font-size: 13px; }
 
-.asset-list::-webkit-scrollbar, .detail-panel::-webkit-scrollbar, .entity-detail-sections::-webkit-scrollbar, .library-tree::-webkit-scrollbar, .tag-filter::-webkit-scrollbar, .text-preview pre::-webkit-scrollbar, .search-results-scroll::-webkit-scrollbar { width: 11px; height: 7px; }
-.asset-list::-webkit-scrollbar-track, .detail-panel::-webkit-scrollbar-track, .entity-detail-sections::-webkit-scrollbar-track, .library-tree::-webkit-scrollbar-track, .tag-filter::-webkit-scrollbar-track, .text-preview pre::-webkit-scrollbar-track, .search-results-scroll::-webkit-scrollbar-track { background: #17191d; }
-.asset-list::-webkit-scrollbar-thumb, .detail-panel::-webkit-scrollbar-thumb, .entity-detail-sections::-webkit-scrollbar-thumb, .library-tree::-webkit-scrollbar-thumb, .tag-filter::-webkit-scrollbar-thumb, .text-preview pre::-webkit-scrollbar-thumb, .search-results-scroll::-webkit-scrollbar-thumb { min-height: 34px; border: 2px solid #17191d; border-radius: 8px; background: #555b66; }
-.asset-list::-webkit-scrollbar-thumb:hover, .detail-panel::-webkit-scrollbar-thumb:hover, .entity-detail-sections::-webkit-scrollbar-thumb:hover, .library-tree::-webkit-scrollbar-thumb:hover, .tag-filter::-webkit-scrollbar-thumb:hover, .text-preview pre::-webkit-scrollbar-thumb:hover, .search-results-scroll::-webkit-scrollbar-thumb:hover { background: #717783; }
+.asset-list::-webkit-scrollbar, .detail-panel::-webkit-scrollbar, .entity-detail-sections::-webkit-scrollbar, .library-tree::-webkit-scrollbar, .tag-filter::-webkit-scrollbar, .text-preview pre::-webkit-scrollbar, .search-results-scroll::-webkit-scrollbar, .entity-search-suggestions::-webkit-scrollbar, .catalog-search-history::-webkit-scrollbar { width: 11px; height: 7px; }
+.asset-list::-webkit-scrollbar-track, .detail-panel::-webkit-scrollbar-track, .entity-detail-sections::-webkit-scrollbar-track, .library-tree::-webkit-scrollbar-track, .tag-filter::-webkit-scrollbar-track, .text-preview pre::-webkit-scrollbar-track, .search-results-scroll::-webkit-scrollbar-track, .entity-search-suggestions::-webkit-scrollbar-track, .catalog-search-history::-webkit-scrollbar-track { background: #17191d; }
+.asset-list::-webkit-scrollbar-thumb, .detail-panel::-webkit-scrollbar-thumb, .entity-detail-sections::-webkit-scrollbar-thumb, .library-tree::-webkit-scrollbar-thumb, .tag-filter::-webkit-scrollbar-thumb, .text-preview pre::-webkit-scrollbar-thumb, .search-results-scroll::-webkit-scrollbar-thumb, .entity-search-suggestions::-webkit-scrollbar-thumb, .catalog-search-history::-webkit-scrollbar-thumb { min-height: 34px; border: 2px solid #17191d; border-radius: 8px; background: #555b66; }
+.asset-list::-webkit-scrollbar-thumb:hover, .detail-panel::-webkit-scrollbar-thumb:hover, .entity-detail-sections::-webkit-scrollbar-thumb:hover, .library-tree::-webkit-scrollbar-thumb:hover, .tag-filter::-webkit-scrollbar-thumb:hover, .text-preview pre::-webkit-scrollbar-thumb:hover, .search-results-scroll::-webkit-scrollbar-thumb:hover, .entity-search-suggestions::-webkit-scrollbar-thumb:hover, .catalog-search-history::-webkit-scrollbar-thumb:hover { background: #717783; }
 
 /* Readability floor: primary content 13px+, secondary metadata 12px+. */
 body { font-size: 14px; }

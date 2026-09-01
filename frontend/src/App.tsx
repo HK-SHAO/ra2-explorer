@@ -649,6 +649,15 @@ type CatalogSearchSuggestion = {
   media?: MediaItem;
 };
 
+type CatalogRecentItem = Omit<CatalogSearchSuggestion, "score"> & { sourceId: string };
+
+type CatalogListFocus = {
+  sequence: number;
+  target: CatalogSearchTarget;
+  itemId: string;
+  media?: MediaItem;
+};
+
 const DEFAULT_PREVIEW_ANGLE: PreviewAngle = 1;
 const entitySortValues: EntitySort[] = ["cameo", "faction", "name_asc", "name_desc", "cost_asc", "cost_desc", "strength_asc", "strength_desc"];
 
@@ -816,7 +825,52 @@ function readBrowsingLocation(): Partial<BrowsingLocation> {
 
 const ENTITY_SELECTIONS_STORAGE_KEY = "ra2exp-entity-selections-v2";
 const ASSET_SELECTIONS_STORAGE_KEY = "ra2exp-asset-selections-v2";
+const SEARCH_HISTORY_STORAGE_KEY = "ra2exp-search-history-v1";
+const SEARCH_RECENTS_STORAGE_KEY = "ra2exp-search-recents-v1";
 const MAX_STORED_SELECTIONS = 256;
+const MAX_SEARCH_HISTORY = 12;
+const MAX_SEARCH_RECENTS = 10;
+
+function writeStoredList(storageKey: string, values: unknown[]) {
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(values));
+  } catch {
+    // Browsing remains available when storage is disabled or full.
+  }
+}
+
+function readStoredSearchHistory() {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(SEARCH_HISTORY_STORAGE_KEY) || "[]");
+    if (!Array.isArray(stored)) return [];
+    return stored.filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+      .slice(0, MAX_SEARCH_HISTORY);
+  } catch {
+    return [];
+  }
+}
+
+function readStoredSearchRecents() {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(SEARCH_RECENTS_STORAGE_KEY) || "[]");
+    if (!Array.isArray(stored)) return [];
+    return stored.filter((value): value is CatalogRecentItem => {
+      if (!value || typeof value !== "object") return false;
+      const item = value as Partial<CatalogRecentItem>;
+      if (
+        typeof item.key !== "string"
+        || typeof item.sourceId !== "string"
+        || (item.target !== "entities" && item.target !== "media")
+        || typeof item.title !== "string"
+        || typeof item.subtitle !== "string"
+        || typeof item.meta !== "string"
+      ) return false;
+      return item.target === "entities" ? Boolean(item.entity?.id) : Boolean(item.media?.asset.id);
+    }).slice(0, MAX_SEARCH_RECENTS);
+  } catch {
+    return [];
+  }
+}
 
 function entitySelectionKey(sourceId: string, kind: EntityKind, usage: EntityUsage | "" = "") {
   return `${sourceId}:${kind}:${usage || "all"}`;
@@ -872,6 +926,30 @@ function audioDisplayName(value: string) {
 
 function assetDisplayName(asset: Pick<Asset, "display_name" | "format">) {
   return audioFormats.includes(asset.format) ? audioDisplayName(asset.display_name) : asset.display_name;
+}
+
+function includeFocusedMedia(
+  items: MediaItem[],
+  focus: CatalogListFocus | null,
+  kind: MediaKind,
+  sort: MediaSort,
+) {
+  const target = focus?.target === "media" ? focus.media : undefined;
+  if (
+    !target
+    || (target.kind !== kind && !(target.kind === "unknown" && kind === "sound"))
+    || items.some((item) => item.asset.id === target.asset.id)
+  ) return items;
+  const next = [...items, target];
+  next.sort((left, right) => {
+    const leftValue = sort === "description_asc"
+      ? mediaPrimaryText(left) : assetDisplayName(left.asset);
+    const rightValue = sort === "description_asc"
+      ? mediaPrimaryText(right) : assetDisplayName(right.asset);
+    const compared = leftValue.localeCompare(rightValue, "zh-CN", { numeric: true });
+    return sort === "name_desc" ? -compared : compared;
+  });
+  return next;
 }
 
 function libraryDisplayName(value: string) {
@@ -1149,6 +1227,11 @@ function ExplorerApp() {
   const [searchTargets, setSearchTargets] = useState<CatalogSearchTarget[]>(
     () => rememberedSearchTargets(rememberedLocation.searchTargets),
   );
+  const [searchHistory, setSearchHistory] = useState(readStoredSearchHistory);
+  const [searchRecents, setSearchRecents] = useState(readStoredSearchRecents);
+  const catalogListFocusRef = useRef<CatalogListFocus | null>(null);
+  const catalogListFocusSequence = useRef(0);
+  const [catalogListFocus, setCatalogListFocus] = useState<CatalogListFocus | null>(null);
   const [entityUsage, setEntityUsage] = useState<EntityUsage | "">(
     entityUsageOrder.includes(rememberedLocation.entityUsage as EntityUsage)
       ? rememberedLocation.entityUsage as EntityUsage
@@ -1168,6 +1251,7 @@ function ExplorerApp() {
   const [entityDetailLoading, setEntityDetailLoading] = useState(false);
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [mediaTotal, setMediaTotal] = useState(0);
+  const mediaLoadedCountRef = useRef(0);
   const [mediaGroups, setMediaGroups] = useState<Array<{ group: string; count: number }>>([]);
   const [mediaEventTypes, setMediaEventTypes] = useState<Array<{ event_type: string; count: number }>>([]);
   const [mediaKindCounts, setMediaKindCounts] = useState<Array<{ kind: MediaKind; count: number }>>([]);
@@ -1473,6 +1557,7 @@ function ExplorerApp() {
   ]);
 
   function selectEntityKind(kind: EntityKind) {
+    cancelCatalogListFocus();
     if (view !== "entities" || kind !== entityKind || entityUsage) {
       requestRememberedListScrollReset();
     }
@@ -1490,6 +1575,7 @@ function ExplorerApp() {
   }
 
   function selectEntityUsage(usage: EntityUsage | "") {
+    cancelCatalogListFocus();
     requestRememberedListScrollReset();
     setSearchResultsOpen(false);
     const next = entityUsage === usage ? "" : usage;
@@ -1501,6 +1587,7 @@ function ExplorerApp() {
   }
 
   function selectAssetCategory(category: string) {
+    cancelCatalogListFocus();
     if (view !== "assets" || category !== assetCategory || mediaGroup || mediaEventType) {
       requestRememberedListScrollReset();
     }
@@ -1519,6 +1606,7 @@ function ExplorerApp() {
   }
 
   function selectMediaGroup(group: string) {
+    cancelCatalogListFocus();
     const next = group;
     requestRememberedListScrollReset();
     pauseAudioAsset();
@@ -1566,12 +1654,14 @@ function ExplorerApp() {
   }
 
   function selectEntityCard(id: string) {
+    cancelCatalogListFocus();
     const entity = visibleEntities.find((item) => item.id === id);
     if (entity) rememberEntityCard(id, entity.kind, entityUsage);
     setSelectedEntityId(id);
   }
 
   function selectAssetCard(id: string) {
+    cancelCatalogListFocus();
     rememberAssetCard(id, selectedCategoryId, mediaGroup);
     setSelectedId(id);
   }
@@ -1585,6 +1675,77 @@ function ExplorerApp() {
     if (next.length > 0) setSearchTargets(next);
   }
 
+  function rememberSearchHistory(value: string) {
+    const normalized = value.trim();
+    if (!normalized) return;
+    setSearchHistory((current) => {
+      const next = [normalized, ...current.filter(
+        (item) => item.toLocaleLowerCase() !== normalized.toLocaleLowerCase(),
+      )].slice(0, MAX_SEARCH_HISTORY);
+      writeStoredList(SEARCH_HISTORY_STORAGE_KEY, next);
+      return next;
+    });
+  }
+
+  function removeSearchHistory(value: string) {
+    setSearchHistory((current) => {
+      const next = current.filter((item) => item !== value);
+      writeStoredList(SEARCH_HISTORY_STORAGE_KEY, next);
+      return next;
+    });
+  }
+
+  function clearSearchHistory() {
+    setSearchHistory([]);
+    writeStoredList(SEARCH_HISTORY_STORAGE_KEY, []);
+  }
+
+  function rememberSearchRecent(item: CatalogRecentItem) {
+    setSearchRecents((current) => {
+      const next = [item, ...current.filter((entry) => entry.key !== item.key)]
+        .slice(0, MAX_SEARCH_RECENTS);
+      writeStoredList(SEARCH_RECENTS_STORAGE_KEY, next);
+      return next;
+    });
+  }
+
+  function removeSearchRecent(key: string) {
+    setSearchRecents((current) => {
+      const next = current.filter((item) => item.key !== key);
+      writeStoredList(SEARCH_RECENTS_STORAGE_KEY, next);
+      return next;
+    });
+  }
+
+  function clearSearchRecents() {
+    setSearchRecents([]);
+    writeStoredList(SEARCH_RECENTS_STORAGE_KEY, []);
+  }
+
+  function queueCatalogListFocus(suggestion: CatalogSearchSuggestion) {
+    const itemId = suggestion.entity?.id || suggestion.media?.asset.id;
+    if (!itemId) return;
+    const focus: CatalogListFocus = {
+      sequence: ++catalogListFocusSequence.current,
+      target: suggestion.target,
+      itemId,
+      media: suggestion.media,
+    };
+    catalogListFocusRef.current = focus;
+    setCatalogListFocus(focus);
+  }
+
+  const finishCatalogListFocus = useCallback((sequence: number) => {
+    if (catalogListFocusRef.current?.sequence !== sequence) return;
+    catalogListFocusRef.current = null;
+    setCatalogListFocus((current) => current?.sequence === sequence ? null : current);
+  }, []);
+
+  function cancelCatalogListFocus() {
+    catalogListFocusRef.current = null;
+    setCatalogListFocus(null);
+  }
+
   function updateCatalogSearchQuery(next: string) {
     setSearchQuery(next);
     if (!next.trim()) setSearchResultsOpen(false);
@@ -1592,10 +1753,13 @@ function ExplorerApp() {
 
   function submitCatalogSearch() {
     if (!searchQuery.trim()) return;
+    rememberSearchHistory(searchQuery);
     setSearchResultsOpen(true);
   }
 
-  function selectCatalogSuggestion(suggestion: CatalogSearchSuggestion) {
+  function navigateCatalogSuggestion(suggestion: CatalogSearchSuggestion) {
+    requestRememberedListScrollReset();
+    queueCatalogListFocus(suggestion);
     if (suggestion.entity) {
       const entity = suggestion.entity;
       pauseAudioAsset();
@@ -1624,6 +1788,35 @@ function ExplorerApp() {
       setSelectedId(media.asset.id);
       toggleAudioAsset(media.asset.id, api.mediaUrl(media.asset.id));
     }
+  }
+
+  function selectCatalogSuggestion(suggestion: CatalogSearchSuggestion) {
+    rememberSearchHistory(searchQuery);
+    rememberSearchRecent({
+      key: suggestion.key,
+      sourceId,
+      target: suggestion.target,
+      title: suggestion.title,
+      subtitle: suggestion.subtitle,
+      meta: suggestion.meta,
+      entity: suggestion.entity,
+      media: suggestion.media,
+    });
+    navigateCatalogSuggestion(suggestion);
+  }
+
+  function selectCatalogRecent(item: CatalogRecentItem) {
+    rememberSearchRecent(item);
+    navigateCatalogSuggestion({
+      key: item.key,
+      target: item.target,
+      title: item.title,
+      subtitle: item.subtitle,
+      meta: item.meta,
+      score: 0,
+      entity: item.entity,
+      media: item.media,
+    });
   }
 
   function updateAutomaticUpdateCheck(next: boolean) {
@@ -1823,6 +2016,7 @@ function ExplorerApp() {
   useEffect(() => {
     if (!sourceId || view !== "assets" || !isMediaCategory) return;
     let cancelled = false;
+    mediaLoadedCountRef.current = 0;
     setMediaLoading(true);
     setMediaItems([]);
     setMediaTotal(0);
@@ -1840,7 +2034,14 @@ function ExplorerApp() {
       })
         .then((page) => {
           if (cancelled) return;
-          setMediaItems(page.items);
+          const nextItems = includeFocusedMedia(
+            page.items,
+            catalogListFocusRef.current,
+            mediaKind,
+            mediaSort,
+          );
+          setMediaItems(nextItems);
+          mediaLoadedCountRef.current = page.items.length;
           setMediaTotal(page.total);
           setMediaGroups(orderedMediaGroups(page.groups));
           setMediaKindCounts(page.kinds);
@@ -1849,11 +2050,11 @@ function ExplorerApp() {
             assetSelectionKey(sourceId, selectedCategoryId, mediaGroup),
           ) || "";
           setSelectedId((current) => {
-            const next = page.items.some((item) => item.asset.id === current)
+            const next = nextItems.some((item) => item.asset.id === current)
               ? current
-              : page.items.some((item) => item.asset.id === remembered)
+              : nextItems.some((item) => item.asset.id === remembered)
                 ? remembered
-                : page.items[0]?.asset.id || "";
+                : nextItems[0]?.asset.id || "";
             if (next) rememberAssetCard(next, selectedCategoryId, mediaGroup);
             return next;
           });
@@ -2203,14 +2404,14 @@ function ExplorerApp() {
   }
 
   async function loadMoreMedia() {
-    if (mediaLoading || mediaItems.length >= mediaTotal || !sourceId) return;
+    if (mediaLoading || mediaLoadedCountRef.current >= mediaTotal || !sourceId) return;
     setMediaLoading(true);
     try {
       const page = await api.media(sourceId, {
         kind: mediaKind,
         group: mediaGroup,
         eventType: mediaEventType,
-        offset: mediaItems.length,
+        offset: mediaLoadedCountRef.current,
         limit: 500,
         sort: mediaSort,
         language: gameLanguage,
@@ -2219,6 +2420,7 @@ function ExplorerApp() {
         const known = new Set(current.map((item) => item.asset.id));
         return [...current, ...page.items.filter((item) => !known.has(item.asset.id))];
       });
+      mediaLoadedCountRef.current += page.items.length;
       setMediaTotal(page.total);
       setMediaEventTypes(page.event_types || []);
     } catch (reason) {
@@ -2269,6 +2471,13 @@ function ExplorerApp() {
     sourceId,
     sourceRevision,
     previewAngle,
+    history: searchHistory,
+    recents: searchRecents,
+    onSelectRecent: selectCatalogRecent,
+    onRemoveHistory: removeSearchHistory,
+    onClearHistory: clearSearchHistory,
+    onRemoveRecent: removeSearchRecent,
+    onClearRecents: clearSearchRecents,
   };
 
   if (loading) {
@@ -2376,6 +2585,8 @@ function ExplorerApp() {
             setLayout={updateLayout}
             onLoadMore={loadMoreMedia}
             scrollKey={`media:${assetScrollKey}:${mediaGroup}:${mediaEventType}:${mediaGrouped}`}
+            catalogFocus={catalogListFocus}
+            onCatalogFocusComplete={finishCatalogListFocus}
           /> : <section className="asset-panel panel">
             <div className="asset-toolbar">
               <label className="search-box"><Icon name="search" /><input value={assetQuery} onChange={(event) => setAssetQuery(event.target.value)} placeholder="搜索名称或 CRC…" aria-label="搜索资产" />{assetQuery && <button onClick={() => setAssetQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</label>
@@ -2456,6 +2667,8 @@ function ExplorerApp() {
               setLayout={updateLayout}
               previewAngle={previewAngle}
               scrollKey={`entities:${sourceId}:${entityKind}:${entityUsage}:${entitySide}:${entitySort}:${entityBuildableFirst}:${layout}`}
+              catalogFocus={catalogListFocus}
+              onCatalogFocusComplete={finishCatalogListFocus}
             />
             <div className="workspace-resizer" role="separator" tabIndex={0} aria-label="调整详情区域大小" aria-orientation={detailPlacement === "bottom" ? "horizontal" : "vertical"} aria-valuenow={detailSize} onPointerDown={beginDetailResize} onKeyDown={resizeDetailWithKeyboard}><span /></div>
             <EntityDetailPanel
@@ -2686,12 +2899,21 @@ type CatalogSearchBarProps = {
   sourceId: string;
   sourceRevision: string;
   previewAngle: PreviewAngle;
+  history: string[];
+  recents: CatalogRecentItem[];
+  onSelectRecent: (item: CatalogRecentItem) => void;
+  onRemoveHistory: (value: string) => void;
+  onClearHistory: () => void;
+  onRemoveRecent: (key: string) => void;
+  onClearRecents: () => void;
 };
 
 function CatalogSearchBar(props: CatalogSearchBarProps) {
   const {
     query, setQuery, targets, setTargets, suggestions, suggestionsLoading,
     onSelectSuggestion, onSubmit, focusToken, sourceId, sourceRevision, previewAngle,
+    history, recents, onSelectRecent, onRemoveHistory, onClearHistory,
+    onRemoveRecent, onClearRecents,
   } = props;
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -2699,6 +2921,10 @@ function CatalogSearchBar(props: CatalogSearchBarProps) {
   const [suggestionIndex, setSuggestionIndex] = useState(-1);
   const suggestionsVisible = suggestionsOpen && Boolean(query.trim())
     && (suggestions.length > 0 || suggestionsLoading);
+  const historyVisible = suggestionsOpen && !query.trim();
+  const visibleRecents = recents.filter(
+    (item) => item.sourceId === sourceId && targets.includes(item.target),
+  );
   const searchesEntities = targets.includes("entities");
   const searchesMedia = targets.includes("media");
   const placeholder = searchesEntities && searchesMedia
@@ -2715,7 +2941,7 @@ function CatalogSearchBar(props: CatalogSearchBarProps) {
     if (focusToken <= 0) return;
     inputRef.current?.focus();
     inputRef.current?.select();
-    setSuggestionsOpen(Boolean(query.trim()));
+    setSuggestionsOpen(true);
   }, [focusToken]);
   useEffect(() => {
     const closeWhenOutside = (event: PointerEvent | FocusEvent) => {
@@ -2739,6 +2965,17 @@ function CatalogSearchBar(props: CatalogSearchBarProps) {
   function selectSuggestion(suggestion: CatalogSearchSuggestion) {
     onSelectSuggestion(suggestion);
     setSuggestionsOpen(false);
+  }
+
+  function selectRecent(item: CatalogRecentItem) {
+    onSelectRecent(item);
+    setSuggestionsOpen(false);
+  }
+
+  function selectHistory(value: string) {
+    setQuery(value);
+    setSuggestionsOpen(true);
+    inputRef.current?.focus();
   }
 
   function submitSearch() {
@@ -2781,10 +3018,10 @@ function CatalogSearchBar(props: CatalogSearchBarProps) {
         <label className={searchesEntities ? "active" : ""}><input type="checkbox" checked={searchesEntities} onChange={(event) => toggleTarget("entities", event.target.checked)} /><span>单位</span></label>
         <label className={searchesMedia ? "active" : ""}><input type="checkbox" checked={searchesMedia} onChange={(event) => toggleTarget("media", event.target.checked)} /><span>声音</span></label>
       </div>
-      <button type="button" className="catalog-search-clear" disabled={!query} onClick={() => { setQuery(""); setSuggestionsOpen(false); inputRef.current?.focus(); }} aria-label="清除搜索" title="清除搜索"><Icon name="close" size={15} /></button>
+      <button type="button" className="catalog-search-clear" disabled={!query} onClick={() => { setQuery(""); setSuggestionsOpen(true); inputRef.current?.focus(); }} aria-label="清除搜索" title="清除搜索"><Icon name="close" size={15} /></button>
     </div>
     <div className="entity-search-input">
-      <div className="search-box entity-search-box"><Icon name="search" /><input ref={inputRef} value={query} onFocus={() => setSuggestionsOpen(true)} onKeyDown={handleSearchKeyDown} onChange={(event) => { setQuery(event.target.value); setSuggestionsOpen(true); }} placeholder={placeholder} aria-label={searchLabel} role="combobox" aria-autocomplete="list" aria-expanded={suggestionsVisible} aria-controls="catalog-search-suggestions" aria-activedescendant={suggestionsVisible && suggestionIndex >= 0 && suggestions[suggestionIndex] ? `catalog-suggestion-${suggestions[suggestionIndex].key.replace(/[^a-z0-9_-]/gi, "-")}` : undefined} /></div>
+      <div className="search-box entity-search-box"><Icon name="search" /><input ref={inputRef} value={query} onFocus={() => setSuggestionsOpen(true)} onKeyDown={handleSearchKeyDown} onChange={(event) => { setQuery(event.target.value); setSuggestionsOpen(true); }} placeholder={placeholder} aria-label={searchLabel} role="combobox" aria-autocomplete="list" aria-expanded={suggestionsVisible || historyVisible} aria-controls={suggestionsVisible ? "catalog-search-suggestions" : historyVisible ? "catalog-search-history" : undefined} aria-activedescendant={suggestionsVisible && suggestionIndex >= 0 && suggestions[suggestionIndex] ? `catalog-suggestion-${suggestions[suggestionIndex].key.replace(/[^a-z0-9_-]/gi, "-")}` : undefined} /></div>
       {suggestionsVisible && <div className="entity-search-suggestions" id="catalog-search-suggestions" role="listbox" aria-label="搜索建议" onMouseDown={(event) => event.preventDefault()}>
         {suggestions.map((suggestion, index) => {
           const mediaVisualKind = suggestion.media?.kind === "voice" ? "voice" : "sound";
@@ -2797,6 +3034,32 @@ function CatalogSearchBar(props: CatalogSearchBarProps) {
           </button>;
         })}
         {suggestionsLoading && suggestions.length === 0 && <div className="catalog-search-loading"><span />正在检索单位和声音…</div>}
+      </div>}
+      {historyVisible && <div className="catalog-search-history" id="catalog-search-history" onMouseDown={(event) => event.preventDefault()}>
+        {visibleRecents.length > 0 && <section>
+          <header><strong>最近访问</strong><button type="button" onClick={onClearRecents}>清空</button></header>
+          <div className="catalog-history-list">{visibleRecents.map((item) => {
+            const mediaVisualKind = item.media?.kind === "voice" ? "voice" : "sound";
+            return <div className={`catalog-history-item catalog-history-${item.target === "entities" ? "entity" : mediaVisualKind}`} key={item.key}>
+              <button type="button" className="catalog-history-target" onClick={() => selectRecent(item)}>
+                {item.entity
+                  ? <EntityCardPreview entity={item.entity} sourceId={sourceId} sourceRevision={sourceRevision} previewAngle={previewAngle} compact />
+                  : <span className={`catalog-suggestion-icon catalog-suggestion-icon-${mediaVisualKind}`}><Icon name={mediaVisualKind} size={18} /></span>}
+                <span className="catalog-suggestion-copy"><strong>{item.title}</strong><small>{item.subtitle}</small></span>
+                <em>{item.meta}</em>
+              </button>
+              <button type="button" className="catalog-history-remove" onClick={() => onRemoveRecent(item.key)} aria-label={`删除最近访问：${item.title}`} title="删除"><Icon name="close" size={14} /></button>
+            </div>;
+          })}</div>
+        </section>}
+        {history.length > 0 && <section>
+          <header><strong>搜索历史</strong><button type="button" onClick={onClearHistory}>清空</button></header>
+          <div className="catalog-history-list catalog-query-history">{history.map((value) => <div className="catalog-history-item" key={value}>
+            <button type="button" className="catalog-history-target" onClick={() => selectHistory(value)}><span className="catalog-history-query-icon"><Icon name="search" size={16} /></span><strong>{value}</strong></button>
+            <button type="button" className="catalog-history-remove" onClick={() => onRemoveHistory(value)} aria-label={`删除搜索历史：${value}`} title="删除"><Icon name="close" size={14} /></button>
+          </div>)}</div>
+        </section>}
+        {visibleRecents.length === 0 && history.length === 0 && <div className="catalog-history-empty">暂无搜索记录</div>}
       </div>}
     </div>
     <button type="button" className="catalog-search-submit" disabled={!query.trim()} onClick={submitSearch}><Icon name="search" size={15} /><span>搜索</span></button>
@@ -2972,7 +3235,7 @@ function SearchResultsPanel({
   </section>;
 }
 
-function MediaListPanel({ items, total, loading, search, groups, selectedGroup, setSelectedGroup, eventTypes, selectedEventType, setSelectedEventType, grouped, setGrouped, headerAlignment, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore, scrollKey }: {
+function MediaListPanel({ items, total, loading, search, groups, selectedGroup, setSelectedGroup, eventTypes, selectedEventType, setSelectedEventType, grouped, setGrouped, headerAlignment, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore, scrollKey, catalogFocus, onCatalogFocusComplete }: {
   items: MediaItem[];
   total: number;
   loading: boolean;
@@ -2995,6 +3258,8 @@ function MediaListPanel({ items, total, loading, search, groups, selectedGroup, 
   setLayout: (layout: LayoutMode) => void;
   onLoadMore: () => Promise<void>;
   scrollKey: string;
+  catalogFocus: CatalogListFocus | null;
+  onCatalogFocusComplete: (sequence: number) => void;
 }) {
   const listScroll = useRememberedScroll(scrollKey, items.length);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
@@ -3018,6 +3283,42 @@ function MediaListPanel({ items, total, loading, search, groups, selectedGroup, 
     });
   }, [sections]);
 
+  useEffect(() => {
+    if (
+      catalogFocus?.target !== "media"
+      || !items.some((item) => item.asset.id === catalogFocus.itemId)
+    ) return;
+    const section = grouped
+      ? sections.find((item) => item.items.some(
+        (media) => media.asset.id === catalogFocus.itemId,
+      ))
+      : undefined;
+    if (section && collapsedSections.has(section.key)) {
+      setCollapsedSections((current) => {
+        const next = new Set(current);
+        next.delete(section.key);
+        return next;
+      });
+      return;
+    }
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        const target = listScroll.ref.current?.querySelector<HTMLButtonElement>(
+          `[data-catalog-item-id="${CSS.escape(catalogFocus.itemId)}"]`,
+        );
+        if (!target) return;
+        target.scrollIntoView({ block: "center", inline: "center" });
+        target.focus({ preventScroll: true });
+        onCatalogFocusComplete(catalogFocus.sequence);
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
+  }, [catalogFocus, collapsedSections, grouped, items, onCatalogFocusComplete, sections]);
+
   function toggleSection(key: string) {
     setCollapsedSections((current) => {
       const next = new Set(current);
@@ -3036,14 +3337,14 @@ function MediaListPanel({ items, total, loading, search, groups, selectedGroup, 
   function renderMediaItem(item: MediaItem) {
     const textCount = uniqueAudioTexts(item.texts).length;
     if (layout === "list") {
-      return <button key={item.asset.id} className={`asset-row media-row ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onPointerEnter={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onFocus={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onClick={() => onSelect(item.asset.id)}>
+      return <button key={item.asset.id} data-catalog-item-id={item.asset.id} className={`asset-row media-row ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onPointerEnter={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onFocus={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onClick={() => onSelect(item.asset.id)}>
         <span className="file-icon format-audio"><Icon name={playingId === item.asset.id ? "pause" : "play"} /></span>
         <span className="asset-main"><strong>{mediaPrimaryText(item)}</strong>{(mediaSecondaryText(item) || textCount > 1) && <small>{mediaSecondaryText(item)}{textCount > 1 ? `${mediaSecondaryText(item) ? " · " : ""}${textCount} 条文本` : ""}</small>}</span>
         <span className="media-links">{item.entities.slice(0, 2).map((entity) => entity.display_name).join(" · ") || item.slots.slice(0, 2).map(mediaSlotLabel).join(" · ") || "未关联"}</span>
         <Icon name="chevron" size={15} />
       </button>;
     }
-    return <button key={item.asset.id} className={`asset-card media-card ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onPointerEnter={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onFocus={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onClick={() => onSelect(item.asset.id)}>
+    return <button key={item.asset.id} data-catalog-item-id={item.asset.id} className={`asset-card media-card ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onPointerEnter={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onFocus={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onClick={() => onSelect(item.asset.id)}>
       <span className="asset-card-copy"><strong title={mediaPrimaryText(item)}>{mediaPrimaryText(item)}</strong>{mediaSecondaryText(item) && <small title={mediaSecondaryText(item)}>{mediaSecondaryText(item)}</small>}<em>{item.slots.slice(0, 2).map(mediaSlotLabel).join(" · ") || "未分类"}</em></span>
     </button>;
   }
@@ -3186,7 +3487,7 @@ function mediaSuggestionScore(item: MediaItem, query: string) {
   );
 }
 
-function EntityListPanel({ entities, total, loading, search, sort, setSort, buildableFirst, setBuildableFirst, selectedId, setSelectedId, sourceId, sourceRevision, sides, selectedSide, setSelectedSide, layout, setLayout, previewAngle, scrollKey }: {
+function EntityListPanel({ entities, total, loading, search, sort, setSort, buildableFirst, setBuildableFirst, selectedId, setSelectedId, sourceId, sourceRevision, sides, selectedSide, setSelectedSide, layout, setLayout, previewAngle, scrollKey, catalogFocus, onCatalogFocusComplete }: {
   entities: EntitySummary[];
   total: number;
   loading: boolean;
@@ -3206,8 +3507,32 @@ function EntityListPanel({ entities, total, loading, search, sort, setSort, buil
   setLayout: (layout: LayoutMode) => void;
   previewAngle: PreviewAngle;
   scrollKey: string;
+  catalogFocus: CatalogListFocus | null;
+  onCatalogFocusComplete: (sequence: number) => void;
 }) {
   const listScroll = useRememberedScroll(scrollKey, entities.length);
+  useEffect(() => {
+    if (
+      catalogFocus?.target !== "entities"
+      || !entities.some((entity) => entity.id === catalogFocus.itemId)
+    ) return;
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        const target = listScroll.ref.current?.querySelector<HTMLButtonElement>(
+          `[data-catalog-item-id="${CSS.escape(catalogFocus.itemId)}"]`,
+        );
+        if (!target) return;
+        target.scrollIntoView({ block: "center", inline: "center" });
+        target.focus({ preventScroll: true });
+        onCatalogFocusComplete(catalogFocus.sequence);
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
+  }, [catalogFocus, entities, layout, onCatalogFocusComplete]);
   return (
     <section className="asset-panel entity-panel panel">
       <div className="asset-toolbar">
@@ -3235,7 +3560,7 @@ function EntityListPanel({ entities, total, loading, search, sort, setSort, buil
       </div>
       <div ref={listScroll.ref} onScroll={listScroll.remember} className={`asset-list ${layout === "grid" ? "asset-grid entity-grid" : "list-columns"}`} tabIndex={0} aria-label="单位列表">
         {layout === "list" ? entities.map((entity) => (
-          <button key={entity.id} className={`asset-row entity-row ${selectedId === entity.id ? "selected" : ""}`} onClick={() => setSelectedId(entity.id)}>
+          <button key={entity.id} data-catalog-item-id={entity.id} className={`asset-row entity-row ${selectedId === entity.id ? "selected" : ""}`} onClick={() => setSelectedId(entity.id)}>
             <span className={`file-icon entity-icon ${entity.renderable ? "ready" : "missing"}`}><Icon name="unit" /></span>
             <span className="asset-main"><strong>{entity.display_name}</strong><small>{entity.id}{entity.body_status !== "not_defined" ? ` → ${entity.image}` : ""}{entity.internal_name !== entity.display_name ? ` · ${entity.internal_name}` : ""}</small></span>
             <span className="entity-kind">{entityUsageLabel(entity.kind, entity.usage)}</span>
@@ -3254,7 +3579,7 @@ function EntityListPanel({ entities, total, loading, search, sort, setSort, buil
 
 function EntityGridCard({ entity, sourceId, sourceRevision, previewAngle, selected, onSelect }: { entity: EntitySummary; sourceId: string; sourceRevision: string; previewAngle: PreviewAngle; selected: boolean; onSelect: (id: string) => void }) {
   return (
-    <button className={`asset-card entity-card ${selected ? "selected" : ""}`} onClick={() => onSelect(entity.id)}>
+    <button data-catalog-item-id={entity.id} className={`asset-card entity-card ${selected ? "selected" : ""}`} onClick={() => onSelect(entity.id)}>
       <EntityCardPreview entity={entity} sourceId={sourceId} sourceRevision={sourceRevision} previewAngle={previewAngle} />
       <span className="asset-card-copy"><strong title={entity.display_name}>{entity.display_name}</strong></span>
     </button>
