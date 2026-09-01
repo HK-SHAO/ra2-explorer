@@ -516,7 +516,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
             visible_width / thumbnail.width,
             visible_height / thumbnail.height,
         )
-        assert 0.60 <= visible_ratio <= 0.68
+        assert 0.68 <= visible_ratio <= 0.75
     infantry_compact_thumbnail = client.get(
         f"/api/entities/{source['id']}/DemoInfantry/preview.png",
         params={"frame": 2, "thumbnail": "true", "compact": "true"},

@@ -428,7 +428,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if body is None:
             raise HTTPException(status_code=409, detail="该单位没有可渲染的主体资产")
         player_color = _validated_player_color(player_color)
-        renderer_version = "shp-layers-v7" if body["format"] == "shp" else "vpl-body-v3"
+        renderer_version = "shp-layers-v8" if body["format"] == "shp" else "vpl-body-v3"
         artifact_path = _source_artifact_path(
             services,
             "previews",
@@ -552,7 +552,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             image = _crop_transparent_preview(
                 image,
                 padding_ratio=(
-                    0.08 if compact else 0.28 if semantic_entity.kind == "infantry" else 0.08
+                    0.08 if compact else 0.20 if semantic_entity.kind == "infantry" else 0.08
                 ),
                 focus_bounds=None if compact else focus_bounds,
             )
