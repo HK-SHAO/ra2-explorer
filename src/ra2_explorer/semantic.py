@@ -39,7 +39,7 @@ from ra2_explorer.storage import Database
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
 ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
 UNAFFILIATED_SIDE = "unaffiliated"
-SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v10",)
+SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v11",)
 _PLANNING_SIDE_IDS = ("GDI", "Nod", "ThirdSide")
 _TYPE_SECTIONS = {
     "vehicle": "VehicleTypes",
@@ -409,6 +409,11 @@ class MediaAssociation:
     def as_dict(
         self, language: GameLanguage = DEFAULT_GAME_LANGUAGE
     ) -> dict[str, object]:
+        samples = (
+            tuple(_sound_description_sample(sample) for sample in self.samples)
+            if self.kind == "sound"
+            else self.samples
+        )
         return {
             "kind": self.kind,
             "slot": self.slot,
@@ -420,7 +425,7 @@ class MediaAssociation:
             "selected_sample": self.selected_sample,
             "selection_value": self.selection_value,
             "rule_field": self.rule_field,
-            "samples": [sample.as_dict(language) for sample in self.samples],
+            "samples": [sample.as_dict(language) for sample in samples],
         }
 
 
@@ -1011,6 +1016,11 @@ class SemanticLibrary:
             for association in entity.media:
                 for sample in association.samples:
                     if sample.asset and sample.asset["id"] == asset_id:
+                        presented = (
+                            _sound_description_sample(sample)
+                            if association.kind == "sound"
+                            else sample
+                        )
                         append(
                             {
                                 "scope": "entity",
@@ -1018,10 +1028,10 @@ class SemanticLibrary:
                                 "slot": association.slot,
                                 "event": association.event,
                             "entity": entity.summary(language),
-                            "text": localize_game_text(sample.text, language),
-                            "original_text": sample.original_text,
+                            "text": localize_game_text(presented.text, language),
+                            "original_text": presented.original_text,
                             "localized_text": localize_game_text(
-                                sample.localized_text, language
+                                presented.localized_text, language
                             ),
                             },
                             (
@@ -1036,6 +1046,11 @@ class SemanticLibrary:
         for association in catalog.eva_events:
             for sample in association.samples:
                 if sample.asset and sample.asset["id"] == asset_id:
+                    presented = (
+                        _sound_description_sample(sample)
+                        if association.kind == "sound"
+                        else sample
+                    )
                     append(
                         {
                             "scope": "event",
@@ -1043,10 +1058,10 @@ class SemanticLibrary:
                             "slot": association.slot,
                             "event": association.event,
                             "entity": None,
-                            "text": localize_game_text(sample.text, language),
-                            "original_text": sample.original_text,
+                            "text": localize_game_text(presented.text, language),
+                            "original_text": presented.original_text,
                             "localized_text": localize_game_text(
-                                sample.localized_text, language
+                                presented.localized_text, language
                             ),
                         },
                         (
@@ -1061,6 +1076,11 @@ class SemanticLibrary:
             for sample in samples:
                 if sample.asset and sample.asset["id"] == asset_id:
                     media_kind = _media_kind_for_asset(catalog.media_items, sample.asset)
+                    presented = (
+                        _sound_description_sample(sample)
+                        if media_kind == "sound"
+                        else sample
+                    )
                     append(
                         {
                             "scope": "event",
@@ -1068,10 +1088,10 @@ class SemanticLibrary:
                             "slot": "sound_event",
                             "event": event,
                             "entity": None,
-                            "text": localize_game_text(sample.text, language),
-                            "original_text": sample.original_text,
+                            "text": localize_game_text(presented.text, language),
+                            "original_text": presented.original_text,
                             "localized_text": localize_game_text(
-                                sample.localized_text, language
+                                presented.localized_text, language
                             ),
                         },
                         (media_kind, event.casefold(), sample.name.casefold()),
@@ -1727,7 +1747,7 @@ _VOICE_MEDIA_GROUP_SLOTS = (
     ),
 )
 _SOUND_MEDIA_GROUP_SLOTS = (
-    ("combat_sound", frozenset({"attack", "special_attack"})),
+    ("weapon_sound", frozenset({"attack", "special_attack"})),
     ("death_sound", frozenset({"die"})),
     (
         "movement_sound",
@@ -1807,8 +1827,7 @@ def _sound_description_sample(sample: MediaSample) -> MediaSample:
     def cleaned(value: str | None) -> str | None:
         if value is None:
             return None
-        stripped = value.strip()
-        return stripped[1:].strip() if stripped.startswith("*") else stripped
+        return value.strip().strip("*").strip()
 
     return replace(
         sample,
@@ -1819,7 +1838,10 @@ def _sound_description_sample(sample: MediaSample) -> MediaSample:
 
 
 def _standalone_sound_group(event: str, sample: MediaSample) -> str:
-    folded = _normalized_media_event(f"{event} {sample.name}")
+    # SOUND/SOUNDMD section names are the authoritative event identity. Sample
+    # names are often abbreviated and contain accidental substrings such as
+    # ``amb``; use them only for truly orphaned samples without an event name.
+    folded = _normalized_media_event(event) or _normalized_media_event(sample.name)
     if any(
         token in folded
         for token in (
@@ -1847,7 +1869,7 @@ def _standalone_sound_group(event: str, sample: MediaSample) -> str:
             "upgradeveteran",
         )
     ):
-        return "pickup_sound"
+        return "notification_sound"
     if any(
         token in folded
         for token in (
@@ -1855,6 +1877,7 @@ def _standalone_sound_group(event: str, sample: MediaSample) -> str:
             "geneticmutator",
             "ironcurtain",
             "nuke",
+            "chronosphere",
             "psychicdominator",
             "weather",
         )
@@ -1888,6 +1911,22 @@ def _standalone_sound_group(event: str, sample: MediaSample) -> str:
             "mindcleared",
             "flare",
             "crazyivanbombtick",
+            "bonus",
+            "cratemoney",
+            "creditdown",
+            "creditup",
+            "cameraswitch",
+            "cheer",
+            "gameclosed",
+            "genericbeep",
+            "buildinggarrisoned",
+            "bridgerepaired",
+            "buildingrepaired",
+            "nocando",
+            "playerjoined",
+            "newgame",
+            "radaroff",
+            "radaron",
         )
     ):
         return "notification_sound"
@@ -1896,7 +1935,7 @@ def _standalone_sound_group(event: str, sample: MediaSample) -> str:
     if "tankcrush" in folded:
         return "impact_sound"
     if "fear" in folded:
-        return "combat_sound"
+        return "action_sound"
     if any(token in folded for token in ("yurimindcontrol", "kirovelitebomb")):
         return "weapon_sound"
     if any(
@@ -1917,37 +1956,32 @@ def _standalone_sound_group(event: str, sample: MediaSample) -> str:
         )
     ):
         return "action_sound"
-    if any(token in folded for token in ("ambient", "amb", "bird", "wind", "water")):
-        return "ambient_sound"
+    if any(token in folded for token in ("expl", "detonat", "blast", "destruct")):
+        return "destruction_sound"
+    if any(
+        token in folded
+        for token in ("impact", "crash", "splash", "sinking", "damaged", "collision")
+    ):
+        return "impact_sound"
     if any(
         token in folded
         for token in ("underattack", "warning", "alarm", "beacon", "detected", "ready")
     ):
         return "notification_sound"
-    if _is_descriptive_sound_text(sample) or any(
+    if any(
         token in folded
         for token in (
             "menu",
-            "credit",
-            "camera",
             "commandbar",
             "options",
             "message",
+            "movie",
             "planningmode",
-            "radar",
             "score",
             "textbleep",
-            "gameclosed",
-            "playerjoined",
-            "newgame",
-            "cratemoney",
         )
     ):
         return "interface_sound"
-    if any(token in folded for token in ("expl", "detonat", "blast", "destruct")):
-        return "destruction_sound"
-    if any(token in folded for token in ("impact", "crash", "splash", "sinking")):
-        return "impact_sound"
     if any(token in folded for token in ("attack", "fire", "weapon", "shot")):
         return "weapon_sound"
     if any(
@@ -1970,9 +2004,16 @@ def _standalone_sound_group(event: str, sample: MediaSample) -> str:
             "chrono",
             "transport",
             "harvest",
+            "enter",
+            "leave",
+            "emerge",
+            "merge",
+            "select",
         )
     ):
         return "action_sound"
+    if any(token in folded for token in ("ambient", "amb", "bird", "wind", "water")):
+        return "ambient_sound"
     return "other_sound"
 
 
@@ -2224,6 +2265,8 @@ def _build_media_items(
         slot: str | tuple[str, ...],
         entity: GameEntity | None = None,
     ) -> None:
+        if kind == "sound":
+            sample = _sound_description_sample(sample)
         state = state_for(sample)
         if state is None:
             return
@@ -2278,7 +2321,7 @@ def _build_media_items(
                     )
                 else:
                     group = (
-                        "combat_sound"
+                        "weapon_sound"
                         if association.slot in combat_slots or association.source != entity.id
                         else "unit_sound"
                     )
@@ -2433,7 +2476,7 @@ def _build_media_items(
         if explosion_match:
             event = f"Explosion{explosion_match.group(1)}"
             state["sound"] = True
-            state["groups"].add("combat_sound")
+            state["groups"].add("destruction_sound")
             state["events"].add(event)
             state["slots"].add("explosion")
             continue

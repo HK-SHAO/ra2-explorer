@@ -816,17 +816,26 @@ def test_multiplayer_taunts_are_separated_from_team_communications() -> None:
 
 
 def test_standalone_sound_events_use_specific_retail_categories() -> None:
-    def group(event: str) -> str:
-        return _standalone_sound_group(event, MediaSample(event, None, None))
+    def group(event: str, sample_name: str | None = None) -> str:
+        return _standalone_sound_group(
+            event, MediaSample(sample_name or event, None, None)
+        )
 
     assert group("OreRefineryProcessing") == "structure_sound"
     assert group("NukeLaunch") == "superweapon_sound"
-    assert group("CratePromoted") == "pickup_sound"
+    assert group("ChronosphereOpen") == "superweapon_sound"
+    assert group("CratePromoted") == "notification_sound"
+    assert group("CrateMoney") == "notification_sound"
     assert group("ArnoldDie") == "death_sound"
     assert group("HornetTakeoff") == "movement_sound"
     assert group("KirovEliteBomb") == "weapon_sound"
     assert group("AirRaidSiren") == "notification_sound"
-    assert group("ArnoldFear") == "combat_sound"
+    assert group("ArnoldFear") == "action_sound"
+    assert group("CommandBar") == "interface_sound"
+    assert group("BuildingMetalDamaged", "bmetdamb") == "impact_sound"
+    assert group("ExplosionWaterLarge") == "destruction_sound"
+    assert group("TanyaEntersWater") == "action_sound"
+    assert group("NavalUnitEmerge") == "action_sound"
 
 
 def test_mission_audio_exposes_mission_and_event_facets() -> None:
@@ -940,16 +949,30 @@ def test_standalone_sound_events_receive_semantic_subcategories() -> None:
     dying = asset("vintdia.wav")
     interface = asset("ucommand.wav")
     weapon = asset("laser.wav")
+    dog = asset("idogatta.wav")
+    placement = asset("uplace.wav")
+    bonus = asset("ubonus.wav")
     items = {
         item["asset"]["display_name"]: item
         for item in _build_media_items(
-            [selected, dying, interface, weapon],
+            [selected, dying, interface, weapon, dog, placement, bonus],
             (),
             {
                 "ArnoldSelect": (MediaSample("iarnsea", "Your orders", selected),),
                 "IntruderVoiceDie": (MediaSample("vintdia", "Bail out", dying),),
                 "CommandBar": (MediaSample("ucommand", "*Command units", interface),),
                 "LaserFire": (MediaSample("laser", None, weapon),),
+                "DogAttack": (
+                    MediaSample("idogatta", "*Bite*", dog, "Bite*", None),
+                ),
+                "PlaceBuilding": (
+                    MediaSample(
+                        "uplace", "*Place building", placement, "Place building", None
+                    ),
+                ),
+                "CrateMoney": (
+                    MediaSample("ubonus", "*Money crate", bonus, "Money crate", None),
+                ),
             },
             (),
             {},
@@ -963,6 +986,16 @@ def test_standalone_sound_events_receive_semantic_subcategories() -> None:
     assert items["ucommand.wav"]["groups"] == ["interface_sound"]
     assert items["ucommand.wav"]["texts"] == ["Command units"]
     assert items["laser.wav"]["groups"] == ["weapon_sound"]
+    assert items["idogatta.wav"]["groups"] == ["weapon_sound"]
+    assert items["idogatta.wav"]["texts"] == ["Bite"]
+    assert items["uplace.wav"]["groups"] == ["action_sound"]
+    assert items["uplace.wav"]["texts"] == ["Place building"]
+    assert items["ubonus.wav"]["groups"] == ["notification_sound"]
+    assert items["ubonus.wav"]["texts"] == ["Money crate"]
+    assert all(
+        "combat_sound" not in item["groups"] and "pickup_sound" not in item["groups"]
+        for item in items.values()
+    )
 
 
 def test_shared_media_entity_refs_preserve_affiliation() -> None:
