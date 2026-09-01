@@ -725,8 +725,8 @@ function vxlFacingForPreviewAngle(angle: PreviewAngle) {
   return (1 - angle + 8) % 8;
 }
 
-function entityFacingForPreviewAngle(bodyFormat: string | null, angle: PreviewAngle) {
-  return bodyFormat === "vxl"
+function entityFacingForPreviewAngle(facingFormat: string | null, angle: PreviewAngle) {
+  return facingFormat === "vxl"
     ? vxlFacingForPreviewAngle(angle)
     : shpFacingForPreviewAngle(angle);
 }
@@ -3730,12 +3730,12 @@ function entityAffiliationSide(entity: EntitySummary) {
 }
 
 function entityCardPreviewUrl(entity: EntitySummary, sourceId: string, previewAngle: PreviewAngle, sourceRevision: string, compact = false) {
-  const staticFacing = entity.body_format === "shp" && entity.kind === "infantry"
-    ? entityFacingForPreviewAngle(entity.body_format, previewAngle)
+  const staticFacing = entity.body_format !== "vxl" && entity.facing_format
+    ? entityFacingForPreviewAngle(entity.facing_format, previewAngle)
     : 0;
   const facing = isStaticSnapshot
     ? staticFacing
-    : entityFacingForPreviewAngle(entity.body_format, previewAngle);
+    : entityFacingForPreviewAngle(entity.facing_format, previewAngle);
   return api.entityPreviewUrl(sourceId, entity.id, {
     facing,
     scale: 2,
@@ -3800,8 +3800,8 @@ function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle, com
   const previewRef = useRef<HTMLSpanElement>(null);
   const affiliationSide = entityAffiliationSide(entity);
   const atlas = isStaticSnapshot ? entity.thumbnail_atlas : undefined;
-  const requestedFacing = entity.body_format === "shp" && entity.kind === "infantry"
-    ? entityFacingForPreviewAngle(entity.body_format, previewAngle)
+  const requestedFacing = entity.facing_format
+    ? entityFacingForPreviewAngle(entity.facing_format, previewAngle)
     : 0;
   const atlasFacing = atlas
     ? Math.min(Math.max(0, requestedFacing), Math.max(0, atlas.facing_count - 1))
@@ -4651,7 +4651,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   defaultPreviewAngleRef.current = defaultPreviewAngle;
   const facing = shpFacingForPreviewAngle(previewAngle);
   const renderFacing = entity?.preview.supports_facing
-    ? entityFacingForPreviewAngle(entity.preview.format, previewAngle)
+    ? entityFacingForPreviewAngle(entity.preview.facing_format, previewAngle)
     : 0;
   const [playerColor, setPlayerColor] = useState("");
   const [playing, setPlaying] = useState(false);

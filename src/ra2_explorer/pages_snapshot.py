@@ -40,7 +40,7 @@ from ra2_explorer.config import Settings
 from ra2_explorer.errors import Ra2ExplorerError
 
 PAGES_SNAPSHOT_SCHEMA_VERSION = 2
-PAGES_RENDER_REVISION = 6
+PAGES_RENDER_REVISION = 7
 PAGES_ASSET_BUNDLE_REVISION = 4
 _SAFE_FILENAME = re.compile(r"^[A-Za-z0-9_.~$-]+$")
 _AUDIO_FORMATS = {"aud", "bag_audio", "wav"}
@@ -708,11 +708,7 @@ def _export_entity_thumbnail_atlases(
         for item in items:
             preview = item.get("preview") or {}
             facing_counts.append(
-                8
-                if kind == "infantry"
-                and preview.get("supports_facing")
-                and preview.get("format") != "vxl"
-                else 1
+                8 if preview.get("supports_facing") and preview.get("format") != "vxl" else 1
             )
         sheet_facing_count = max(facing_counts, default=1)
         sheet_pattern = (

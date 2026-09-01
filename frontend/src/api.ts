@@ -208,6 +208,7 @@ export interface EntitySummary {
   body_status: "available" | "not_defined" | "missing";
   component_count: number;
   body_format: string | null;
+  facing_format: "vxl" | "shp" | null;
   media_kinds: Array<"voice" | "sound" | "animation">;
   media_count: number;
   cost: string | null;
@@ -272,6 +273,7 @@ export interface EntityDependency {
 
 export interface EntityPreview {
   format: "vxl" | "shp" | null;
+  facing_format: "vxl" | "shp" | null;
   frame_count: number;
   facing_count: number;
   supports_facing: boolean;

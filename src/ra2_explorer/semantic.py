@@ -41,7 +41,7 @@ from ra2_explorer.storage import Database
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
 ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
 UNAFFILIATED_SIDE = "unaffiliated"
-SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v16",)
+SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v17",)
 _PLANNING_SIDE_IDS = ("GDI", "Nod", "ThirdSide")
 _TYPE_SECTIONS = {
     "vehicle": "VehicleTypes",
@@ -484,6 +484,16 @@ class GameEntity:
 
     def summary(self, language: GameLanguage = DEFAULT_GAME_LANGUAGE) -> dict[str, object]:
         body = self.component("body")
+        turret = self.component("turret")
+        body_is_voxel = bool(body and body["format"] == "vxl")
+        turret_is_voxel = bool(turret and turret.get("format") == "vxl")
+        facing_format = (
+            "vxl"
+            if body_is_voxel or turret_is_voxel
+            else "shp"
+            if body
+            else None
+        )
         display_name = localize_game_text(self.display_name, language) or self.display_name
         affiliation = None
         if self.affiliation is not None:
@@ -516,6 +526,7 @@ class GameEntity:
             ),
             "component_count": sum(component.asset is not None for component in self.components),
             "body_format": body["format"] if body else None,
+            "facing_format": facing_format,
             "media_kinds": sorted({association.kind for association in self.media}),
             "media_count": len(self.media),
             "cost": self.rules.get("cost"),
@@ -1416,7 +1427,7 @@ class SemanticLibrary:
                 "metadata",
                 source_id=source["id"],
                 revision=source.get("scanned_at") or source["created_at"],
-                identity=(entity.id, "entity-preview-info-v3"),
+                identity=(entity.id, "entity-preview-info-v4"),
                 extension="json",
             )
             if self.reader.derived is not None
@@ -1428,6 +1439,7 @@ class SemanticLibrary:
         body = entity.component("body")
         voxel_turret = entity.component("turret")
         has_voxel_turret = bool(voxel_turret and voxel_turret.get("format") == "vxl")
+        body_is_voxel = bool(body and body["format"] == "vxl")
         sequence_facings = any(
             sample.animation and sample.animation.facing_step > 0
             for association in entity.media
@@ -1441,6 +1453,13 @@ class SemanticLibrary:
         )
         base: dict[str, object] = {
             "format": str(body["format"]) if body else None,
+            "facing_format": (
+                "vxl"
+                if body_is_voxel or has_voxel_turret
+                else "shp"
+                if body
+                else None
+            ),
             "frame_count": 0 if body is None else 1,
             "facing_count": facing_count,
             "supports_facing": bool(

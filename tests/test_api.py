@@ -1379,6 +1379,28 @@ def test_building_components_include_bib_and_voxel_turret_parts() -> None:
     assert by_role["turret"]["display_name"] == "GTGCANTUR.VXL"
     assert by_role["barrel"]["display_name"] == "GTGCANBARL.VXL"
 
+    entity = GameEntity(
+        id="GTGCAN",
+        kind="building",
+        usage="buildable",
+        display_name="Grand Cannon",
+        internal_name="Grand Cannon",
+        ui_name=None,
+        ui_name_resolved=True,
+        image="GAGCAN",
+        voxel=False,
+        countries=(),
+        sides=(),
+        affiliation=None,
+        rules={},
+        art={},
+        components=components,
+        dependencies=(),
+        media=(),
+    )
+    assert entity.summary()["body_format"] == "shp"
+    assert entity.summary()["facing_format"] == "vxl"
+
 
 def test_anchored_building_turret_expands_canvas_without_clipping() -> None:
     body = Image.new("RGBA", (40, 30), (0, 0, 0, 0))

@@ -385,6 +385,7 @@ def test_pages_exports_one_thumbnail_atlas_request_per_entity_kind(
     for entity_id, kind, supports_facing in (
         ("TANK", "vehicle", True),
         ("SOLDIER", "infantry", True),
+        ("CANNON", "building", True),
     ):
         facing_count = 8 if supports_facing else 1
         for facing in range(facing_count):
@@ -418,17 +419,19 @@ def test_pages_exports_one_thumbnail_atlas_request_per_entity_kind(
 
     metadata = _export_entity_thumbnail_atlases(tmp_path, entities)
 
-    assert metadata["TANK"]["facing_count"] == 1
+    assert metadata["TANK"]["facing_count"] == 8
     assert metadata["SOLDIER"]["facing_count"] == 8
+    assert metadata["CANNON"]["facing_count"] == 8
     assert metadata["SOLDIER"]["content_bounds"] == [
         {"x": 10, "y": 22, "width": 124, "height": 83}
     ] * 8
     assert metadata["SOLDIER"]["path"] == (
-        "previews/entity-atlases/infantry/{facing}-r6.webp"
+        "previews/entity-atlases/infantry/{facing}-r7.webp"
     )
-    assert (tmp_path / "previews/entity-atlases/vehicle/0-r6.webp").is_file()
-    assert (tmp_path / "previews/entity-atlases/infantry/7-r6.webp").is_file()
-    with Image.open(tmp_path / "previews/entity-atlases/infantry/0-r6.webp") as atlas:
+    assert (tmp_path / "previews/entity-atlases/vehicle/7-r7.webp").is_file()
+    assert (tmp_path / "previews/entity-atlases/building/7-r7.webp").is_file()
+    assert (tmp_path / "previews/entity-atlases/infantry/7-r7.webp").is_file()
+    with Image.open(tmp_path / "previews/entity-atlases/infantry/0-r7.webp") as atlas:
         assert atlas.size == (144, 135)
 
 
