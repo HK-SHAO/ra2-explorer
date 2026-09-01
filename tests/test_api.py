@@ -28,6 +28,7 @@ from ra2_explorer.semantic import (
     _entity_animation_role,
     _entity_usage,
     _shp_unit_body_playbacks,
+    _standalone_sound_group,
 )
 from tests.ra2_fixtures import (
     FIXTURE_NAMES,
@@ -812,6 +813,20 @@ def test_multiplayer_taunts_are_separated_from_team_communications() -> None:
     assert items["tauli03.wav"]["slots"] == ["multiplayer_help"]
     assert items["tauli06.wav"]["groups"] == ["taunt_voice"]
     assert items["tauli06.wav"]["slots"] == ["taunt_laugh"]
+
+
+def test_standalone_sound_events_use_specific_retail_categories() -> None:
+    def group(event: str) -> str:
+        return _standalone_sound_group(event, MediaSample(event, None, None))
+
+    assert group("OreRefineryProcessing") == "structure_sound"
+    assert group("NukeLaunch") == "superweapon_sound"
+    assert group("CratePromoted") == "pickup_sound"
+    assert group("ArnoldDie") == "death_sound"
+    assert group("HornetTakeoff") == "movement_sound"
+    assert group("KirovEliteBomb") == "weapon_sound"
+    assert group("AirRaidSiren") == "notification_sound"
+    assert group("ArnoldFear") == "combat_sound"
 
 
 def test_mission_audio_exposes_mission_and_event_facets() -> None:

@@ -535,6 +535,9 @@ const mediaGroupLabels: Record<string, string> = {
   unit_sound: "单位动作",
   ambient_sound: "环境音效",
   notification_sound: "提示音效",
+  pickup_sound: "箱子与升级",
+  structure_sound: "建筑运转",
+  superweapon_sound: "超级武器",
   interface_sound: "界面与过场",
   other_sound: "其他音效",
   unclassified: "未关联音频",
@@ -545,7 +548,8 @@ const mediaGroupOrder = [
   "unit_voice", "eva_voice", "unit_intel_voice", "world_domination_voice", "mission_voice",
   "multiplayer_voice", "taunt_voice", "ambient_voice", "other_voice",
   "weapon_sound", "combat_sound", "death_sound", "movement_sound", "action_sound", "impact_sound",
-  "destruction_sound", "unit_sound", "notification_sound", "ambient_sound", "interface_sound", "other_sound",
+  "destruction_sound", "superweapon_sound", "structure_sound", "pickup_sound", "unit_sound",
+  "notification_sound", "ambient_sound", "interface_sound", "other_sound",
   "unclassified",
 ];
 

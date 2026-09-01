@@ -39,7 +39,7 @@ from ra2_explorer.storage import Database
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
 ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
 UNAFFILIATED_SIDE = "unaffiliated"
-SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v8",)
+SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v10",)
 _PLANNING_SIDE_IDS = ("GDI", "Nod", "ThirdSide")
 _TYPE_SECTIONS = {
     "vehicle": "VehicleTypes",
@@ -1820,6 +1820,103 @@ def _sound_description_sample(sample: MediaSample) -> MediaSample:
 
 def _standalone_sound_group(event: str, sample: MediaSample) -> str:
     folded = _normalized_media_event(f"{event} {sample.name}")
+    if any(
+        token in folded
+        for token in (
+            "voicedie",
+            "die",
+            "death",
+            "victimswell",
+            "infantrypsycrush",
+            "infantrymelt",
+            "infantrysquish",
+            "infantryzap",
+            "trexfall",
+        )
+    ):
+        return "death_sound"
+    if any(
+        token in folded
+        for token in (
+            "cratearmor",
+            "cratefreeunit",
+            "healcrate",
+            "cratepromoted",
+            "cratespeed",
+            "upgradeelite",
+            "upgradeveteran",
+        )
+    ):
+        return "pickup_sound"
+    if any(
+        token in folded
+        for token in (
+            "forceshield",
+            "geneticmutator",
+            "ironcurtain",
+            "nuke",
+            "psychicdominator",
+            "weather",
+        )
+    ):
+        return "superweapon_sound"
+    if any(
+        token in folded
+        for token in (
+            "bioreactor",
+            "grindergrinding",
+            "oilderrick",
+            "orerefinery",
+            "prismtowerpowerup",
+            "spyuplink",
+            "tankbunker",
+            "teslacoilpowerup",
+            "poweron",
+            "poweroff",
+            "psychicamplifier",
+            "oremineextract",
+        )
+    ):
+        return "structure_sound"
+    if any(token in folded for token in ("bigbenbell", "fountainloop", "policesiren")):
+        return "ambient_sound"
+    if any(
+        token in folded
+        for token in (
+            "psychicsensordetect",
+            "airraidsiren",
+            "mindcleared",
+            "flare",
+            "crazyivanbombtick",
+        )
+    ):
+        return "notification_sound"
+    if "wallcrush" in folded:
+        return "destruction_sound"
+    if "tankcrush" in folded:
+        return "impact_sound"
+    if "fear" in folded:
+        return "combat_sound"
+    if any(token in folded for token in ("yurimindcontrol", "kirovelitebomb")):
+        return "weapon_sound"
+    if any(
+        token in folded
+        for token in (
+            "landing",
+            "takeoff",
+            "trexfoot",
+        )
+    ):
+        return "movement_sound"
+    if any(
+        token in folded
+        for token in (
+            "parachutedrop",
+            "floatingdiscchargeup",
+            "floatingdiscsteal",
+        )
+    ):
+        return "action_sound"
     if any(token in folded for token in ("ambient", "amb", "bird", "wind", "water")):
         return "ambient_sound"
     if any(
