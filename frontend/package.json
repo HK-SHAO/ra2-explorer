@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "build:pages": "tsc && vite build --mode pages",
+    "build:pages": "tsc && node scripts/build-pages.mjs",
     "preview": "vite preview",
     "preview:pages": "vite preview --mode pages"
   },

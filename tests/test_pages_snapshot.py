@@ -9,6 +9,7 @@ from PIL import Image
 
 from ra2_explorer.errors import Ra2ExplorerError
 from ra2_explorer.pages_snapshot import (
+    PAGES_RENDER_REVISION,
     _animation_frame_requests,
     _AnimationVariant,
     _asset_usages,
@@ -24,6 +25,17 @@ from ra2_explorer.pages_snapshot import (
     _snapshot_identity,
     archive_pages_snapshot,
 )
+
+
+def test_pages_default_preload_atlas_matches_render_revision() -> None:
+    pages_env = (Path(__file__).parents[1] / "frontend" / ".env.pages").read_text(
+        encoding="utf-8",
+    )
+
+    assert (
+        "RA2EXP_DEFAULT_ATLAS="
+        f"previews/entity-atlases/vehicle/0-r{PAGES_RENDER_REVISION}.webp"
+    ) in pages_env
 
 
 def test_pages_prune_removes_only_stale_reused_exports(tmp_path: Path) -> None:
