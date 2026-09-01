@@ -970,27 +970,30 @@ function ruleColumnSpan(label: string, value: string) {
   return width > 72 ? 3 : width > 34 ? 2 : 1;
 }
 
-let resetNextRememberedListScroll = false;
+const appliedRememberedScrollResets = new Map<string, number>();
 
-function requestRememberedListScrollReset() {
-  resetNextRememberedListScroll = true;
-}
-
-function useRememberedScroll<T extends HTMLElement = HTMLDivElement>(
+function useRememberedScroll<
+  T extends HTMLElement = HTMLDivElement,
+  A extends HTMLElement = T,
+>(
   key: string,
   itemCount: number,
-  scope: "list" | "detail" = "list",
+  resetRevision = 0,
 ) {
   const ref = useRef<T | null>(null);
+  const alternateRef = useRef<A | null>(null);
   const activeKey = useRef("");
+  const activeResetRevision = useRef(resetRevision);
   const target = useRef(0);
   const restoring = useRef(false);
   const ready = useRef(false);
 
-  if (activeKey.current !== key) {
+  if (activeKey.current !== key || activeResetRevision.current !== resetRevision) {
+    const reset = Boolean(key)
+      && resetRevision > (appliedRememberedScrollResets.get(key) || 0);
+    if (reset) appliedRememberedScrollResets.set(key, resetRevision);
     activeKey.current = key;
-    const reset = scope === "list" && resetNextRememberedListScroll;
-    if (reset) resetNextRememberedListScroll = false;
+    activeResetRevision.current = resetRevision;
     target.current = key && !reset
       ? Math.max(0, Number.parseInt(window.localStorage.getItem(`ra2exp-scroll:${key}`) || "0", 10) || 0)
       : 0;
@@ -998,20 +1001,26 @@ function useRememberedScroll<T extends HTMLElement = HTMLDivElement>(
     ready.current = false;
   }
 
-  useEffect(() => {
-    if (!key || !ref.current) return;
+  useLayoutEffect(() => {
+    const elements = [ref.current, alternateRef.current].filter(
+      (element): element is T | A => element !== null,
+    );
+    if (!key || elements.length === 0) return;
     ready.current = false;
-    ref.current.scrollTop = target.current;
+    for (const element of elements) element.scrollTop = target.current;
     const frame = window.requestAnimationFrame(() => {
-      if (!ref.current || activeKey.current !== key) return;
-      ref.current.scrollTop = target.current;
-      restoring.current = Math.abs(ref.current.scrollTop - target.current) >= 2;
+      if (activeKey.current !== key) return;
+      for (const element of elements) element.scrollTop = target.current;
+      restoring.current = elements.some(
+        (element) => element.scrollHeight > element.clientHeight
+          && Math.abs(element.scrollTop - target.current) >= 2,
+      );
       ready.current = true;
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [key, itemCount]);
+  }, [key, itemCount, resetRevision]);
 
-  function remember(event: ReactUIEvent<T>) {
+  function remember<E extends HTMLElement>(event: ReactUIEvent<E>) {
     if (!key || !ready.current) return;
     const top = event.currentTarget.scrollTop;
     if (restoring.current && Math.abs(top - target.current) >= 2) return;
@@ -1020,7 +1029,27 @@ function useRememberedScroll<T extends HTMLElement = HTMLDivElement>(
     window.localStorage.setItem(`ra2exp-scroll:${key}`, String(Math.round(top)));
   }
 
-  return { ref, remember };
+  return { ref, alternateRef, remember };
+}
+
+function useResponsiveDetailPageReset(
+  key: string,
+  panelRef: { current: HTMLElement | null },
+) {
+  const previousKey = useRef(key);
+  useLayoutEffect(() => {
+    const changed = Boolean(previousKey.current) && previousKey.current !== key;
+    previousKey.current = key;
+    const panel = panelRef.current;
+    const scrollingElement = document.scrollingElement;
+    if (!changed || !panel || !scrollingElement) return;
+    const pageScrollable = scrollingElement.scrollHeight > window.innerHeight + 2;
+    const panelScrollable = panel.scrollHeight > panel.clientHeight + 2;
+    const panelTop = window.scrollY + panel.getBoundingClientRect().top;
+    if (pageScrollable && !panelScrollable && window.scrollY > panelTop + 2) {
+      window.scrollTo({ top: panelTop, behavior: "auto" });
+    }
+  }, [key, panelRef]);
 }
 
 function sortEntities(
@@ -1206,6 +1235,7 @@ function ExplorerApp() {
   const [layout, setLayout] = useState<LayoutMode>(() =>
     window.localStorage.getItem("ra2exp-layout") === "list" ? "list" : "grid",
   );
+  const [listScrollResetRevision, setListScrollResetRevision] = useState(0);
   const [detailPlacement, setDetailPlacement] = useState<DetailPlacement>(() =>
     window.localStorage.getItem("ra2exp-detail-placement") === "right" ? "right" : "bottom",
   );
@@ -1405,7 +1435,19 @@ function ExplorerApp() {
   const assetScrollKey = [sourceId, selectedCategoryId, assetFormatTag, mediaEventType, isMediaCategory ? "" : assetQuery, assetSort, layout]
     .map((value) => encodeURIComponent(value))
     .join(":");
-  const assetListScroll = useRememberedScroll(`assets:${assetScrollKey}`, assets.length);
+  const assetListScroll = useRememberedScroll(
+    `assets:${assetScrollKey}`,
+    assets.length,
+    listScrollResetRevision,
+  );
+  const libraryTreeScroll = useRememberedScroll(
+    `library:${sourceId}:${gameLanguage}`,
+    visibleCategories.length + entityKinds.length + mediaGroups.length,
+  );
+
+  function requestRememberedListScrollReset() {
+    setListScrollResetRevision((current) => current + 1);
+  }
 
   function updateLayout(next: LayoutMode) {
     setLayout(next);
@@ -2506,7 +2548,7 @@ function ExplorerApp() {
               </label>
             </section>}
 
-            <nav className="library-tree" aria-label="浏览分类" tabIndex={0}>
+            <nav ref={libraryTreeScroll.ref} onScroll={libraryTreeScroll.remember} className="library-tree" aria-label="浏览分类" tabIndex={0}>
               <section className="tree-branch">
                 <div className="tree-parent"><Icon name="unit" /><strong>单位</strong><em>{entityKinds.reduce((count, item) => count + item.count, 0)}</em></div>
                 <div className="tree-children">
@@ -2585,6 +2627,7 @@ function ExplorerApp() {
             setLayout={updateLayout}
             onLoadMore={loadMoreMedia}
             scrollKey={`media:${assetScrollKey}:${mediaGroup}:${mediaEventType}:${mediaGrouped}`}
+            scrollResetRevision={listScrollResetRevision}
             catalogFocus={catalogListFocus}
             onCatalogFocusComplete={finishCatalogListFocus}
           /> : <section className="asset-panel panel">
@@ -2643,7 +2686,7 @@ function ExplorerApp() {
             previewUrl={previewUrl}
             associations={associations}
             wide={detailPlacement === "bottom"}
-            scrollKey={`asset:${sourceId}:${selectedId}`}
+            scrollKey={`asset:${sourceId}:${selectedId}:${detailPlacement}`}
             onPopout={() => window.open(staticPopoutUrl(new URLSearchParams({ detail: "asset", asset_id: selectedId })), `ra2exp-asset-${selectedId}`, "popup=yes,width=1100,height=780")}
           />
           </> : <>
@@ -2667,6 +2710,7 @@ function ExplorerApp() {
               setLayout={updateLayout}
               previewAngle={previewAngle}
               scrollKey={`entities:${sourceId}:${entityKind}:${entityUsage}:${entitySide}:${entitySort}:${entityBuildableFirst}:${layout}`}
+              scrollResetRevision={listScrollResetRevision}
               catalogFocus={catalogListFocus}
               onCatalogFocusComplete={finishCatalogListFocus}
             />
@@ -2679,7 +2723,7 @@ function ExplorerApp() {
               playerColors={playerColors}
               defaultPreviewAngle={previewAngle}
               wide={detailPlacement === "bottom"}
-              scrollKey={`entity:${sourceId}:${selectedEntityId}`}
+              scrollKey={`entity:${sourceId}:${selectedEntityId}:${detailPlacement}`}
               onPopout={() => window.open(staticPopoutUrl(new URLSearchParams({ detail: "entity", source_id: sourceId, entity_id: selectedEntityId })), `ra2exp-entity-${selectedEntityId}`, "popup=yes,width=1100,height=780")}
             />
           </>}
@@ -2917,6 +2961,8 @@ function CatalogSearchBar(props: CatalogSearchBarProps) {
   } = props;
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const suggestionsScrollRef = useRef<HTMLDivElement>(null);
+  const historyScrollRef = useRef<HTMLDivElement>(null);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [suggestionIndex, setSuggestionIndex] = useState(-1);
   const suggestionsVisible = suggestionsOpen && Boolean(query.trim())
@@ -2937,6 +2983,12 @@ function CatalogSearchBar(props: CatalogSearchBarProps) {
     : searchesEntities ? "搜索单位" : "搜索声音";
 
   useEffect(() => setSuggestionIndex(-1), [query, suggestions[0]?.key]);
+  useLayoutEffect(() => {
+    if (suggestionsScrollRef.current) suggestionsScrollRef.current.scrollTop = 0;
+  }, [query, targets.join(":"), suggestionsOpen]);
+  useLayoutEffect(() => {
+    if (historyScrollRef.current) historyScrollRef.current.scrollTop = 0;
+  }, [suggestionsOpen]);
   useEffect(() => {
     if (focusToken <= 0) return;
     inputRef.current?.focus();
@@ -3022,7 +3074,7 @@ function CatalogSearchBar(props: CatalogSearchBarProps) {
     </div>
     <div className="entity-search-input">
       <div className="search-box entity-search-box"><Icon name="search" /><input ref={inputRef} value={query} onFocus={() => setSuggestionsOpen(true)} onKeyDown={handleSearchKeyDown} onChange={(event) => { setQuery(event.target.value); setSuggestionsOpen(true); }} placeholder={placeholder} aria-label={searchLabel} role="combobox" aria-autocomplete="list" aria-expanded={suggestionsVisible || historyVisible} aria-controls={suggestionsVisible ? "catalog-search-suggestions" : historyVisible ? "catalog-search-history" : undefined} aria-activedescendant={suggestionsVisible && suggestionIndex >= 0 && suggestions[suggestionIndex] ? `catalog-suggestion-${suggestions[suggestionIndex].key.replace(/[^a-z0-9_-]/gi, "-")}` : undefined} /></div>
-      {suggestionsVisible && <div className="entity-search-suggestions" id="catalog-search-suggestions" role="listbox" aria-label="搜索建议" onMouseDown={(event) => event.preventDefault()}>
+      {suggestionsVisible && <div ref={suggestionsScrollRef} className="entity-search-suggestions" id="catalog-search-suggestions" role="listbox" aria-label="搜索建议" onMouseDown={(event) => event.preventDefault()}>
         {suggestions.map((suggestion, index) => {
           const mediaVisualKind = suggestion.media?.kind === "voice" ? "voice" : "sound";
           return <button id={`catalog-suggestion-${suggestion.key.replace(/[^a-z0-9_-]/gi, "-")}`} type="button" role="option" aria-selected={index === suggestionIndex} className={`${index === suggestionIndex ? "active " : ""}catalog-suggestion-${suggestion.target === "entities" ? "entity" : mediaVisualKind}`} key={suggestion.key} onMouseEnter={() => setSuggestionIndex(index)} onClick={() => selectSuggestion(suggestion)}>
@@ -3035,7 +3087,7 @@ function CatalogSearchBar(props: CatalogSearchBarProps) {
         })}
         {suggestionsLoading && suggestions.length === 0 && <div className="catalog-search-loading"><span />正在检索单位和声音…</div>}
       </div>}
-      {historyVisible && <div className="catalog-search-history" id="catalog-search-history" onMouseDown={(event) => event.preventDefault()}>
+      {historyVisible && <div ref={historyScrollRef} className="catalog-search-history" id="catalog-search-history" onMouseDown={(event) => event.preventDefault()}>
         {visibleRecents.length > 0 && <section>
           <header><strong>最近访问</strong><button type="button" onClick={onClearRecents}>清空</button></header>
           <div className="catalog-history-list">{visibleRecents.map((item) => {
@@ -3111,7 +3163,10 @@ function SearchResultsPanel({
   const [entitySideFilter, setEntitySideFilter] = useState("");
   const [mediaKindFilter, setMediaKindFilter] = useState<MediaKind | "">("");
   const [mediaGroupFilter, setMediaGroupFilter] = useState("");
-  const scroll = useRememberedScroll(`search-results:${query}`, entities.length + media.length);
+  const scroll = useRememberedScroll(
+    `search-results:${query}:${search.targets.join(",")}:${entityKindFilter}:${entitySideFilter}:${mediaKindFilter}:${mediaGroupFilter}`,
+    entities.length + media.length,
+  );
 
   useEffect(() => {
     setEntityKindFilter("");
@@ -3235,7 +3290,7 @@ function SearchResultsPanel({
   </section>;
 }
 
-function MediaListPanel({ items, total, loading, search, groups, selectedGroup, setSelectedGroup, eventTypes, selectedEventType, setSelectedEventType, grouped, setGrouped, headerAlignment, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore, scrollKey, catalogFocus, onCatalogFocusComplete }: {
+function MediaListPanel({ items, total, loading, search, groups, selectedGroup, setSelectedGroup, eventTypes, selectedEventType, setSelectedEventType, grouped, setGrouped, headerAlignment, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore, scrollKey, scrollResetRevision, catalogFocus, onCatalogFocusComplete }: {
   items: MediaItem[];
   total: number;
   loading: boolean;
@@ -3258,10 +3313,11 @@ function MediaListPanel({ items, total, loading, search, groups, selectedGroup, 
   setLayout: (layout: LayoutMode) => void;
   onLoadMore: () => Promise<void>;
   scrollKey: string;
+  scrollResetRevision: number;
   catalogFocus: CatalogListFocus | null;
   onCatalogFocusComplete: (sequence: number) => void;
 }) {
-  const listScroll = useRememberedScroll(scrollKey, items.length);
+  const listScroll = useRememberedScroll(scrollKey, items.length, scrollResetRevision);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
   const sections = useMemo(() => {
     const groupedItems = new Map<string, { label: string; subtitle: string; items: MediaItem[] }>();
@@ -3487,7 +3543,7 @@ function mediaSuggestionScore(item: MediaItem, query: string) {
   );
 }
 
-function EntityListPanel({ entities, total, loading, search, sort, setSort, buildableFirst, setBuildableFirst, selectedId, setSelectedId, sourceId, sourceRevision, sides, selectedSide, setSelectedSide, layout, setLayout, previewAngle, scrollKey, catalogFocus, onCatalogFocusComplete }: {
+function EntityListPanel({ entities, total, loading, search, sort, setSort, buildableFirst, setBuildableFirst, selectedId, setSelectedId, sourceId, sourceRevision, sides, selectedSide, setSelectedSide, layout, setLayout, previewAngle, scrollKey, scrollResetRevision, catalogFocus, onCatalogFocusComplete }: {
   entities: EntitySummary[];
   total: number;
   loading: boolean;
@@ -3507,10 +3563,11 @@ function EntityListPanel({ entities, total, loading, search, sort, setSort, buil
   setLayout: (layout: LayoutMode) => void;
   previewAngle: PreviewAngle;
   scrollKey: string;
+  scrollResetRevision: number;
   catalogFocus: CatalogListFocus | null;
   onCatalogFocusComplete: (sequence: number) => void;
 }) {
-  const listScroll = useRememberedScroll(scrollKey, entities.length);
+  const listScroll = useRememberedScroll(scrollKey, entities.length, scrollResetRevision);
   useEffect(() => {
     if (
       catalogFocus?.target !== "entities"
@@ -3739,8 +3796,12 @@ function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle, com
   </span>;
 }
 
-function FrameGrid({ count, active, onSelect, urlFor }: { count: number; active: number; onSelect: (frame: number) => void; urlFor: (frame: number) => string }) {
-  return <div className="frame-grid" aria-label="全部动画帧">{Array.from({ length: count }, (_, index) => <button type="button" key={index} className={active === index ? "active" : ""} onClick={() => onSelect(index)}><img loading="lazy" src={urlFor(index)} alt={`第 ${index + 1} 帧`} /><span>{index + 1}</span></button>)}</div>;
+function FrameGrid({ count, active, onSelect, urlFor, scrollKey }: { count: number; active: number; onSelect: (frame: number) => void; urlFor: (frame: number) => string; scrollKey: string }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [scrollKey]);
+  return <div ref={scrollRef} className="frame-grid" aria-label="全部动画帧">{Array.from({ length: count }, (_, index) => <button type="button" key={index} className={active === index ? "active" : ""} onClick={() => onSelect(index)}><img loading="lazy" src={urlFor(index)} alt={`第 ${index + 1} 帧`} /><span>{index + 1}</span></button>)}</div>;
 }
 
 function FrameTransport({ frame, count, playing, onPlayingChange, onFrameChange, label = "动画帧", playDisabled = false }: {
@@ -4625,13 +4686,11 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   const effectFrameVisible = Boolean(activeAnimation && !activeAnimationReplacesBody && animationFrame < activeAnimationFrames.length);
   const associationLayout = detailTab === "animation" ? animationAssociationLayout : soundAssociationLayout;
   const setAssociationLayout = detailTab === "animation" ? setAnimationAssociationLayout : setSoundAssociationLayout;
-  const detailScroll = useRememberedScroll<HTMLElement>(scrollKey, entity ? entity.components.length + entity.media.length : 0, "detail");
-  const connectDetailPanel = useCallback((node: HTMLElement | null) => {
-    if (!wide) detailScroll.ref.current = node;
-  }, [wide, detailScroll.ref]);
-  const connectDetailSections = useCallback((node: HTMLDivElement | null) => {
-    if (wide) detailScroll.ref.current = node;
-  }, [wide, detailScroll.ref]);
+  const detailScroll = useRememberedScroll<HTMLElement, HTMLDivElement>(
+    `${scrollKey}:${detailTab}`,
+    entity ? entity.components.length + entity.media.length : 0,
+  );
+  useResponsiveDetailPageReset(scrollKey, detailScroll.ref);
 
   useEffect(() => {
     setFrame(0);
@@ -4928,7 +4987,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
     (slot) => ({ slot, items: entity.dependencies.filter((item) => item.slot === slot) }),
   );
   return (
-    <aside ref={connectDetailPanel} onScroll={wide ? undefined : detailScroll.remember} aria-busy={loading} className={`detail-panel entity-detail panel ${wide ? "entity-detail-wide" : "entity-detail-narrow"}`}>
+    <aside ref={detailScroll.ref} onScroll={detailScroll.remember} aria-busy={loading} className={`detail-panel entity-detail panel ${wide ? "entity-detail-wide" : "entity-detail-narrow"}`}>
       <div className="entity-detail-body">
         <div className="entity-preview-column">
           {entity.renderable ? <div className="preview-block entity-preview">
@@ -4939,7 +4998,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
                 : buildingOperationPreviewUrl
                   ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${entity.id}:operation:${activeAnimationAsset?.id || "effect"}`} frameFit={buildingOperationFrameFit} src={buildingOperationPreviewUrl} alt={`${activeAnimationTitle}组合预览`} building />
                   : !activeAnimationAsset && frameMode === "grid" && hasRawBodyAnimation
-                    ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing: renderFacing, playerColor, scale: 3 })} />
+                    ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} scrollKey={`${entity.id}:${renderFacing}:${playerColor}`} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing: renderFacing, playerColor, scale: 3 })} />
                     : <div className="entity-composite-stage">
                     {effectBodyPreviewUrl
                       ? <ImageViewport className="shp entity-composite-body" fitKey={`${entity.id}:${effectBodyAssociation?.event || "body"}`} frameFit={effectBodyFrameFit} src={effectBodyPreviewUrl} alt={`${entity.display_name} 主体动作`} building={entity.kind === "building"} />
@@ -4972,12 +5031,12 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
           </div> : <div className="unsupported-preview"><Icon name="unit" size={34} /><strong>{entityBodyStatusLabel(entity)}</strong></div>}
         </div>
 
-        <div ref={connectDetailSections} onScroll={wide ? detailScroll.remember : undefined} className="entity-detail-sections">
+        <div ref={detailScroll.alternateRef} onScroll={detailScroll.remember} className="entity-detail-sections">
           <div className="detail-title entity-detail-title"><div className="detail-heading-line"><h2 title={entity.display_name}>{entity.display_name}</h2><small>{entity.id} · {entity.internal_name}</small></div><div className="detail-actions">{detailTab !== "data" && <LayoutToggle layout={associationLayout} onChange={setAssociationLayout} />}{onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}</div></div>
           <div className="entity-detail-tabs" role="tablist" aria-label="单位详细信息">
-            <button type="button" role="tab" id="entity-sound-tab" aria-controls="entity-sound-panel" aria-selected={detailTab === "sound"} className={detailTab === "sound" ? "active" : ""} disabled={soundCount === 0} onClick={() => { setDetailTab("sound"); if (detailScroll.ref.current) detailScroll.ref.current.scrollTop = 0; }}>声音 <em>{soundCount}</em></button>
-            <button type="button" role="tab" id="entity-animation-tab" aria-controls="entity-animation-panel" aria-selected={detailTab === "animation"} className={detailTab === "animation" ? "active" : ""} disabled={animationCount === 0} onClick={() => { setDetailTab("animation"); if (detailScroll.ref.current) detailScroll.ref.current.scrollTop = 0; }}>动画 <em>{animationCount}</em></button>
-            <button type="button" role="tab" id="entity-data-tab" aria-controls="entity-data-panel" aria-selected={detailTab === "data"} className={detailTab === "data" ? "active" : ""} onClick={() => { setDetailTab("data"); if (detailScroll.ref.current) detailScroll.ref.current.scrollTop = 0; }}>数据 <em>{dataCount}</em></button>
+            <button type="button" role="tab" id="entity-sound-tab" aria-controls="entity-sound-panel" aria-selected={detailTab === "sound"} className={detailTab === "sound" ? "active" : ""} disabled={soundCount === 0} onClick={() => setDetailTab("sound")}>声音 <em>{soundCount}</em></button>
+            <button type="button" role="tab" id="entity-animation-tab" aria-controls="entity-animation-panel" aria-selected={detailTab === "animation"} className={detailTab === "animation" ? "active" : ""} disabled={animationCount === 0} onClick={() => setDetailTab("animation")}>动画 <em>{animationCount}</em></button>
+            <button type="button" role="tab" id="entity-data-tab" aria-controls="entity-data-panel" aria-selected={detailTab === "data"} className={detailTab === "data" ? "active" : ""} onClick={() => setDetailTab("data")}>数据 <em>{dataCount}</em></button>
           </div>
 
           {detailTab === "sound" && <section className="entity-tab-panel entity-sounds" role="tabpanel" id="entity-sound-panel" aria-labelledby="entity-sound-tab">
@@ -5088,7 +5147,11 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
     const remembered = window.localStorage.getItem("ra2exp-audio-detail-tab-v1");
     return remembered === "data" ? "data" : "associations";
   });
-  const detailScroll = useRememberedScroll<HTMLElement>(scrollKey, associations?.items.length || 0, "detail");
+  const detailScroll = useRememberedScroll<HTMLElement>(
+    `${scrollKey}:${asset && audioFormats.includes(asset.format) ? audioDetailTab : "main"}`,
+    associations?.items.length || 0,
+  );
+  useResponsiveDetailPageReset(scrollKey, detailScroll.ref);
   function selectAudioDetailTab(next: AudioDetailTab) {
     setAudioDetailTab(next);
     window.localStorage.setItem("ra2exp-audio-detail-tab-v1", next);
@@ -5210,7 +5273,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
 
       {isModel && <div className="preview-block">
         {frameMode === "grid" && asset.format === "hva" && frameCount > 1
-          ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => api.previewUrl(asset.id, index, paletteId, 3, playerColor)} />
+          ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} scrollKey={`${asset.id}:${paletteId}:${playerColor}`} urlFor={(index) => api.previewUrl(asset.id, index, paletteId, 3, playerColor)} />
           : <VoxelPreview url={api.assetModelUrl(asset.id, frame, playerColor, paletteId)} label={asset.display_name} viewKey={`asset:${asset.id}`} />}
         {asset.format === "hva" && hasFrameControl && <div className="frame-controls">
           {frameMode === "sequence" && <FrameTransport frame={frame} count={frameCount} playing={playing} onPlayingChange={setPlaying} onFrameChange={setFrame} label="帧" />}
@@ -5221,7 +5284,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
       {canPreview && (
         <div className="preview-block">
           {frameMode === "grid" && asset.format === "shp" && frameCount > 1
-            ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} urlFor={(index) => {
+            ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} scrollKey={`${asset.id}:${paletteId}:${playerColor}`} urlFor={(index) => {
               const source = shpFrames[index] ?? 0;
               return api.previewUrl(asset.id, source, paletteId, 3, playerColor, { shadowFrame: metadata?.frames?.[source]?.paired_shadow_frame ?? undefined });
             }} />
@@ -5570,7 +5633,7 @@ function DetachedAssetDetail({ assetId }: { assetId: string }) {
   const previewUrl = asset && imageFormats.includes(asset.format)
     ? api.previewUrl(asset.id, frame, paletteId, asset.format === "pcx" ? 1 : asset.format === "shp" ? 5 : 4)
     : "";
-  return <main className="detached-shell">{error ? <div className="detached-error">{error}</div> : <DetailPanel asset={asset} metadata={metadata} textAsset={textAsset} textQuery={textQuery} setTextQuery={setTextQuery} frame={frame} setFrame={setFrame} playing={playing} setPlaying={setPlaying} palettes={palettes} paletteId={paletteId} setPaletteId={setPaletteId} playerColors={colors} previewUrl={previewUrl} associations={associations} wide />}</main>;
+  return <main className="detached-shell">{error ? <div className="detached-error">{error}</div> : <DetailPanel asset={asset} metadata={metadata} textAsset={textAsset} textQuery={textQuery} setTextQuery={setTextQuery} frame={frame} setFrame={setFrame} playing={playing} setPlaying={setPlaying} palettes={palettes} paletteId={paletteId} setPaletteId={setPaletteId} playerColors={colors} previewUrl={previewUrl} associations={associations} wide scrollKey={`detached-asset:${assetId}`} />}</main>;
 }
 
 function App() {
