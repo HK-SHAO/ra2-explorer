@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from ra2_explorer.api import (
+    _alpha_composite_anchored,
     _alpha_composite_centered,
     _composite_focus_bounds,
     _crop_transparent_preview,
@@ -28,6 +29,9 @@ from ra2_explorer.semantic import (
     _effective_entity_countries,
     _entity_animation_role,
     _entity_usage,
+    _index_assets,
+    _overlay_voice_transcripts,
+    _resolve_components,
     _shp_unit_body_playbacks,
     _standalone_sound_group,
 )
@@ -113,9 +117,12 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert [asset["size"] for asset in largest_first] == sorted(
         (asset["size"] for asset in largest_first), reverse=True
     )
-    assert client.get(
-        "/api/assets", params={"source_id": source["id"], "sort": "unsupported"}
-    ).status_code == 422
+    assert (
+        client.get(
+            "/api/assets", params={"source_id": source["id"], "sort": "unsupported"}
+        ).status_code
+        == 422
+    )
 
     vxl = by_name["fixture.vxl"]
     vxl_metadata = client.get(f"/api/assets/{vxl['id']}/metadata")
@@ -157,9 +164,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert map_metadata.json()["width"] == 60
     assert map_metadata.json()["height"] == 42
     assert map_metadata.json()["object_counts"]["structure"] == 1
-    assert client.get(f"/api/assets/{game_map['id']}/preview.png").content.startswith(
-        b"\x89PNG"
-    )
+    assert client.get(f"/api/assets/{game_map['id']}/preview.png").content.startswith(b"\x89PNG")
 
     strings = by_name["fixture.csf"]
     text = client.get(f"/api/assets/{strings['id']}/text", params={"q": "ready"})
@@ -217,14 +222,20 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert allied_vehicles.status_code == 200
     assert allied_vehicles.json()["total"] == 1
     assert allied_vehicles.json()["items"][0]["id"] == "DemoVehicle"
-    assert client.get(
-        "/api/entities",
-        params={"source_id": source["id"], "kind": "vehicle", "side": "Nod"},
-    ).json()["total"] == 0
-    assert client.get(
-        "/api/entities",
-        params={"source_id": source["id"], "side": "unaffiliated"},
-    ).json()["total"] == 0
+    assert (
+        client.get(
+            "/api/entities",
+            params={"source_id": source["id"], "kind": "vehicle", "side": "Nod"},
+        ).json()["total"]
+        == 0
+    )
+    assert (
+        client.get(
+            "/api/entities",
+            params={"source_id": source["id"], "side": "unaffiliated"},
+        ).json()["total"]
+        == 0
+    )
     empty_side = client.get(
         "/api/entities",
         params={"source_id": source["id"], "kind": "building", "side": "GDI"},
@@ -240,9 +251,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
         },
     )
     assert buildable_infantry.status_code == 200
-    assert [item["id"] for item in buildable_infantry.json()["items"]] == [
-        "DemoInfantry"
-    ]
+    assert [item["id"] for item in buildable_infantry.json()["items"]] == ["DemoInfantry"]
     multi_category = client.get(
         "/api/entities",
         params={
@@ -255,28 +264,30 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
         "DemoVehicle",
         "DemoInfantry",
     }
-    assert client.get(
-        "/api/entities",
-        params={"source_id": source["id"], "usage": "invalid"},
-    ).status_code == 422
-    assert client.get(
-        "/api/entities",
-        params={"source_id": source["id"], "kinds": "vehicle,invalid"},
-    ).status_code == 422
+    assert (
+        client.get(
+            "/api/entities",
+            params={"source_id": source["id"], "usage": "invalid"},
+        ).status_code
+        == 422
+    )
+    assert (
+        client.get(
+            "/api/entities",
+            params={"source_id": source["id"], "kinds": "vehicle,invalid"},
+        ).status_code
+        == 422
+    )
     simplified_name_search = client.get(
         "/api/entities",
         params={"source_id": source["id"], "q": "测试步兵"},
     )
-    assert [item["id"] for item in simplified_name_search.json()["items"]] == [
-        "DemoInfantry"
-    ]
+    assert [item["id"] for item in simplified_name_search.json()["items"]] == ["DemoInfantry"]
     fuzzy_name_search = client.get(
         "/api/entities",
         params={"source_id": source["id"], "q": "测试兵"},
     )
-    assert [item["id"] for item in fuzzy_name_search.json()["items"]] == [
-        "DemoInfantry"
-    ]
+    assert [item["id"] for item in fuzzy_name_search.json()["items"]] == ["DemoInfantry"]
     traditional_name_search = client.get(
         "/api/entities",
         params={"source_id": source["id"], "q": "測試步兵", "language": "zh-TW"},
@@ -287,20 +298,19 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
             "/api/entities",
             params={"source_id": source["id"], "q": query},
         )
-        assert [item["id"] for item in pinyin_name_search.json()["items"]] == [
-            "DemoInfantry"
-        ]
+        assert [item["id"] for item in pinyin_name_search.json()["items"]] == ["DemoInfantry"]
     mixed_name_search = client.get(
         "/api/entities",
         params={"source_id": source["id"], "q": "测试 bing"},
     )
-    assert [item["id"] for item in mixed_name_search.json()["items"]] == [
-        "DemoInfantry"
-    ]
-    assert client.get(
-        "/api/entities",
-        params={"source_id": source["id"], "language": "english"},
-    ).status_code == 422
+    assert [item["id"] for item in mixed_name_search.json()["items"]] == ["DemoInfantry"]
+    assert (
+        client.get(
+            "/api/entities",
+            params={"source_id": source["id"], "language": "english"},
+        ).status_code
+        == 422
+    )
 
     semantic_media = client.get(
         "/api/media",
@@ -325,18 +335,27 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     )
     assert selected_media.status_code == 200
     assert selected_media.json()["total"] == 1
-    assert client.get(
-        "/api/media",
-        params={"source_id": source["id"], "kind": "voice", "q": "准备 ce shi"},
-    ).json()["total"] == 1
-    assert client.get(
-        "/api/media",
-        params={"source_id": source["id"], "kind": "voice", "event_type": "move"},
-    ).json()["total"] == 0
-    assert client.get(
-        "/api/media",
-        params={"source_id": source["id"], "sort": "random"},
-    ).status_code == 422
+    assert (
+        client.get(
+            "/api/media",
+            params={"source_id": source["id"], "kind": "voice", "q": "准备 ce shi"},
+        ).json()["total"]
+        == 1
+    )
+    assert (
+        client.get(
+            "/api/media",
+            params={"source_id": source["id"], "kind": "voice", "event_type": "move"},
+        ).json()["total"]
+        == 0
+    )
+    assert (
+        client.get(
+            "/api/media",
+            params={"source_id": source["id"], "sort": "random"},
+        ).status_code
+        == 422
+    )
 
     entity = client.get(f"/api/entities/{source['id']}/DemoVehicle")
     assert entity.status_code == 200
@@ -380,8 +399,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     splash_animation = next(
         item
         for item in entity_body["media"]
-        if item["kind"] == "animation"
-        and item["rule_field"] == "WarheadType.SplashList"
+        if item["kind"] == "animation" and item["rule_field"] == "WarheadType.SplashList"
     )
     assert splash_animation["selected_sample"] == "IMPACT2"
     destruction_animation = next(
@@ -476,10 +494,13 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
         params={"frame": 0, "facing": 2},
     )
     assert infantry_facing.status_code == 200
-    assert infantry_facing.content != client.get(
-        f"/api/entities/{source['id']}/DemoInfantry/preview.png",
-        params={"frame": 0, "facing": 0},
-    ).content
+    assert (
+        infantry_facing.content
+        != client.get(
+            f"/api/entities/{source['id']}/DemoInfantry/preview.png",
+            params={"frame": 0, "facing": 0},
+        ).content
+    )
     infantry_thumbnail = client.get(
         f"/api/entities/{source['id']}/DemoInfantry/preview.png",
         params={"frame": 2, "thumbnail": "true"},
@@ -491,10 +512,11 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
         visible_height = visible_bounds[3] - visible_bounds[1]
         assert abs(visible_bounds[0] - (thumbnail.width - visible_bounds[2])) <= 1
         assert abs(visible_bounds[1] - (thumbnail.height - visible_bounds[3])) <= 1
-        assert max(
+        visible_ratio = max(
             visible_width / thumbnail.width,
             visible_height / thumbnail.height,
-        ) <= 0.56
+        )
+        assert 0.60 <= visible_ratio <= 0.68
     infantry_compact_thumbnail = client.get(
         f"/api/entities/{source['id']}/DemoInfantry/preview.png",
         params={"frame": 2, "thumbnail": "true", "compact": "true"},
@@ -504,10 +526,13 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
         assert visible_bounds is not None
         visible_width = visible_bounds[2] - visible_bounds[0]
         visible_height = visible_bounds[3] - visible_bounds[1]
-        assert max(
-            visible_width / thumbnail.width,
-            visible_height / thumbnail.height,
-        ) >= 0.8
+        assert (
+            max(
+                visible_width / thumbnail.width,
+                visible_height / thumbnail.height,
+            )
+            >= 0.8
+        )
 
     entity_preview = client.get(
         f"/api/entities/{source['id']}/DemoVehicle/preview.png",
@@ -603,7 +628,7 @@ def test_art_animation_playback_uses_inclusive_bounds_and_shadow() -> None:
     assert playback.shadow is True
 
 
-def test_eva_events_read_russian_field_and_resolve_unit_names() -> None:
+def test_eva_events_read_russian_field_without_using_unit_names_as_transcripts() -> None:
     boomer = GameEntity(
         id="BSUB",
         kind="vehicle",
@@ -639,10 +664,35 @@ def test_eva_events_read_russian_field_and_resolve_unit_names() -> None:
     assert [event.slot for event in events] == ["eva_allied", "eva_soviet"]
     assert {event.samples[0].name for event in events} == {"CEVAU39", "CSOFU39"}
     for event in events:
-        assert event.samples[0].text == "雷鸣攻击潜舰"
-        assert event.samples[0].original_text == "Yuri Boomer"
-        assert event.samples[0].localized_text == "雷鸣攻击潜舰"
-        assert event.samples[0].text_label == "Name:Boomer"
+        assert event.samples[0].text is None
+        assert event.samples[0].original_text is None
+        assert event.samples[0].localized_text is None
+
+
+def test_verified_unit_intro_overrides_csf_unit_name_text() -> None:
+    voice_strings = {
+        "csofu39": VoiceText(
+            "VOX:CSOFU39",
+            "雷鸣攻击潜舰",
+            None,
+            "雷鸣攻击潜舰",
+        )
+    }
+
+    _overlay_voice_transcripts(
+        voice_strings,
+        {
+            "csofu39": {
+                "text": "Yuri's Boomer submarine combines stealth and ballistic missiles.",
+                "original_text": "Yuri's Boomer submarine combines stealth and ballistic missiles.",
+                "localized_text": "尤里的雷鸣攻击潜艇兼具隐蔽性与弹道导弹能力。",
+            }
+        },
+    )
+
+    assert voice_strings["csofu39"].original_text.startswith("Yuri's Boomer")
+    assert voice_strings["csofu39"].localized_text == "尤里的雷鸣攻击潜艇兼具隐蔽性与弹道导弹能力。"
+    assert voice_strings["csofu39"].text == voice_strings["csofu39"].localized_text
 
 
 def test_eva_media_groups_separate_missions_and_nonverbal_prompts() -> None:
@@ -831,9 +881,7 @@ def test_multiplayer_taunts_are_separated_from_team_communications() -> None:
 
 def test_standalone_sound_events_use_specific_retail_categories() -> None:
     def group(event: str, sample_name: str | None = None) -> str:
-        return _standalone_sound_group(
-            event, MediaSample(sample_name or event, None, None)
-        )
+        return _standalone_sound_group(event, MediaSample(sample_name or event, None, None))
 
     assert group("OreRefineryProcessing") == "structure_sound"
     assert group("NukeLaunch") == "superweapon_sound"
@@ -915,9 +963,7 @@ def test_orphaned_retail_audio_keeps_evidence_based_categories() -> None:
             "storage_kind": "mix",
         }
 
-    propaganda = asset(
-        "aprotr1.wav", "bag_audio", "language.mix/audio.mix::aprotr1.wav"
-    )
+    propaganda = asset("aprotr1.wav", "bag_audio", "language.mix/audio.mix::aprotr1.wav")
     explosion = asset("gexp05a.wav", "bag_audio", "language.mix/audio.mix::gexp05a.wav")
     interface = asset("BARGRAPH.AUD", "aud", "ra2.mix/SIDENC02.MIX::BARGRAPH.AUD")
     unknown = asset("MYSTERY.AUD", "aud", "ra2.mix/local.mix::MYSTERY.AUD")
@@ -987,20 +1033,12 @@ def test_standalone_sound_events_receive_semantic_subcategories() -> None:
                 "IntruderVoiceDie": (MediaSample("vintdia", "Bail out", dying),),
                 "CommandBar": (MediaSample("ucommand", "*Command units", interface),),
                 "LaserFire": (MediaSample("laser", None, weapon),),
-                "DogAttack": (
-                    MediaSample("idogatta", "*Bite*", dog, "Bite*", None),
-                ),
-                "dogattack": (
-                    MediaSample("idogatta", "*Bite*", dog, "Bite*", None),
-                ),
+                "DogAttack": (MediaSample("idogatta", "*Bite*", dog, "Bite*", None),),
+                "dogattack": (MediaSample("idogatta", "*Bite*", dog, "Bite*", None),),
                 "PlaceBuilding": (
-                    MediaSample(
-                        "uplace", "*Place building", placement, "Place building", None
-                    ),
+                    MediaSample("uplace", "*Place building", placement, "Place building", None),
                 ),
-                "CrateMoney": (
-                    MediaSample("ubonus", "*Money crate", bonus, "Money crate", None),
-                ),
+                "CrateMoney": (MediaSample("ubonus", "*Money crate", bonus, "Money crate", None),),
             },
             (),
             {},
@@ -1056,11 +1094,7 @@ def test_shared_media_entity_refs_preserve_affiliation() -> None:
             art={},
             components=(),
             dependencies=(),
-            media=(
-                MediaAssociation(
-                    "voice", "select", "EngineerSelect", entity_id, (sample,)
-                ),
-            ),
+            media=(MediaAssociation("voice", "select", "EngineerSelect", entity_id, (sample,)),),
         )
 
     item = _build_media_items(
@@ -1142,30 +1176,42 @@ def test_canonical_cli_name_is_ra2exp() -> None:
 
 
 def test_entity_usage_distinguishes_player_structures_and_scene_objects() -> None:
-    assert _entity_usage(
-        "building",
-        {
-            "owner": "British,Americans",
-            "cost": "3000",
-            "techlevel": "-1",
-            "constructionyard": "yes",
-            "undeploysinto": "AMCV",
-            "capturable": "yes",
-        },
-    ) == "buildable"
-    assert _entity_usage(
-        "building",
-        {"capturable": "yes", "needsengineer": "yes"},
-    ) == "tech"
-    assert _entity_usage(
-        "building",
-        {"civilian": "yes", "nominal": "yes"},
-    ) == "civilian"
+    assert (
+        _entity_usage(
+            "building",
+            {
+                "owner": "British,Americans",
+                "cost": "3000",
+                "techlevel": "-1",
+                "constructionyard": "yes",
+                "undeploysinto": "AMCV",
+                "capturable": "yes",
+            },
+        )
+        == "buildable"
+    )
+    assert (
+        _entity_usage(
+            "building",
+            {"capturable": "yes", "needsengineer": "yes"},
+        )
+        == "tech"
+    )
+    assert (
+        _entity_usage(
+            "building",
+            {"civilian": "yes", "nominal": "yes"},
+        )
+        == "civilian"
+    )
     assert _entity_usage("building", {"owner": "Americans", "cost": "2800"}) == "scenario"
-    assert _entity_usage(
-        "infantry",
-        {"owner": "Americans", "cost": "1000", "techlevel": "8", "buildlimit": "1"},
-    ) == "hero"
+    assert (
+        _entity_usage(
+            "infantry",
+            {"owner": "Americans", "cost": "1000", "techlevel": "8", "buildlimit": "1"},
+        )
+        == "hero"
+    )
 
 
 def test_entity_animation_fields_follow_art_semantics() -> None:
@@ -1179,9 +1225,7 @@ def test_entity_animation_fields_follow_art_semantics() -> None:
 
 
 def test_non_voxel_unit_frames_follow_walk_and_firing_configuration() -> None:
-    playbacks = _shp_unit_body_playbacks(
-        {"walkframes": "6", "firingframes": "4"}
-    )
+    playbacks = _shp_unit_body_playbacks({"walkframes": "6", "firingframes": "4"})
 
     assert [event for event, _playback, _field in playbacks] == [
         "ready",
@@ -1294,6 +1338,67 @@ def test_layered_building_thumbnail_uses_the_complete_visible_subject() -> None:
     assert abs(visible[1] - (thumbnail.height - visible[3])) <= 1
 
 
+def test_building_components_include_bib_and_voxel_turret_parts() -> None:
+    def asset(name: str, asset_format: str) -> dict[str, object]:
+        return {
+            "id": name.casefold(),
+            "display_name": name,
+            "name": name,
+            "format": asset_format,
+            "virtual_path": f"fixture::{name}",
+            "size": 128,
+            "storage_kind": "mix",
+        }
+
+    indexed = _index_assets(
+        [
+            asset("GAGCAN.SHP", "shp"),
+            asset("GAGCANBB.SHP", "shp"),
+            asset("GTGCANTUR.VXL", "vxl"),
+            asset("GTGCANTUR.HVA", "hva"),
+            asset("GTGCANBARL.VXL", "vxl"),
+            asset("GTGCANBARL.HVA", "hva"),
+        ]
+    )
+
+    components, voxel = _resolve_components(
+        indexed,
+        "building",
+        "GTGCAN",
+        "GAGCAN",
+        {"turretanim": "GTGCANTUR", "turretanimisvoxel": "yes"},
+        {"bibshape": "GAGCANBB"},
+        True,
+        True,
+    )
+    by_role = {component.role: component.asset for component in components}
+
+    assert voxel is False
+    assert by_role["body"]["display_name"] == "GAGCAN.SHP"
+    assert by_role["bib"]["display_name"] == "GAGCANBB.SHP"
+    assert by_role["turret"]["display_name"] == "GTGCANTUR.VXL"
+    assert by_role["barrel"]["display_name"] == "GTGCANBARL.VXL"
+
+
+def test_anchored_building_turret_expands_canvas_without_clipping() -> None:
+    body = Image.new("RGBA", (40, 30), (0, 0, 0, 0))
+    body.paste((255, 0, 0, 255), (10, 12, 30, 28))
+    turret = Image.new("RGBA", (20, 16), (0, 0, 0, 0))
+    turret.paste((0, 255, 0, 255), (2, 1, 19, 10))
+
+    composite, focus = _alpha_composite_anchored(
+        body,
+        turret,
+        overlay_anchor=(10, 14),
+        target_anchor=(20, 5),
+        base_focus=(10, 12, 30, 28),
+    )
+
+    assert composite.size == (40, 39)
+    assert focus == (10, 1, 30, 37)
+    assert composite.getchannel("A").getbbox() == (10, 1, 30, 37)
+
+
 def test_effective_entity_countries_follow_house_restrictions() -> None:
     owners = (
         "Russians,Confederation,Africans,Arabs,YuriCountry,"
@@ -1312,9 +1417,9 @@ def test_effective_entity_countries_follow_house_restrictions() -> None:
             "forbiddenhouses": "British,French,Germans,Americans,Alliance,YuriCountry",
         }
     ) == ("Russians", "Confederation", "Africans", "Arabs")
-    assert _effective_entity_countries(
-        {"owner": owners, "requiredhouses": "British"}
-    ) == ("British",)
+    assert _effective_entity_countries({"owner": owners, "requiredhouses": "British"}) == (
+        "British",
+    )
 
 
 def test_expansion_rules_replace_the_base_edition() -> None:
