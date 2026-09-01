@@ -2310,6 +2310,18 @@ function ExplorerApp() {
   }, [view, sourceId, sourceRevision, visibleEntities, previewAngle]);
 
   useEffect(() => {
+    if (!isStaticSnapshot) return;
+    const atlas = entities.find((entity) => entity.search_thumbnail_atlas)?.search_thumbnail_atlas;
+    if (!atlas) return;
+    const atlasAngle = Math.min(Math.max(0, previewAngle), Math.max(0, atlas.facing_count - 1));
+    const primaryUrl = api.entityThumbnailAtlasUrl(atlas.path, atlasAngle);
+    const fallbackUrl = api.entityThumbnailAtlasFallbackUrl(atlas.path, atlasAngle);
+    void preloadThumbnailAtlas(primaryUrl).then((loaded) => {
+      if (!loaded && fallbackUrl !== primaryUrl) void preloadThumbnailAtlas(fallbackUrl);
+    });
+  }, [entities, previewAngle]);
+
+  useEffect(() => {
     if (view !== "entities" || !sourceId || visibleEntities.length === 0) return;
     const selectedIndex = Math.max(0, visibleEntities.findIndex((entity) => entity.id === selectedEntityId));
     const nearbyIndexes = [selectedIndex, selectedIndex + 1, selectedIndex - 1, selectedIndex + 2, selectedIndex - 2];
@@ -3849,22 +3861,28 @@ function useThumbnailAtlasUrl(primaryUrl: string, fallbackUrl: string) {
 function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle, compact = false }: { entity: EntitySummary; sourceId: string; sourceRevision: string; previewAngle: PreviewAngle; compact?: boolean }) {
   const previewRef = useRef<HTMLSpanElement>(null);
   const affiliationSide = entityAffiliationSide(entity);
-  const atlas = isStaticSnapshot ? entity.thumbnail_atlas : undefined;
+  const searchAtlas = compact && isStaticSnapshot ? entity.search_thumbnail_atlas : undefined;
+  const atlas = searchAtlas ?? (isStaticSnapshot ? entity.thumbnail_atlas : undefined);
   const requestedFacing = entity.facing_format
     ? entityFacingForPreviewAngle(entity.facing_format, previewAngle)
     : 0;
   const atlasFacing = atlas
-    ? Math.min(Math.max(0, requestedFacing), Math.max(0, atlas.facing_count - 1))
+    ? Math.min(
+      Math.max(0, searchAtlas ? previewAngle : requestedFacing),
+      Math.max(0, atlas.facing_count - 1),
+    )
     : 0;
   const atlasUrl = atlas ? api.entityThumbnailAtlasUrl(atlas.path, atlasFacing) : "";
   const atlasFallbackUrl = atlas ? api.entityThumbnailAtlasFallbackUrl(atlas.path, atlasFacing) : "";
   const readyAtlasUrl = useThumbnailAtlasUrl(atlasUrl, atlasFallbackUrl);
   const atlasColumn = atlas ? atlas.index % atlas.columns : 0;
   const atlasRow = atlas ? Math.floor(atlas.index / atlas.columns) : 0;
-  const atlasContentBounds = compact && atlas ? atlas.content_bounds?.[atlasFacing] : undefined;
+  const atlasContentBounds = compact && atlas && !searchAtlas
+    ? atlas.content_bounds?.[atlasFacing]
+    : undefined;
   const atlasContentWidth = atlasContentBounds?.width ?? atlas?.cell_width ?? 1;
   const atlasContentHeight = atlasContentBounds?.height ?? atlas?.cell_height ?? 1;
-  const atlasScale = compact && atlas
+  const atlasScale = compact && atlas && !searchAtlas
     ? Math.min(34 / atlasContentWidth, 34 / atlasContentHeight)
     : 1;
   const url = entity.renderable && !atlas
@@ -3908,12 +3926,14 @@ function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle, com
   return <span ref={previewRef} className={`asset-card-preview entity-card-preview format-${entity.body_format || "unknown"} ${entity.renderable ? "ready" : "missing"} ${compact ? "catalog-suggestion-thumbnail" : ""}`}>
     {entity.renderable
       ? atlas
-        ? <span className="entity-thumbnail-atlas" aria-hidden="true" style={{
+        ? <span className={`entity-thumbnail-atlas ${searchAtlas ? "entity-search-thumbnail-atlas" : compact ? "legacy-search-thumbnail-atlas" : ""}`} aria-hidden="true" style={{
           width: atlasContentWidth,
           height: atlasContentHeight,
           backgroundImage: `url("${readyAtlasUrl}")`,
           backgroundPosition: `${-(atlasColumn * atlas.cell_width + (atlasContentBounds?.x ?? 0))}px ${-(atlasRow * atlas.cell_height + (atlasContentBounds?.y ?? 0))}px`,
-          transform: atlasScale === 1 ? undefined : `scale(${atlasScale})`,
+          transform: compact && !searchAtlas
+            ? `translate(-50%, -50%) scale(${atlasScale})`
+            : undefined,
         }} />
         : readyUrl && <img decoding="async" fetchPriority="low" src={readyUrl} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
       : <Icon name="unit" size={34} />}

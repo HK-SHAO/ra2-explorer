@@ -63,7 +63,8 @@ function isExternalSnapshotPath(path: string) {
   const normalized = path.replace(/^\/+/, "");
   return normalized === "manifest.json"
     || normalized.startsWith("catalog/")
-    || normalized.startsWith("previews/entity-atlases/");
+    || normalized.startsWith("previews/entity-atlases/")
+    || normalized.startsWith("previews/entity-search-atlases/");
 }
 
 function snapshotUrl(path: string) {

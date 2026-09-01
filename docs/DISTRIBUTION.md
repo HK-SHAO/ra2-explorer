@@ -34,7 +34,7 @@
 
 ## 大文件隔离
 
-主分支只追踪代码、`packaging\pages-data.json` 和 `packaging\pages-cdn.json`。Pages 完整 ZIP 以 8 MiB 分片存放在独立 GitHub 数据 Release；锁定清单固定 tag、每片大小与 SHA-256，以及合并后整包大小与 SHA-256。高频清单、目录和卡片图集固定到 npm 精确版本并由 jsDelivr 分发。浏览器只请求所需文件，CDN 失败时回退 Pages 同源副本。`.ra2pack`、游戏文件和本地发行输出均位于被 Git 忽略的目录。
+主分支只追踪代码、`packaging\pages-data.json` 和 `packaging\pages-cdn.json`。Pages 完整 ZIP 以 8 MiB 分片存放在独立 GitHub 数据 Release；锁定清单固定 tag、每片大小与 SHA-256，以及合并后整包大小与 SHA-256。高频清单、目录、卡片图集和搜索小图图集固定到 npm 精确版本并由 jsDelivr 分发。浏览器只请求所需文件，CDN 失败时回退 Pages 同源副本。`.ra2pack`、游戏文件和本地发行输出均位于被 Git 忽略的目录。
 
 ## 自动发布
 

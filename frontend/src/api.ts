@@ -190,6 +190,21 @@ export type EntityKind = "vehicle" | "infantry" | "aircraft" | "building";
 export type EntityUsage = "buildable" | "hero" | "tech" | "civilian" | "scenario";
 export type GameLanguage = "zh-CN" | "zh-TW";
 
+export interface EntityThumbnailAtlas {
+  path: string;
+  index: number;
+  columns: number;
+  cell_width: number;
+  cell_height: number;
+  facing_count: number;
+  content_bounds?: Array<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }>;
+}
+
 export interface EntitySummary {
   id: string;
   kind: EntityKind;
@@ -227,20 +242,8 @@ export interface EntitySummary {
     display_name: string;
     icon: EntityComponentAsset | null;
   } | null;
-  thumbnail_atlas?: {
-    path: string;
-    index: number;
-    columns: number;
-    cell_width: number;
-    cell_height: number;
-    facing_count: number;
-    content_bounds?: Array<{
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    }>;
-  };
+  thumbnail_atlas?: EntityThumbnailAtlas;
+  search_thumbnail_atlas?: EntityThumbnailAtlas;
 }
 
 export type AssetSort = "name_asc" | "name_desc" | "size_desc" | "size_asc";
