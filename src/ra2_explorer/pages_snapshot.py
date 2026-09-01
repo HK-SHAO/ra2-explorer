@@ -38,7 +38,7 @@ from ra2_explorer.config import Settings
 from ra2_explorer.errors import Ra2ExplorerError
 
 PAGES_SNAPSHOT_SCHEMA_VERSION = 1
-PAGES_RENDER_REVISION = 3
+PAGES_RENDER_REVISION = 4
 _SAFE_FILENAME = re.compile(r"^[A-Za-z0-9_.~$-]+$")
 _AUDIO_FORMATS = {"aud", "bag_audio", "wav"}
 _MODEL_FORMATS = {"hva", "vxl"}
@@ -80,6 +80,7 @@ class _EntityPreviewTask:
     facing: int
     scale: int
     thumbnail: bool
+    player_color: str | None
     output: Path
 
 
@@ -462,6 +463,21 @@ def _export_audio(
     _run_parallel("压缩声音", sorted(audio_ids), export, workers=workers)
 
 
+def _entity_player_color(entity: dict[str, Any]) -> str | None:
+    sides = {
+        str(side)
+        for side in entity.get("sides", [])
+        if str(side) in {"GDI", "Nod", "ThirdSide"}
+    }
+    if len(sides) == 1:
+        side = next(iter(sides))
+    elif not sides and (entity.get("affiliation") or {}).get("kind") == "side":
+        side = str(entity["affiliation"]["id"])
+    else:
+        return None
+    return {"GDI": "blue", "Nod": "red", "ThirdSide": "purple"}.get(side)
+
+
 def _entity_tasks(
     root: Path,
     source_id: str,
@@ -475,6 +491,7 @@ def _entity_tasks(
         entity_id = str(entity["id"])
         safe_id = _safe_filename(entity_id)
         preview = entity.get("preview") or {}
+        player_color = _entity_player_color(entity)
         facings = range(8) if preview.get("supports_facing") else range(1)
         thumbnail_facings = range(1) if preview.get("format") == "vxl" else facings
         for facing in thumbnail_facings:
@@ -487,6 +504,7 @@ def _entity_tasks(
                 facing=facing,
                 scale=2,
                 thumbnail=True,
+                player_color=player_color,
                 output=thumbnail_output,
             )
         frame_count = max(1, int(preview.get("frame_count") or 1))
@@ -510,7 +528,10 @@ def _entity_tasks(
                         f"/api/entities/{quote(source_id, safe='')}/"
                         f"{quote(entity_id, safe='')}/model.json"
                     ),
-                    params={"frame": frame},
+                    params={
+                        "frame": frame,
+                        **({"player_color": player_color} if player_color else {}),
+                    },
                     output=output,
                     kind="model",
                 )
@@ -532,6 +553,7 @@ def _entity_tasks(
                     facing=facing,
                     scale=4,
                     thumbnail=False,
+                    player_color=player_color,
                     output=output,
                 )
     return list(images.values()), list(models.values())
@@ -556,7 +578,9 @@ def _export_entity_previews(
             raise Ra2ExplorerError(f"单位没有可渲染主体：{entity_id}")
         palette = _select_palette(services, body, None)
         default_samples = _default_entity_operation_samples(semantic_entity)
-        operation_layers: dict[int, tuple[list[Image.Image], list[Image.Image]]] = {}
+        operation_layers: dict[
+            tuple[int, str | None], tuple[list[Image.Image], list[Image.Image]]
+        ] = {}
         for request in requests:
             if request.output.is_file() and request.output.stat().st_size > 0:
                 continue
@@ -566,11 +590,12 @@ def _export_entity_previews(
                 palette=palette,
                 frame=request.frame,
                 facing=request.facing,
-                player_color=None,
+                player_color=request.player_color,
                 scale=request.scale,
             )
             if body["format"] == "shp" and default_samples:
-                layers = operation_layers.get(request.scale)
+                layer_key = (request.scale, request.player_color)
+                layers = operation_layers.get(layer_key)
                 if layers is None:
                     shadow_layers: list[Image.Image] = []
                     main_layers: list[Image.Image] = []
@@ -578,7 +603,7 @@ def _export_entity_previews(
                         rendered = _render_entity_shp_layer(
                             services,
                             sample,
-                            player_color=None,
+                            player_color=request.player_color,
                             scale=request.scale,
                         )
                         if rendered is None:
@@ -588,7 +613,7 @@ def _export_entity_previews(
                             shadow_layers.append(shadow)
                         main_layers.append(main)
                     layers = (shadow_layers, main_layers)
-                    operation_layers[request.scale] = layers
+                    operation_layers[layer_key] = layers
                 shadow_layers, main_layers = layers
                 if shadow_layers or main_layers:
                     image, focus_bounds = _composite_entity_preview_layers(

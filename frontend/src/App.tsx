@@ -890,7 +890,17 @@ function ruleColumnSpan(label: string, value: string) {
   return width > 72 ? 3 : width > 34 ? 2 : 1;
 }
 
-function useRememberedScroll<T extends HTMLElement = HTMLDivElement>(key: string, itemCount: number) {
+let resetNextRememberedListScroll = false;
+
+function requestRememberedListScrollReset() {
+  resetNextRememberedListScroll = true;
+}
+
+function useRememberedScroll<T extends HTMLElement = HTMLDivElement>(
+  key: string,
+  itemCount: number,
+  scope: "list" | "detail" = "list",
+) {
   const ref = useRef<T | null>(null);
   const activeKey = useRef("");
   const target = useRef(0);
@@ -899,7 +909,9 @@ function useRememberedScroll<T extends HTMLElement = HTMLDivElement>(key: string
 
   if (activeKey.current !== key) {
     activeKey.current = key;
-    target.current = key
+    const reset = scope === "list" && resetNextRememberedListScroll;
+    if (reset) resetNextRememberedListScroll = false;
+    target.current = key && !reset
       ? Math.max(0, Number.parseInt(window.localStorage.getItem(`ra2exp-scroll:${key}`) || "0", 10) || 0)
       : 0;
     restoring.current = target.current > 0;
@@ -1459,6 +1471,9 @@ function ExplorerApp() {
   ]);
 
   function selectEntityKind(kind: EntityKind) {
+    if (view !== "entities" || kind !== entityKind || entityUsage) {
+      requestRememberedListScrollReset();
+    }
     pauseAudioAsset();
     setSearchResultsOpen(false);
     if (kind !== entityKind) {
@@ -1473,6 +1488,7 @@ function ExplorerApp() {
   }
 
   function selectEntityUsage(usage: EntityUsage | "") {
+    requestRememberedListScrollReset();
     setSearchResultsOpen(false);
     const next = entityUsage === usage ? "" : usage;
     setEntityUsage(next);
@@ -1484,6 +1500,9 @@ function ExplorerApp() {
   }
 
   function selectAssetCategory(category: string) {
+    if (view !== "assets" || category !== assetCategory || mediaGroup || mediaEventType) {
+      requestRememberedListScrollReset();
+    }
     pauseAudioAsset();
     setSearchResultsOpen(false);
     setView("assets");
@@ -1500,6 +1519,7 @@ function ExplorerApp() {
 
   function selectMediaGroup(group: string) {
     const next = group;
+    requestRememberedListScrollReset();
     pauseAudioAsset();
     setSearchResultsOpen(false);
     setMediaGroup(next);
@@ -2353,7 +2373,6 @@ function ExplorerApp() {
           /> : <section className="asset-panel panel">
             <div className="asset-toolbar">
               <label className="search-box"><Icon name="search" /><input value={assetQuery} onChange={(event) => setAssetQuery(event.target.value)} placeholder="搜索名称或 CRC…" aria-label="搜索资产" />{assetQuery && <button onClick={() => setAssetQuery("")} aria-label="清除搜索"><Icon name="close" size={15} /></button>}</label>
-              <span className="result-count">显示 {assets.length} / {total}</span>
               <LayoutToggle layout={layout} onChange={updateLayout} />
             </div>
             <div className="filter-strip">
@@ -2363,12 +2382,15 @@ function ExplorerApp() {
                   {formatLabels[formatName] || formatName.toUpperCase()}<em>{stats.formats.find((item) => item.format === formatName)?.count || 0}</em>
                 </button>)}
               </div>
-              <label className="sort-control"><span>排序</span><select value={assetSort} onChange={(event) => setAssetSort(event.target.value as AssetSort)}>
-                <option value="name_asc">名称 A–Z</option>
-                <option value="name_desc">名称 Z–A</option>
-                <option value="size_desc">体积从大到小</option>
-                <option value="size_asc">体积从小到大</option>
-              </select></label>
+              <div className="media-filter-actions asset-filter-actions">
+                <span className="result-count">显示 {assets.length} / {total}</span>
+                <label className="sort-control"><span>排序</span><select value={assetSort} onChange={(event) => setAssetSort(event.target.value as AssetSort)}>
+                  <option value="name_asc">名称 A–Z</option>
+                  <option value="name_desc">名称 Z–A</option>
+                  <option value="size_desc">体积从大到小</option>
+                  <option value="size_asc">体积从小到大</option>
+                </select></label>
+              </div>
             </div>
             <div ref={assetListScroll.ref} className={`asset-list ${layout === "grid" ? "asset-grid" : "list-columns"}`} tabIndex={0} aria-label="资产列表" onScroll={(event) => { assetListScroll.remember(event); const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void loadMoreAssets(); }}>
               {layout === "list" ? assets.map((asset) => (
@@ -2597,6 +2619,16 @@ function CatalogSearchBar(props: CatalogSearchBarProps) {
   const [suggestionIndex, setSuggestionIndex] = useState(-1);
   const suggestionsVisible = suggestionsOpen && Boolean(query.trim())
     && (suggestions.length > 0 || suggestionsLoading);
+  const searchesEntities = targets.includes("entities");
+  const searchesMedia = targets.includes("media");
+  const placeholder = searchesEntities && searchesMedia
+    ? "快捷键 Ctrl+K · 搜索单位、声音、中英文或拼音…"
+    : searchesEntities
+      ? "快捷键 Ctrl+K · 搜索单位名称、中英文或拼音…"
+      : "快捷键 Ctrl+K · 搜索声音、对白、中英文或拼音…";
+  const searchLabel = searchesEntities && searchesMedia
+    ? "搜索单位和声音"
+    : searchesEntities ? "搜索单位" : "搜索声音";
 
   useEffect(() => setSuggestionIndex(-1), [query, suggestions[0]?.key]);
   useEffect(() => {
@@ -2666,12 +2698,13 @@ function CatalogSearchBar(props: CatalogSearchBarProps) {
   return <div ref={rootRef} className="entity-search-cluster catalog-search" role="search">
     <div className="entity-search-options">
       <div className="catalog-search-targets" role="group" aria-label="搜索内容类型">
-        <label className={targets.includes("entities") ? "active" : ""}><input type="checkbox" checked={targets.includes("entities")} onChange={(event) => toggleTarget("entities", event.target.checked)} /><Icon name="unit" size={14} /><span>单位</span></label>
-        <label className={targets.includes("media") ? "active" : ""}><input type="checkbox" checked={targets.includes("media")} onChange={(event) => toggleTarget("media", event.target.checked)} /><Icon name="voice" size={14} /><span>声音</span></label>
+        <label className={searchesEntities ? "active" : ""}><input type="checkbox" checked={searchesEntities} onChange={(event) => toggleTarget("entities", event.target.checked)} /><span>单位</span></label>
+        <label className={searchesMedia ? "active" : ""}><input type="checkbox" checked={searchesMedia} onChange={(event) => toggleTarget("media", event.target.checked)} /><span>声音</span></label>
       </div>
+      <button type="button" className="catalog-search-clear" disabled={!query} onClick={() => { setQuery(""); setSuggestionsOpen(false); inputRef.current?.focus(); }} aria-label="清除搜索" title="清除搜索"><Icon name="close" size={15} /></button>
     </div>
     <div className="entity-search-input">
-      <div className="search-box entity-search-box"><Icon name="search" /><input ref={inputRef} value={query} onFocus={() => setSuggestionsOpen(true)} onKeyDown={handleSearchKeyDown} onChange={(event) => { setQuery(event.target.value); setSuggestionsOpen(true); }} placeholder="快捷键 Ctrl+K · 全局搜索单位、声音、中英文或拼音…" aria-label="搜索单位和声音" role="combobox" aria-autocomplete="list" aria-expanded={suggestionsVisible} aria-controls="catalog-search-suggestions" aria-activedescendant={suggestionsVisible && suggestionIndex >= 0 && suggestions[suggestionIndex] ? `catalog-suggestion-${suggestions[suggestionIndex].key.replace(/[^a-z0-9_-]/gi, "-")}` : undefined} />{query && <button type="button" onClick={() => { setQuery(""); setSuggestionsOpen(false); inputRef.current?.focus(); }} aria-label="清除搜索" title="清除搜索"><Icon name="close" size={15} /></button>}</div>
+      <div className="search-box entity-search-box"><Icon name="search" /><input ref={inputRef} value={query} onFocus={() => setSuggestionsOpen(true)} onKeyDown={handleSearchKeyDown} onChange={(event) => { setQuery(event.target.value); setSuggestionsOpen(true); }} placeholder={placeholder} aria-label={searchLabel} role="combobox" aria-autocomplete="list" aria-expanded={suggestionsVisible} aria-controls="catalog-search-suggestions" aria-activedescendant={suggestionsVisible && suggestionIndex >= 0 && suggestions[suggestionIndex] ? `catalog-suggestion-${suggestions[suggestionIndex].key.replace(/[^a-z0-9_-]/gi, "-")}` : undefined} /></div>
       {suggestionsVisible && <div className="entity-search-suggestions" id="catalog-search-suggestions" role="listbox" aria-label="搜索建议" onMouseDown={(event) => event.preventDefault()}>
         {suggestions.map((suggestion, index) => <button id={`catalog-suggestion-${suggestion.key.replace(/[^a-z0-9_-]/gi, "-")}`} type="button" role="option" aria-selected={index === suggestionIndex} className={index === suggestionIndex ? "active" : ""} key={suggestion.key} onMouseEnter={() => setSuggestionIndex(index)} onClick={() => selectSuggestion(suggestion)}><Icon name={suggestion.target === "entities" ? "unit" : "voice"} size={16} /><span><strong>{suggestion.title}</strong><small>{suggestion.subtitle}</small></span><em>{suggestion.meta}</em></button>)}
         {suggestionsLoading && suggestions.length === 0 && <div className="catalog-search-loading"><span />正在检索单位和声音…</div>}
@@ -2841,8 +2874,8 @@ function SearchResultsPanel({
   </section>;
 
   return <section className="asset-panel search-results-panel panel">
-    <div className="asset-toolbar search-results-toolbar"><CatalogSearchBar {...search} /><span className="result-count">共 {total.toLocaleString("zh-CN")} 项</span><button type="button" className="search-results-close" onClick={onClose} aria-label="返回浏览" title="返回浏览"><Icon name="close" size={16} /></button></div>
-    <div className="search-results-heading"><span>搜索结果</span><h1>“{query}”</h1>{loading && <i aria-label="正在更新结果" />}</div>
+    <div className="asset-toolbar search-results-toolbar"><CatalogSearchBar {...search} /><button type="button" className="search-results-close" onClick={onClose} aria-label="返回浏览" title="返回浏览"><Icon name="close" size={16} /></button></div>
+    <div className="search-results-heading"><h1><span>搜索结果</span><strong>“{query}”</strong></h1><em>共 {total.toLocaleString("zh-CN")} 项</em>{loading && <i aria-label="正在更新结果" />}</div>
     <div ref={scroll.ref} onScroll={scroll.remember} className="search-results-scroll" tabIndex={0}>
       {originView === "entities" ? <>{entitySection}{mediaSection}</> : <>{mediaSection}{entitySection}</>}
       {!loading && total === 0 && <div className="no-results search-no-results"><Icon name="search" size={28} /><strong>没有找到匹配内容</strong><span>可以尝试中文、英文、拼音或拼音首字母</span></div>}
@@ -2929,7 +2962,6 @@ function MediaListPanel({ items, total, loading, search, groups, selectedGroup, 
     <section className="asset-panel media-panel panel">
       <div className="asset-toolbar">
         <CatalogSearchBar {...search} />
-        <span className="result-count">显示 {items.length} / {total}</span>
         <LayoutToggle layout={layout} onChange={setLayout} />
       </div>
       <div className="filter-strip media-filter-strip">
@@ -2944,6 +2976,7 @@ function MediaListPanel({ items, total, loading, search, groups, selectedGroup, 
           </div>}
         </div>
         <div className="media-filter-actions">
+          <span className="result-count">显示 {items.length} / {total}</span>
           <label className="group-toggle"><input type="checkbox" checked={grouped} onChange={(event) => setGrouped(event.target.checked)} /><span>分组</span></label>
           {grouped && sections.length > 0 && <button type="button" className="group-collapse-toggle" aria-expanded={allSectionsExpanded} onClick={toggleAllSections}><Icon name="chevron" size={14} /><span>{allSectionsExpanded ? "全部收起" : "全部展开"}</span></button>}
           <label className="sort-control"><span>排序</span><select value={sort} onChange={(event) => setSort(event.target.value as MediaSort)}><option value="name_asc">文件名 A–Z</option><option value="name_desc">文件名 Z–A</option><option value="description_asc">说明 A–Z</option></select></label>
@@ -3089,7 +3122,6 @@ function EntityListPanel({ entities, total, loading, search, sort, setSort, buil
     <section className="asset-panel entity-panel panel">
       <div className="asset-toolbar">
         <CatalogSearchBar {...search} />
-        <span className="result-count">显示 {entities.length} / {total}</span>
         <LayoutToggle layout={layout} onChange={setLayout} />
       </div>
       <div className="filter-strip">
@@ -3097,6 +3129,7 @@ function EntityListPanel({ entities, total, loading, search, sort, setSort, buil
           {sides.map((side) => <button key={side.id} className={selectedSide === side.id ? "active" : ""} onClick={() => setSelectedSide(selectedSide === side.id ? "" : side.id)}>{sideLabels[side.id] || side.id}<em>{side.count}</em></button>)}
         </div>
         <div className="media-filter-actions entity-filter-actions">
+          <span className="result-count">显示 {entities.length} / {total}</span>
           <label className="group-toggle"><input type="checkbox" checked={buildableFirst} onChange={(event) => setBuildableFirst(event.target.checked)} /><span>可建造优先</span></label>
           <label className="sort-control"><span>排序</span><select value={sort} onChange={(event) => setSort(event.target.value as EntitySort)}>
             <option value="cameo">游戏建造栏</option>
@@ -3138,6 +3171,16 @@ function EntityGridCard({ entity, sourceId, sourceRevision, previewAngle, select
   );
 }
 
+function entityCardPlayerColor(entity: EntitySummary) {
+  const side = entity.sides.length === 1
+    ? entity.sides[0]
+    : entity.sides.length === 0 && entity.affiliation?.kind === "side"
+      ? entity.affiliation.id : "";
+  return side === "GDI" ? "blue"
+    : side === "Nod" ? "red"
+      : side === "ThirdSide" ? "purple" : "";
+}
+
 function entityCardPreviewUrl(entity: EntitySummary, sourceId: string, previewAngle: PreviewAngle, sourceRevision: string) {
   const staticFacing = entity.body_format === "shp" && entity.kind === "infantry"
     ? entityFacingForPreviewAngle(entity.body_format, previewAngle)
@@ -3149,6 +3192,7 @@ function entityCardPreviewUrl(entity: EntitySummary, sourceId: string, previewAn
     facing,
     scale: 2,
     thumbnail: true,
+    playerColor: entityCardPlayerColor(entity),
     revision: sourceRevision,
   });
 }
@@ -3975,9 +4019,9 @@ function EntitySoundSample({ sample }: { sample: MediaSample }) {
     {sample.asset && audioFormats.includes(sample.asset.format)
       ? <CompactAudioPlayer assetId={sample.asset.id} label={internalName} />
       : <em className="media-sample-missing">未解析</em>}
-    <span className="media-sample-texts">
-      {originalText && <span className="media-sample-copy"><b>原文</b>{originalText}</span>}
-      {localizedText && <span className="media-sample-copy"><b>中文</b>{localizedText}</span>}
+    <span className={`media-sample-texts ${localizedText ? "bilingual" : "single"}`}>
+      {originalText && <span className="media-sample-copy" title={originalText}><b>原文</b>{originalText}</span>}
+      {localizedText && <span className="media-sample-copy" title={localizedText}><b>中文</b>{localizedText}</span>}
     </span>
     {sample.asset && audioFormats.includes(sample.asset.format) && <AudioDownloadAction assetId={sample.asset.id} label={internalName} />}
   </div>;
@@ -4158,7 +4202,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   const effectFrameVisible = Boolean(activeAnimation && !activeAnimationReplacesBody && animationFrame < activeAnimationFrames.length);
   const associationLayout = detailTab === "animation" ? animationAssociationLayout : soundAssociationLayout;
   const setAssociationLayout = detailTab === "animation" ? setAnimationAssociationLayout : setSoundAssociationLayout;
-  const detailScroll = useRememberedScroll<HTMLElement>(scrollKey, entity ? entity.components.length + entity.media.length : 0);
+  const detailScroll = useRememberedScroll<HTMLElement>(scrollKey, entity ? entity.components.length + entity.media.length : 0, "detail");
   const connectDetailPanel = useCallback((node: HTMLElement | null) => {
     if (!wide) detailScroll.ref.current = node;
   }, [wide, detailScroll.ref]);
@@ -4621,7 +4665,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
     const remembered = window.localStorage.getItem("ra2exp-audio-detail-tab-v1");
     return remembered === "data" ? "data" : "associations";
   });
-  const detailScroll = useRememberedScroll<HTMLElement>(scrollKey, associations?.items.length || 0);
+  const detailScroll = useRememberedScroll<HTMLElement>(scrollKey, associations?.items.length || 0, "detail");
   function selectAudioDetailTab(next: AudioDetailTab) {
     setAudioDetailTab(next);
     window.localStorage.setItem("ra2exp-audio-detail-tab-v1", next);

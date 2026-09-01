@@ -15,6 +15,7 @@ from ra2_explorer.pages_snapshot import (
     _AssetUsage,
     _composite_entity_preview_layers,
     _directory_stats,
+    _entity_player_color,
     _entity_thumbnail_atlas_cell,
     _export_entity_thumbnail_atlases,
     _pages_audio_stats,
@@ -224,6 +225,18 @@ def test_pages_thumbnail_atlas_cell_matches_card_dimensions() -> None:
     assert cell.getchannel("A").getbbox() == (10, 33, 134, 95)
 
 
+def test_pages_entity_card_player_colors_follow_exclusive_side() -> None:
+    assert _entity_player_color({"sides": ["GDI"]}) == "blue"
+    assert _entity_player_color({"sides": ["Nod"]}) == "red"
+    assert _entity_player_color({"sides": ["ThirdSide"]}) == "purple"
+    assert _entity_player_color({"sides": ["GDI", "Nod"]}) is None
+    assert _entity_player_color({"sides": []}) is None
+    assert _entity_player_color({
+        "sides": [],
+        "affiliation": {"kind": "side", "id": "GDI"},
+    }) == "blue"
+
+
 def test_pages_exports_one_thumbnail_atlas_request_per_entity_kind(
     tmp_path: Path,
 ) -> None:
@@ -267,11 +280,11 @@ def test_pages_exports_one_thumbnail_atlas_request_per_entity_kind(
     assert metadata["TANK"]["facing_count"] == 1
     assert metadata["SOLDIER"]["facing_count"] == 8
     assert metadata["SOLDIER"]["path"] == (
-        "previews/entity-atlases/infantry/{facing}-r3.webp"
+        "previews/entity-atlases/infantry/{facing}-r4.webp"
     )
-    assert (tmp_path / "previews/entity-atlases/vehicle/0-r3.webp").is_file()
-    assert (tmp_path / "previews/entity-atlases/infantry/7-r3.webp").is_file()
-    with Image.open(tmp_path / "previews/entity-atlases/infantry/0-r3.webp") as atlas:
+    assert (tmp_path / "previews/entity-atlases/vehicle/0-r4.webp").is_file()
+    assert (tmp_path / "previews/entity-atlases/infantry/7-r4.webp").is_file()
+    with Image.open(tmp_path / "previews/entity-atlases/infantry/0-r4.webp") as atlas:
         assert atlas.size == (144, 135)
 
 
