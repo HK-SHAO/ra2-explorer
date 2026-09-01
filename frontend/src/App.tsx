@@ -4019,25 +4019,30 @@ function preloadDecodedImageFrame(src: string, priority: ImageFetchPriority = "a
   return promise;
 }
 
-function scheduleDecodedImageFrame(src: string, delayMs: number, onReady: () => void) {
+function scheduleDecodedImageFrames(srcs: string[], delayMs: number, onReady: () => void) {
   let cancelled = false;
   let delayElapsed = false;
-  let imageDecoded = false;
+  let imagesDecoded = false;
   const finish = () => {
-    if (!cancelled && delayElapsed && imageDecoded) onReady();
+    if (!cancelled && delayElapsed && imagesDecoded) onReady();
   };
   const timer = window.setTimeout(() => {
     delayElapsed = true;
     finish();
   }, delayMs);
-  void preloadDecodedImageFrame(src, "high").then(() => {
-    imageDecoded = true;
+  const uniqueSources = [...new Set(srcs.filter(Boolean))];
+  void Promise.all(uniqueSources.map((src) => preloadDecodedImageFrame(src, "high"))).then(() => {
+    imagesDecoded = true;
     finish();
   });
   return () => {
     cancelled = true;
     window.clearTimeout(timer);
   };
+}
+
+function scheduleDecodedImageFrame(src: string, delayMs: number, onReady: () => void) {
+  return scheduleDecodedImageFrames([src], delayMs, onReady);
 }
 
 function DeferredPreviewImage({ src, alt = "" }: { src: string; alt?: string }) {
@@ -4313,35 +4318,65 @@ function StablePreviewImage({ src, alt, style, className, draggable = false, onB
   const [displayedSrc, setDisplayedSrc] = useState(src);
   const requestedSrc = useRef(src);
   const onBeforeRevealRef = useRef(onBeforeReveal);
+  const onLoadRef = useRef(onLoad);
   const onErrorRef = useRef(onError);
+  requestedSrc.current = src;
   onBeforeRevealRef.current = onBeforeReveal;
+  onLoadRef.current = onLoad;
   onErrorRef.current = onError;
 
-  useEffect(() => {
-    requestedSrc.current = src;
-    if (!src || src === displayedSrc) return;
-    let cancelled = false;
-    void preloadDecodedImageFrame(src, "high").then((candidate) => {
-      if (cancelled || requestedSrc.current !== src) return;
-      onBeforeRevealRef.current?.(candidate);
-      setDisplayedSrc(src);
-      if (!candidate.naturalWidth) onErrorRef.current?.();
-    });
-    return () => { cancelled = true; };
-  }, [src, displayedSrc]);
+  function revealPending(image: HTMLImageElement, pendingSrc: string) {
+    const reveal = () => {
+      if (requestedSrc.current !== pendingSrc || !image.naturalWidth) {
+        if (requestedSrc.current === pendingSrc && !image.naturalWidth) onErrorRef.current?.();
+        return;
+      }
+      onBeforeRevealRef.current?.(image);
+      onLoadRef.current?.(image);
+      setDisplayedSrc(pendingSrc);
+    };
+    if (typeof image.decode === "function") void image.decode().catch(() => undefined).then(reveal);
+    else reveal();
+  }
 
-  return <img
-    src={displayedSrc}
-    data-requested-src={src}
-    alt={alt}
-    className={className}
-    draggable={draggable}
-    decoding="async"
-    fetchPriority="high"
-    style={style}
-    onLoad={(event) => onLoad?.(event.currentTarget)}
-    onError={onError}
-  />;
+  const pendingSrc = src && src !== displayedSrc ? src : "";
+  return <>
+    {displayedSrc && <img
+      key={displayedSrc}
+      src={displayedSrc}
+      data-requested-src={src}
+      data-frame-state="active"
+      alt={alt}
+      className={className}
+      draggable={draggable}
+      decoding="async"
+      fetchPriority="high"
+      style={style}
+      onLoad={(event) => {
+        if (requestedSrc.current === displayedSrc) onLoadRef.current?.(event.currentTarget);
+      }}
+      onError={() => {
+        if (requestedSrc.current === displayedSrc) onErrorRef.current?.();
+      }}
+    />}
+    {pendingSrc && <img
+      key={pendingSrc}
+      src={pendingSrc}
+      data-requested-src={src}
+      data-frame-state="pending"
+      alt=""
+      aria-hidden="true"
+      className={`${className || ""} stable-preview-pending`}
+      draggable={false}
+      decoding="async"
+      fetchPriority="high"
+      style={style}
+      onLoad={(event) => revealPending(event.currentTarget, pendingSrc)}
+      onError={() => {
+        if (requestedSrc.current === pendingSrc) onErrorRef.current?.();
+      }}
+    />}
+  </>;
 }
 
 interface ImageFrameFit {
@@ -4796,9 +4831,12 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
     ? effectBodySequence(animationAssociations, activeAnimation.slot)
     : null;
   const effectBodySample = effectBodyAssociation?.samples.find((sample) => sample.asset) || null;
-  const effectBodyFrames = effectBodySample
-    ? animationSourceFramesFromTotal(effectBodySample, entity?.preview.source_frame_count || 0, facing)
-    : [];
+  const effectBodyFrames = useMemo(
+    () => effectBodySample
+      ? animationSourceFramesFromTotal(effectBodySample, entity?.preview.source_frame_count || 0, facing)
+      : [],
+    [effectBodySample, entity?.preview.source_frame_count, facing],
+  );
   const activeAnimationShadowFrames = activeAnimationFrames
     .map((sourceFrame) => animationShadowFrame(activeAnimation?.sample, animationMetadata, sourceFrame))
     .filter((sourceFrame): sourceFrame is number => sourceFrame !== undefined);
@@ -4857,6 +4895,44 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
     ? effectBodyFrames[animationFrame % effectBodyFrames.length]
     : 0;
   const effectFrameVisible = Boolean(activeAnimation && !activeAnimationReplacesBody && animationFrame < activeAnimationFrames.length);
+  function animationPreviewUrls(sequenceFrame: number) {
+    const sample = activeAnimation?.sample;
+    const asset = sample?.asset;
+    if (!sample || !asset || asset.format !== "shp") return [];
+    const sourceFrame = activeAnimationFrames[Math.min(sequenceFrame, activeAnimationFrames.length - 1)] || 0;
+    const shadowFrame = animationShadowFrame(sample, animationMetadata, sourceFrame);
+    if (entity?.kind === "building" && activeAnimation?.role === "operation") {
+      return [api.entityPreviewUrl(sourceId, entity.id, {
+        frame,
+        facing: renderFacing,
+        playerColor,
+        scale: 4,
+        effectAssetId: asset.id,
+        effectFrame: sourceFrame,
+        effectShadowFrame: shadowFrame,
+        effectPalette: sample.palette || undefined,
+        revision: sourceRevision,
+      })];
+    }
+    const urls = sequenceFrame < activeAnimationFrames.length
+      ? [api.previewUrl(asset.id, sourceFrame, "", 5, playerColor, {
+        palette: sample.palette || undefined,
+        shadowFrame,
+      })]
+      : [];
+    if (effectBodySample?.asset?.format === "shp" && effectBodyFrames.length > 0) {
+      const bodySourceFrame = effectBodyFrames[sequenceFrame % effectBodyFrames.length];
+      urls.push(api.previewUrl(
+        effectBodySample.asset.id,
+        bodySourceFrame,
+        "",
+        5,
+        playerColor,
+        { palette: effectBodySample.palette || undefined },
+      ));
+    }
+    return [...new Set(urls)];
+  }
   const associationLayout = detailTab === "animation" ? animationAssociationLayout : soundAssociationLayout;
   const setAssociationLayout = detailTab === "animation" ? setAnimationAssociationLayout : setSoundAssociationLayout;
   const detailScroll = useRememberedScroll<HTMLElement, HTMLDivElement>(
@@ -4981,30 +5057,15 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
       return;
     }
     if (!animationMetadata && (sample.animation?.shadow || sample.animation?.frame_count === null)) return;
-    const compositeBuildingOperation = entity?.kind === "building"
-      && activeAnimation.role === "operation";
-    const frameUrls = activeAnimationFrames.map((sourceFrame) => {
-      const shadowFrame = animationShadowFrame(sample, animationMetadata, sourceFrame);
-      return compositeBuildingOperation && entity
-        ? api.entityPreviewUrl(sourceId, entity.id, {
-          frame,
-          facing: renderFacing,
-          playerColor,
-          scale: 4,
-          effectAssetId: asset.id,
-          effectFrame: sourceFrame,
-          effectShadowFrame: shadowFrame,
-          effectPalette: sample.palette || undefined,
-          revision: sourceRevision,
-        })
-        : api.previewUrl(asset.id, sourceFrame, "", 5, playerColor, {
-          palette: sample.palette || undefined,
-          shadowFrame,
-        });
-    });
-    if (frameUrls.length === 0) return;
+    const frameUrlGroups = Array.from(
+      { length: activeAnimationFrameCount },
+      (_, index) => animationPreviewUrls(index),
+    );
+    if (frameUrlGroups.length === 0) return;
     let cancelled = false;
-    const firstFrames = frameUrls.slice(0, 2).map((url) => preloadDecodedImageFrame(url, "high"));
+    const firstFrames = frameUrlGroups.slice(0, 2).map((urls) => Promise.all(
+      urls.map((url) => preloadDecodedImageFrame(url, "high")),
+    ));
     void firstFrames[0].then(() => {
       if (cancelled) return;
       autoStartedAnimationRef.current = activeAnimation;
@@ -5012,10 +5073,12 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
     });
     void Promise.all(firstFrames).then(() => {
       if (cancelled) return;
-      for (const url of frameUrls.slice(2)) void preloadDecodedImageFrame(url, "low");
+      for (const urls of frameUrlGroups.slice(2)) {
+        for (const url of urls) void preloadDecodedImageFrame(url, "low");
+      }
     });
     return () => { cancelled = true; };
-  }, [activeAnimation, activeAnimationFrameCount, activeAnimationFrames, animationMetadata, entity, frame, renderFacing, playerColor, sourceId, sourceRevision]);
+  }, [activeAnimation, activeAnimationFrameCount, activeAnimationFrames, animationMetadata, effectBodyFrames, effectBodySample, entity, frame, renderFacing, playerColor, sourceId, sourceRevision]);
 
   useEffect(() => {
     if (!activeAnimation) return;
@@ -5047,20 +5110,12 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
       ? activeAnimationLoopStart
       : animationFrame + 1;
     const advance = () => setAnimationFrame((current) => current === animationFrame ? nextFrame : current);
-    const animationSample = activeAnimation?.sample;
-    const animationAsset = animationSample?.asset;
-    if (animationAsset?.format === "shp" && animationSample) {
-      const sourceFrame = activeAnimationFrames[Math.min(nextFrame, activeAnimationFrames.length - 1)] || 0;
-      const shadowFrame = animationShadowFrame(animationSample, animationMetadata, sourceFrame);
-      const nextUrl = api.previewUrl(animationAsset.id, sourceFrame, "", 5, playerColor, {
-        palette: animationSample.palette || undefined,
-        shadowFrame,
-      });
-      return scheduleDecodedImageFrame(nextUrl, interval, advance);
+    if (activeAnimation?.sample.asset?.format === "shp") {
+      return scheduleDecodedImageFrames(animationPreviewUrls(nextFrame), interval, advance);
     }
     const timer = window.setTimeout(advance, interval);
     return () => window.clearTimeout(timer);
-  }, [animationPlaying, animationFrame, activeAnimationFrameCount, activeAnimationLoops, activeAnimationLoopStart, activeAnimation, activeAnimationFrames, animationMetadata, playerColor]);
+  }, [animationPlaying, animationFrame, activeAnimationFrameCount, activeAnimationLoops, activeAnimationLoopStart, activeAnimation, activeAnimationFrames, animationMetadata, effectBodyFrames, effectBodySample, entity, frame, renderFacing, playerColor, sourceId, sourceRevision]);
 
   if (loading && !entity) return <aside className="detail-panel panel empty-detail"><div className="radar small"><span /></div><strong>正在读取单位详情…</strong></aside>;
   if (!entity) return <aside className="detail-panel panel empty-detail"><div className="empty-detail-icon"><Icon name="unit" size={30} /></div><strong>选择单位</strong></aside>;
