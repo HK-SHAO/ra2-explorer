@@ -823,7 +823,10 @@ def test_standalone_sound_events_use_specific_retail_categories() -> None:
 
     assert group("OreRefineryProcessing") == "structure_sound"
     assert group("NukeLaunch") == "superweapon_sound"
+    assert group("NuclearSiloReady") == "superweapon_sound"
     assert group("ChronosphereOpen") == "superweapon_sound"
+    assert group("ChronoScreenSound") == "superweapon_sound"
+    assert group("PsychicRevealActivate") == "superweapon_sound"
     assert group("CratePromoted") == "notification_sound"
     assert group("CrateMoney") == "notification_sound"
     assert group("ArnoldDie") == "death_sound"
@@ -955,7 +958,15 @@ def test_standalone_sound_events_receive_semantic_subcategories() -> None:
     items = {
         item["asset"]["display_name"]: item
         for item in _build_media_items(
-            [selected, dying, interface, weapon, dog, placement, bonus],
+            [
+                selected,
+                dying,
+                interface,
+                weapon,
+                dog,
+                placement,
+                bonus,
+            ],
             (),
             {
                 "ArnoldSelect": (MediaSample("iarnsea", "Your orders", selected),),
@@ -963,6 +974,9 @@ def test_standalone_sound_events_receive_semantic_subcategories() -> None:
                 "CommandBar": (MediaSample("ucommand", "*Command units", interface),),
                 "LaserFire": (MediaSample("laser", None, weapon),),
                 "DogAttack": (
+                    MediaSample("idogatta", "*Bite*", dog, "Bite*", None),
+                ),
+                "dogattack": (
                     MediaSample("idogatta", "*Bite*", dog, "Bite*", None),
                 ),
                 "PlaceBuilding": (
@@ -988,6 +1002,7 @@ def test_standalone_sound_events_receive_semantic_subcategories() -> None:
     assert items["laser.wav"]["groups"] == ["weapon_sound"]
     assert items["idogatta.wav"]["groups"] == ["weapon_sound"]
     assert items["idogatta.wav"]["texts"] == ["Bite"]
+    assert items["idogatta.wav"]["events"] == ["DogAttack"]
     assert items["uplace.wav"]["groups"] == ["action_sound"]
     assert items["uplace.wav"]["texts"] == ["Place building"]
     assert items["ubonus.wav"]["groups"] == ["notification_sound"]

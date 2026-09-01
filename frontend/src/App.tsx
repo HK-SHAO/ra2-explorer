@@ -2607,7 +2607,8 @@ function semanticSoundSectionIdentity(item: MediaItem, selectedGroup: string) {
     if (events.includes("nuke") || events.includes("nuclear")) return section("nuclear", "核弹");
     if (events.includes("psychicdominator")) return section("psychic-dominator", "心灵控制器");
     if (events.includes("weather")) return section("weather-control", "天气控制器");
-    if (events.includes("chronosphere")) return section("chronosphere", "超时空传送");
+    if (events.includes("chronosphere") || events.includes("chronoscreen")) return section("chronosphere", "超时空传送");
+    if (events.includes("psychicreveal")) return section("psychic-reveal", "心灵探测");
     return section("other", "其他超级武器");
   }
   if (selectedGroup === "notification_sound") {

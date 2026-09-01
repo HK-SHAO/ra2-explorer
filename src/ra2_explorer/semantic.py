@@ -39,7 +39,7 @@ from ra2_explorer.storage import Database
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
 ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
 UNAFFILIATED_SIDE = "unaffiliated"
-SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v11",)
+SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v12",)
 _PLANNING_SIDE_IDS = ("GDI", "Nod", "ThirdSide")
 _TYPE_SECTIONS = {
     "vehicle": "VehicleTypes",
@@ -1877,8 +1877,11 @@ def _standalone_sound_group(event: str, sample: MediaSample) -> str:
             "geneticmutator",
             "ironcurtain",
             "nuke",
+            "nuclear",
             "chronosphere",
+            "chronoscreen",
             "psychicdominator",
+            "psychicreveal",
             "weather",
         )
     ):
@@ -2499,7 +2502,17 @@ def _build_media_items(
     for state in states.values():
         kind = "voice" if state["voice"] else "sound" if state["sound"] else "unknown"
         asset_stem = str(state["asset"]["display_name"]).rsplit(".", 1)[0].casefold()
-        events = sorted(state["events"], key=str.casefold)
+        events = []
+        seen_events: set[str] = set()
+        for event in sorted(
+            state["events"],
+            key=lambda value: (value.casefold(), value == value.casefold(), value),
+        ):
+            folded_event = event.casefold()
+            if folded_event in seen_events:
+                continue
+            seen_events.add(folded_event)
+            events.append(event)
         mission = _mission_context(asset_stem, events) if kind == "voice" else None
         if mission is not None:
             state["slots"].difference_update({"eva_allied", "eva_soviet", "eva_yuri"})
