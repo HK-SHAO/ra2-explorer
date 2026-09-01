@@ -4,6 +4,7 @@ import io
 import json
 import math
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import Literal
@@ -428,7 +429,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if body is None:
             raise HTTPException(status_code=409, detail="该单位没有可渲染的主体资产")
         player_color = _validated_player_color(player_color)
-        renderer_version = "shp-layers-v8" if body["format"] == "shp" else "vpl-body-v3"
+        renderer_version = "shp-layers-v9" if body["format"] == "shp" else "vpl-body-v3"
         artifact_path = _source_artifact_path(
             services,
             "previews",
@@ -1045,8 +1046,25 @@ def _default_entity_operation_samples(
 ) -> tuple[MediaSample, ...]:
     samples: list[MediaSample] = []
     seen_assets: set[str] = set()
+    excluded_super_family = any(
+        association.kind == "animation"
+        and association.role == "operation"
+        and association.slot.casefold().startswith("superanim")
+        and any(
+            sample.asset and str(sample.asset["id"]) == excluded_asset_id
+            for sample in association.samples
+        )
+        for association in entity.media
+    )
     for association in entity.media:
         if association.kind != "animation" or association.role != "operation":
+            continue
+        slot = association.slot.casefold()
+        is_persistent = bool(
+            re.fullmatch(r"(?:active|idle)anim(?:two|three|four)?", slot)
+            or slot == "superanim"
+        )
+        if not is_persistent or (excluded_super_family and slot.startswith("superanim")):
             continue
         configured = next(
             (

@@ -41,7 +41,7 @@ from ra2_explorer.storage import Database
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
 ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
 UNAFFILIATED_SIDE = "unaffiliated"
-SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v17",)
+SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v19",)
 _PLANNING_SIDE_IDS = ("GDI", "Nod", "ThirdSide")
 _TYPE_SECTIONS = {
     "vehicle": "VehicleTypes",
@@ -375,6 +375,7 @@ class AnimationPlayback:
     loop_count: int | None = None
     direction: str | None = None
     shadow: bool = False
+    reverse: bool = False
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -388,6 +389,7 @@ class AnimationPlayback:
             "loop_count": self.loop_count,
             "direction": self.direction,
             "shadow": self.shadow,
+            "reverse": self.reverse,
         }
 
 
@@ -597,6 +599,7 @@ def deserialize_semantic_catalog(payload: dict[str, object]) -> SemanticCatalog:
             loop_count=_optional_int(values.get("loop_count")),
             direction=_optional_text(values.get("direction")),
             shadow=bool(values.get("shadow")),
+            reverse=bool(values.get("reverse")),
         )
 
     def sample(value: object) -> MediaSample:
@@ -3271,7 +3274,14 @@ def _animation_samples(
     image = values.get("image") or reference
     names = (image,) if "." in image else (f"{image}.shp", f"{image}.hva")
     asset = _find_asset(assets, names, ("shp", "hva", "video"))
-    playback = _art_animation_playback(values)
+    playback = _art_animation_playback(
+        values,
+        end_is_frame_count=_art_end_is_frame_count(reference, values, art_sections),
+    )
+    if playback is not None and playback.frame_count is None:
+        sibling_count = _art_sibling_frame_count(reference, values, art_sections)
+        if sibling_count is not None:
+            playback = replace(playback, frame_count=sibling_count)
     if force_shadow:
         playback = replace(playback or AnimationPlayback(), shadow=True)
     direction_match = re.search(r"-(NE|SE|SW|NW|N|E|S|W)$", reference, re.IGNORECASE)
@@ -3296,16 +3306,67 @@ def _entity_animation_role(field: str) -> str | None:
     normalized = field.casefold()
     if normalized == "buildup":
         return "construction"
-    if normalized.startswith("anim"):
-        return None
-    if normalized.endswith("anim") or re.fullmatch(
-        r"(?:active|idle|production|special)anim(?:two|three|four)", normalized
+    if re.fullmatch(
+        r"(?:active|idle|special|super)anim(?:two|three|four)?"
+        r"|productionanim"
+        r"|deployinganim|roofdeployinganim|underdooranim|underroofdooranim",
+        normalized,
     ):
         return "operation"
     return None
 
 
-def _art_animation_playback(values: dict[str, str]) -> AnimationPlayback | None:
+def _art_end_is_frame_count(
+    reference: str,
+    values: dict[str, str],
+    art_sections: dict[str, dict[str, str]],
+) -> bool:
+    """Detect the retail repair-bay convention where End stores a frame count.
+
+    Most ART animations use End as an inclusive source-frame index. The retail
+    repair bays explicitly use it as a count; their normal and damaged sections
+    share one image, and at least one sibling consequently has End <= Start.
+    """
+    if "end" not in values or "loopend" in values:
+        return False
+    image = (values.get("image") or reference).casefold()
+    for section_name, candidate in art_sections.items():
+        if (candidate.get("image") or section_name).casefold() != image:
+            continue
+        if "end" not in candidate or "loopend" in candidate:
+            continue
+        start = _integer(candidate.get("start"), 0) or 0
+        end = _integer(candidate.get("end"))
+        if start > 0 and end is not None and end <= start:
+            return True
+    return False
+
+
+def _art_sibling_frame_count(
+    reference: str,
+    values: dict[str, str],
+    art_sections: dict[str, dict[str, str]],
+) -> int | None:
+    """Bound range-less animations before the next state sharing their image."""
+    image = (values.get("image") or reference).casefold()
+    start = _integer(values.get("start"), 0) or 0
+    later_starts = []
+    for section_name, candidate in art_sections.items():
+        if (candidate.get("image") or section_name).casefold() != image:
+            continue
+        candidate_start = _integer(candidate.get("start"), 0) or 0
+        if candidate_start > start:
+            later_starts.append(candidate_start)
+    if not later_starts:
+        return None
+    return min(later_starts) - start
+
+
+def _art_animation_playback(
+    values: dict[str, str],
+    *,
+    end_is_frame_count: bool = False,
+) -> AnimationPlayback | None:
     playback_fields = {
         "start",
         "end",
@@ -3314,14 +3375,20 @@ def _art_animation_playback(values: dict[str, str]) -> AnimationPlayback | None:
         "loopcount",
         "rate",
         "shadow",
+        "reverse",
     }
     if not playback_fields.intersection(values):
         return None
     start = _integer(values.get("start"), 0) or 0
     loop_start = _integer(values.get("loopstart"))
     loop_end = _integer(values.get("loopend"))
-    end = loop_end if loop_end is not None else _integer(values.get("end"))
-    frame_count = end - start + 1 if end is not None and end >= start else None
+    end = _integer(values.get("end"))
+    if loop_end is not None:
+        frame_count = loop_end - start + 1 if loop_end >= start else None
+    elif end is not None and end_is_frame_count:
+        frame_count = max(1, end)
+    else:
+        frame_count = end - start + 1 if end is not None and end >= start else None
     return AnimationPlayback(
         start_frame=max(0, start),
         frame_count=frame_count,
@@ -3330,6 +3397,7 @@ def _art_animation_playback(values: dict[str, str]) -> AnimationPlayback | None:
         loop_end=loop_end,
         loop_count=_integer(values.get("loopcount")),
         shadow=_yes(values.get("shadow")),
+        reverse=_yes(values.get("reverse")),
     )
 
 

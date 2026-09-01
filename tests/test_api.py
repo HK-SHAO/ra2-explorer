@@ -22,6 +22,8 @@ from ra2_explorer.semantic import (
     MediaSample,
     VoiceText,
     _art_animation_playback,
+    _art_end_is_frame_count,
+    _art_sibling_frame_count,
     _AssetIndex,
     _build_eva_events,
     _build_media_items,
@@ -482,6 +484,7 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
         "loop_count": None,
         "direction": None,
         "shadow": False,
+        "reverse": False,
     }
     infantry_image = client.get(
         f"/api/entities/{source['id']}/DemoInfantry/preview.png",
@@ -626,6 +629,35 @@ def test_art_animation_playback_uses_inclusive_bounds_and_shadow() -> None:
     assert playback.loop_end == 19
     assert playback.rate_ms == 450
     assert playback.shadow is True
+
+    reversed_playback = _art_animation_playback(
+        {"start": "10", "end": "10", "reverse": "yes"},
+        end_is_frame_count=True,
+    )
+    assert reversed_playback is not None
+    assert reversed_playback.frame_count == 10
+    assert reversed_playback.reverse is True
+
+
+def test_art_animation_playback_detects_repair_bay_frame_counts() -> None:
+    sections = {
+        "repair_start": {"image": "REPAIR", "start": "0", "end": "10"},
+        "repair_damaged": {"image": "REPAIR", "start": "10", "end": "10"},
+        "ordinary": {"image": "OTHER", "start": "12", "end": "23"},
+    }
+
+    assert _art_end_is_frame_count("REPAIR_START", sections["repair_start"], sections)
+    assert not _art_end_is_frame_count("ORDINARY", sections["ordinary"], sections)
+
+
+def test_art_animation_playback_stops_before_a_shared_damaged_state() -> None:
+    sections = {
+        "idle": {"image": "IDLE", "start": "0", "rate": "0", "shadow": "yes"},
+        "idle_damaged": {"image": "IDLE", "start": "1", "rate": "0", "shadow": "yes"},
+    }
+
+    assert _art_sibling_frame_count("IDLE", sections["idle"], sections) == 1
+    assert _art_sibling_frame_count("IDLE_DAMAGED", sections["idle_damaged"], sections) is None
 
 
 def test_eva_events_read_russian_field_without_using_unit_names_as_transcripts() -> None:
@@ -1219,9 +1251,14 @@ def test_entity_animation_fields_follow_art_semantics() -> None:
     assert _entity_animation_role("activeanim") == "operation"
     assert _entity_animation_role("activeanimtwo") == "operation"
     assert _entity_animation_role("productionanim") == "operation"
+    assert _entity_animation_role("superanimtwo") == "operation"
+    assert _entity_animation_role("specialanimthree") == "operation"
+    assert _entity_animation_role("underroofdooranim") == "operation"
     assert _entity_animation_role("bibshape") is None
     assert _entity_animation_role("animactive") is None
     assert _entity_animation_role("activeanimdamaged") is None
+    assert _entity_animation_role("chargeanim") is None
+    assert _entity_animation_role("turretanim") is None
 
 
 def test_non_voxel_unit_frames_follow_walk_and_firing_configuration() -> None:
@@ -1256,6 +1293,9 @@ def test_default_building_layers_follow_operation_associations() -> None:
     first = MediaSample("FIRST", None, asset("first"))
     selected = MediaSample("SELECTED", None, asset("selected"))
     ignored = MediaSample("IGNORED", None, asset("ignored"))
+    super_idle = MediaSample("SUPER_IDLE", None, asset("super-idle"))
+    super_start = MediaSample("SUPER_START", None, asset("super-start"))
+    production = MediaSample("PRODUCTION", None, asset("production"))
     entity = GameEntity(
         id="DemoBuilding",
         kind="building",
@@ -1300,12 +1340,37 @@ def test_default_building_layers_follow_operation_associations() -> None:
                 (ignored,),
                 role="construction",
             ),
+            MediaAssociation(
+                "animation",
+                "superanim",
+                "SUPER_IDLE",
+                "DemoBuilding",
+                (super_idle,),
+                role="operation",
+            ),
+            MediaAssociation(
+                "animation",
+                "superanimtwo",
+                "SUPER_START",
+                "DemoBuilding",
+                (super_start,),
+                role="operation",
+            ),
+            MediaAssociation(
+                "animation",
+                "productionanim",
+                "PRODUCTION",
+                "DemoBuilding",
+                (production,),
+                role="operation",
+            ),
         ),
     )
 
     assert [sample.name for sample in _default_entity_operation_samples(entity)] == [
         "SELECTED",
         "FIRST",
+        "SUPER_IDLE",
     ]
     assert [
         sample.name
@@ -1313,7 +1378,14 @@ def test_default_building_layers_follow_operation_associations() -> None:
             entity,
             excluded_asset_id="selected",
         )
-    ] == ["FIRST"]
+    ] == ["FIRST", "SUPER_IDLE"]
+    assert [
+        sample.name
+        for sample in _default_entity_operation_samples(
+            entity,
+            excluded_asset_id="super-start",
+        )
+    ] == ["SELECTED", "FIRST"]
 
 
 def test_layered_building_thumbnail_uses_the_complete_visible_subject() -> None:
