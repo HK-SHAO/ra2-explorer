@@ -1582,6 +1582,8 @@ function ExplorerApp() {
       setEntityKind(entity.kind);
       setEntityUsage("");
       setEntitySide("");
+      setEntityLoading(true);
+      setEntities([]);
       rememberEntityCard(entity.id, entity.kind, "");
       setSelectedEntityId(entity.id);
       return;
@@ -1595,6 +1597,8 @@ function ExplorerApp() {
       setAssetFormatTag("");
       setMediaGroup("");
       setMediaEventType("");
+      setMediaLoading(true);
+      setMediaItems([]);
       rememberAssetCard(media.asset.id, category, "");
       setSelectedId(media.asset.id);
       toggleAudioAsset(media.asset.id, api.mediaUrl(media.asset.id));
