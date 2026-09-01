@@ -4,7 +4,10 @@ import json
 from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from ra2_explorer.reference_data import load_audio_transcript
+from ra2_explorer.reference_data import (
+    BUNDLED_UNIT_INTEL_TRANSCRIPT_PATH,
+    load_audio_transcript,
+)
 
 
 def test_audio_transcript_reads_complete_list_and_normalizes_file_ids(tmp_path) -> None:
@@ -51,9 +54,7 @@ def test_audio_transcript_merges_local_mission_supplement(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    entries = load_audio_transcript(
-        workbook_path, supplement_paths=(supplement_path,)
-    )
+    entries = load_audio_transcript(workbook_path, supplement_paths=(supplement_path,))
 
     assert entries["giselea"]["text"] == "Sir, yes sir!"
     assert entries["a01_p01"] == {
@@ -71,9 +72,7 @@ def test_audio_transcript_can_load_supplement_without_workbook(tmp_path) -> None
         encoding="utf-8",
     )
 
-    entries = load_audio_transcript(
-        tmp_path / "missing.xlsx", supplement_paths=(supplement_path,)
-    )
+    entries = load_audio_transcript(tmp_path / "missing.xlsx", supplement_paths=(supplement_path,))
 
     assert entries["s02_p01"]["original_text"] == "Destroy Einstein lab."
 
@@ -100,6 +99,18 @@ def test_audio_transcript_merges_multiple_supplements(tmp_path) -> None:
 
     assert entries["a01_p01"]["original_text"] == "Mission briefing."
     assert entries["cevau06"]["original_text"].startswith("The V3")
+
+
+def test_bundled_expansion_unit_intel_has_spoken_text_and_translation(tmp_path) -> None:
+    entries = load_audio_transcript(
+        tmp_path / "missing.xlsx",
+        supplement_paths=(BUNDLED_UNIT_INTEL_TRANSCRIPT_PATH,),
+    )
+
+    assert len(entries) == 110
+    assert entries["csofu39"]["original_text"].startswith("Yuri's Boomer submarine")
+    assert "雷鸣攻击潜艇" in entries["csofu39"]["localized_text"]
+    assert entries["cevau94"]["localized_text"].startswith("战乱中")
 
 
 def test_audio_transcript_corrects_verified_rotated_harvest_groups(tmp_path) -> None:
@@ -162,9 +173,7 @@ def test_audio_transcript_corrects_verified_rotated_harvest_groups(tmp_path) -> 
 def _audio_transcript_workbook(
     rows: tuple[tuple[str, str, str, str, str, str], ...] | None = None,
 ) -> bytes:
-    selected_rows = rows or (
-        ("$giselea.wav", "Sir, yes sir!", "GI", "Select", "", "Allied"),
-    )
+    selected_rows = rows or (("$giselea.wav", "Sir, yes sir!", "GI", "Select", "", "Allied"),)
     shared = ("File", "Line", "Unit", "Category", "Comments", "Faction")
     output = BytesIO()
     with ZipFile(output, "w", ZIP_DEFLATED) as workbook:

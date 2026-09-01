@@ -25,6 +25,7 @@ AUDIO_TRANSCRIPT_URL = (
 AUDIO_TRANSCRIPT_SOURCE_URL = (
     "https://forums.cncnet.org/topic/12109-in-game-audio-database-transcript/"
 )
+BUNDLED_UNIT_INTEL_TRANSCRIPT_PATH = Path(__file__).with_name("data") / "unit-intel-transcript.json"
 
 # The community workbook rotates both retail harvester voice groups by one row.
 # These filename-to-line bindings were verified against the decoded English BAG
@@ -236,15 +237,9 @@ def _parse_audio_transcript(content: bytes) -> dict[str, dict[str, str]]:
         else:
             shared = ["".join(node.itertext()) for node in shared_root]
         book_root = ElementTree.fromstring(workbook.read("xl/workbook.xml"))
-        relations_root = ElementTree.fromstring(
-            workbook.read("xl/_rels/workbook.xml.rels")
-        )
-        targets = {
-            node.attrib["Id"]: node.attrib["Target"] for node in relations_root
-        }
-        relation_key = (
-            "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
-        )
+        relations_root = ElementTree.fromstring(workbook.read("xl/_rels/workbook.xml.rels"))
+        targets = {node.attrib["Id"]: node.attrib["Target"] for node in relations_root}
+        relation_key = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
         sheets = book_root.findall("m:sheets/m:sheet", namespace)
         selected = next(
             (sheet for sheet in sheets if sheet.attrib.get("name") == "Complete List"),
@@ -314,6 +309,7 @@ __all__ = [
     "CNC_FORMATS_REVISION",
     "AUDIO_TRANSCRIPT_SOURCE_URL",
     "AUDIO_TRANSCRIPT_URL",
+    "BUNDLED_UNIT_INTEL_TRANSCRIPT_PATH",
     "load_audio_transcript",
     "load_known_names",
     "reference_status",
