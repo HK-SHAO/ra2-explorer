@@ -182,6 +182,7 @@ function mediaSearchValues(item: MediaItem) {
     ...item.localized_texts,
     ...item.events,
     ...item.slots,
+    ...(item.mission ? [item.mission.key, item.mission.game, item.mission.campaign, String(item.mission.number)] : []),
     ...item.entities.flatMap((entity) => [entity.id, entity.display_name, entity.affiliation?.display_name || ""]),
   ];
 }

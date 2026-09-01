@@ -381,6 +381,12 @@ export interface MediaItem {
   }>;
   countries: string[];
   sides: string[];
+  mission?: {
+    key: string;
+    game: "ra2" | "yr";
+    campaign: "allied" | "soviet" | "tutorial" | "coop";
+    number: number;
+  } | null;
   description: string | null;
   search_aliases?: {
     pinyin_compact: string[];
