@@ -632,15 +632,6 @@ function formatDuration(value: number) {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
-function canUseCompactTextTag(value: string) {
-  if (value.includes("\n")) return false;
-  const widthHint = Array.from(value.trim()).reduce((total, character) => {
-    const point = character.codePointAt(0) || 0;
-    return total + (point >= 0x2e80 ? 2 : 1);
-  }, 0);
-  return widthHint <= 48;
-}
-
 function crcLabel(value: number | null) {
   return value === null ? "—" : value.toString(16).toUpperCase().padStart(8, "0");
 }
@@ -4693,11 +4684,12 @@ function EntitySoundSample({ sample }: { sample: MediaSample }) {
     ? sample.localized_text
     : null;
   const internalName = audioDisplayName(sample.name);
-  return <div className="media-sample">
-    <strong className="media-sample-id" title={sample.asset?.display_name || sample.name}>{internalName}{sample.weight > 1 && <em>×{sample.weight}</em>}</strong>
+  const missing = !sample.asset || !audioFormats.includes(sample.asset.format);
+  return <div className={missing ? "media-sample media-sample-no-audio" : "media-sample"}>
+    <strong className="media-sample-id" title={sample.asset?.display_name || sample.name}>{internalName}{sample.weight > 1 && <em>×{sample.weight}</em>}{missing && <em className="media-sample-missing">未解析</em>}</strong>
     {sample.asset && audioFormats.includes(sample.asset.format)
       ? <CompactAudioPlayer assetId={sample.asset.id} label={internalName} />
-      : <em className="media-sample-missing">未解析</em>}
+      : null}
     <span className={`media-sample-texts ${localizedText ? "bilingual" : "single"}`}>
       {originalText && <span className="media-sample-copy" title={originalText}><b>原文</b>{originalText}</span>}
       {localizedText && <span className="media-sample-copy" title={localizedText}><b>中文</b>{localizedText}</span>}
@@ -5612,7 +5604,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
       {isAudio && activeAudioDetailTab === "data" && <div className={`metadata sound-metadata ${hasAudioRelationshipTabs ? "" : "sound-metadata-direct"}`} role={hasAudioRelationshipTabs ? "tabpanel" : undefined} id={hasAudioRelationshipTabs ? "audio-data-panel" : undefined} aria-labelledby={hasAudioRelationshipTabs ? "audio-data-tab" : undefined}>
         {hasAudioRelationshipTabs && <h3>资产信息</h3>}
         <ul className="sound-metadata-tags" aria-label="音频元信息">{audioMetadataTags.map((tag) => <li key={`${tag.label}-${tag.value}`} title={`${tag.label}：${tag.value}`}><span>{tag.label}</span><strong className={tag.mono ? "mono" : ""}>{tag.value}</strong></li>)}</ul>
-        {audioTextRows.length > 0 && <dl className="sound-transcript-list">{audioTextRows.map((row) => <div className={canUseCompactTextTag(row.value) ? "sound-transcript-tag" : "sound-transcript-block"} key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl>}
+        {audioTextRows.length > 0 && <dl className="sound-transcript-list">{audioTextRows.map((row) => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl>}
       </div>}
       {!isAudio && <div className="metadata">
         <h3>资产信息</h3>
