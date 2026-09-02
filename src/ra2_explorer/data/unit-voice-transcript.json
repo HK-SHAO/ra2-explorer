@@ -151,7 +151,7 @@
     "ibordid": { "translated_text": "<阵亡声>", "translation_kind": "nonverbal" },
     "ibordie": { "translated_text": "<阵亡声>", "translation_kind": "nonverbal" },
 
-    "idogsela": { "translated_text": "<犬吠声>", "translation_kind": "nonverbal" },
+    "idogsela": { "translated_text": "汪！" },
     "idogmova": { "translated_text": "<喘息声>", "translation_kind": "nonverbal" },
     "idogatca": { "translated_text": "<低吼声>", "translation_kind": "nonverbal" },
     "idogfea": { "translated_text": "<呜咽声>", "translation_kind": "nonverbal" },
