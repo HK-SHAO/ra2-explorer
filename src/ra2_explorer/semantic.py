@@ -41,7 +41,7 @@ from ra2_explorer.storage import Database
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
 ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
 UNAFFILIATED_SIDE = "unaffiliated"
-SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v20",)
+SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v24",)
 _PLANNING_SIDE_IDS = ("GDI", "Nod", "ThirdSide")
 _TYPE_SECTIONS = {
     "vehicle": "VehicleTypes",
@@ -971,7 +971,7 @@ class SemanticLibrary:
             "total": total,
             "kinds": [
                 {"kind": media_kind, "count": kind_counts.get(media_kind, 0)}
-                for media_kind in ("voice", "sound", "unknown")
+                for media_kind in ("voice", "sound", "music", "unknown")
             ],
             "groups": [
                 {"group": media_group, "count": count}
@@ -1600,6 +1600,7 @@ class SemanticLibrary:
         art_assets = _named_inputs(asset_index, ("art.ini", "artmd.ini"))
         sound_assets = _named_inputs(asset_index, ("sound.ini", "soundmd.ini"))
         eva_assets = _named_inputs(asset_index, ("eva.ini", "evamd.ini"))
+        theme_assets = _named_inputs(asset_index, ("theme.ini", "thememd.ini"))
         csf_assets = sorted(
             (asset for asset in assets if asset["format"] == "csf"),
             key=_config_precedence,
@@ -1608,6 +1609,7 @@ class SemanticLibrary:
         art = _merge_ini_inputs(self.reader, art_assets, warnings)
         sounds = _merge_ini_inputs(self.reader, sound_assets, warnings)
         eva = _merge_ini_inputs(self.reader, eva_assets, warnings)
+        themes = _merge_ini_inputs(self.reader, theme_assets, warnings)
         strings, voice_strings = _merge_csf_inputs(
             self.reader,
             csf_assets,
@@ -1714,6 +1716,7 @@ class SemanticLibrary:
             "art": tuple(_input_summary(asset) for asset in art_assets),
             "sound": tuple(_input_summary(asset) for asset in sound_assets),
             "eva": tuple(_input_summary(asset) for asset in eva_assets),
+            "theme": tuple(_input_summary(asset) for asset in theme_assets),
             "csf": tuple(_input_summary(asset) for asset in csf_assets),
         }
         if not rules_assets:
@@ -1726,6 +1729,8 @@ class SemanticLibrary:
             audio_events,
             eva_events,
             voice_strings,
+            strings,
+            _theme_entries(themes),
         )
         return SemanticCatalog(
             source_id,
@@ -2312,12 +2317,44 @@ def _mission_event_slot(asset_stem: str, events: Iterable[str]) -> str:
     return "mission_dialogue"
 
 
+@dataclass(frozen=True, slots=True)
+class ThemeEntry:
+    stem: str
+    title: str | None
+
+
+def _theme_entries(themes: dict[str, dict[str, str]]) -> tuple[ThemeEntry, ...]:
+    """Bind THEME.INI soundtrack entries to their audio file stems.
+
+    Retail THEME.INI keeps a [Themes] index plus one section per track whose
+    Sound key names the audio file and whose Name key points at a CSF label.
+    """
+    entries: list[ThemeEntry] = []
+    seen: set[str] = set()
+    for section, values in themes.items():
+        if section.casefold() == "themes":
+            continue
+        sound = str(values.get("sound") or "").strip()
+        if not sound:
+            continue
+        stem = sound.rsplit(".", 1)[0]
+        folded = stem.casefold()
+        if not folded or folded in seen:
+            continue
+        seen.add(folded)
+        title = str(values.get("name") or "").strip() or None
+        entries.append(ThemeEntry(stem, title))
+    return tuple(entries)
+
+
 def _build_media_items(
     assets: list[dict[str, Any]],
     entities: tuple[GameEntity, ...],
     audio_events: dict[str, tuple[MediaSample, ...]],
     eva_events: tuple[MediaAssociation, ...],
     voice_strings: dict[str, VoiceText],
+    strings: dict[str, str] | None = None,
+    theme_entries: tuple[ThemeEntry, ...] = (),
 ) -> tuple[dict[str, object], ...]:
     entities_by_id = {entity.id.casefold(): entity for entity in entities}
     representatives: dict[str, dict[str, Any]] = {}
@@ -2334,6 +2371,7 @@ def _build_media_items(
             "asset": asset,
             "voice": False,
             "sound": False,
+            "music": False,
             "groups": set(),
             "texts": set(),
             "original_texts": set(),
@@ -2559,8 +2597,22 @@ def _build_media_items(
                 state["events"].add("PropagandaTruck")
                 state["slots"].add("ambient")
 
+    for entry in theme_entries:
+        state = states.get(f"{entry.stem}.wav".casefold()) or states.get(
+            f"{entry.stem}.aud".casefold()
+        )
+        if state is None:
+            continue
+        state["music"] = True
+        state["groups"].add("theme_music")
+        state["events"].add(entry.stem)
+        state["slots"].add("theme")
+        title = strings.get(str(entry.title).casefold()) if strings and entry.title else None
+        if title:
+            state["texts"].add(title.strip())
+
     for state in states.values():
-        if state["voice"] or state["sound"]:
+        if state["voice"] or state["sound"] or state["music"]:
             continue
         asset = state["asset"]
         stem = str(asset["display_name"]).rsplit(".", 1)[0].casefold()
@@ -2572,6 +2624,14 @@ def _build_media_items(
             state["groups"].add("destruction_sound")
             state["events"].add(event)
             state["slots"].add("explosion")
+            continue
+        # Tracks that THEME.INI omits or comments out still ship inside the
+        # soundtrack archives, so archive membership is the reliable signal.
+        if "theme.mix" in virtual_path or "thememd.mix" in virtual_path:
+            state["music"] = True
+            state["groups"].add("theme_music")
+            state["events"].add(stem.upper())
+            state["slots"].add("theme")
             continue
         description = _LEGACY_INTERFACE_AUDIO_DESCRIPTIONS.get(stem)
         if (
@@ -2590,7 +2650,12 @@ def _build_media_items(
 
     items = []
     for state in states.values():
-        kind = "voice" if state["voice"] else "sound" if state["sound"] else "unknown"
+        kind = (
+            "voice" if state["voice"]
+            else "sound" if state["sound"]
+            else "music" if state["music"]
+            else "unknown"
+        )
         asset_stem = str(state["asset"]["display_name"]).rsplit(".", 1)[0].casefold()
         events = []
         seen_events: set[str] = set()
@@ -2618,6 +2683,7 @@ def _build_media_items(
             for group in refined_groups
             if (kind == "voice" and group.endswith("_voice"))
             or (kind == "sound" and group.endswith("_sound"))
+            or (kind == "music" and group.endswith("_music"))
         )
         if kind == "voice" and len(groups) > 1 and "other_voice" in groups:
             groups.remove("other_voice")

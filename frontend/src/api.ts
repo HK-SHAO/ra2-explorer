@@ -369,7 +369,7 @@ export interface EntityPage {
   warnings: string[];
 }
 
-export type MediaKind = "voice" | "sound" | "unknown";
+export type MediaKind = "voice" | "sound" | "music" | "unknown";
 export type MediaSort = "name_asc" | "name_desc" | "description_asc";
 
 export interface MediaItem {

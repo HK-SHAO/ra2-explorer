@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from PIL import Image
+
 from ra2_explorer.codecs.binary import BinaryReader, checked_product
 from ra2_explorer.codecs.pal import Palette, parse_palette
 from ra2_explorer.errors import InvalidFormatError
@@ -27,6 +29,27 @@ class VplFile:
             return color & 0xFF
         selected = max(0, min(len(self.sections) - 1, section))
         return self.sections[selected][color & 0xFF]
+
+    def preview(self, *, cell_size: int = 4) -> Image.Image:
+        """Render the lighting lookup as one row per section."""
+        if cell_size < 1:
+            raise ValueError("cell_size must be positive")
+        rows = max(1, self.section_count)
+        image = Image.new(
+            "RGB", (LOOKUP_WIDTH * cell_size, rows * cell_size)
+        )
+        pixels = image.load()
+        for row in range(rows):
+            for color in range(LOOKUP_WIDTH):
+                value = self.color_index(row, color)
+                shade = (value, value, value)
+                for offset_y in range(cell_size):
+                    for offset_x in range(cell_size):
+                        pixels[
+                            color * cell_size + offset_x,
+                            row * cell_size + offset_y,
+                        ] = shade
+        return image
 
 
 def parse_vpl(data: bytes | bytearray | memoryview) -> VplFile:

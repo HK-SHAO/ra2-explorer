@@ -534,7 +534,14 @@ function ruleFieldName(ruleField: string | null) {
   return fields[fields.length - 1] || "动画引用";
 }
 
+const mediaCategoryKinds: Record<string, MediaKind> = {
+  voices: "voice",
+  sounds: "sound",
+  music: "music",
+};
+
 const mediaGroupLabels: Record<string, string> = {
+  theme_music: "主题音乐",
   selection_voice: "选中回应",
   movement_voice: "移动指令",
   combat_voice: "攻击指令",
@@ -771,7 +778,7 @@ type BrowsingLocation = {
 
 const audioFormats = ["bag_audio", "wav", "aud"];
 const imageFormats = ["shp", "tmp", "pcx", "pal", "map"];
-const defaultVisibleFormats = ["bag_audio", "wav", "aud"];
+const defaultVisibleFormats = ["bag_audio", "wav", "aud", "shp", "vxl", "hva", "pal", "vpl", "video"];
 
 function preloadEntityAudioResources(entity: GameEntity) {
   const primaryUrls: string[] = [];
@@ -806,8 +813,13 @@ const assetCategories: Array<{
 }> = [
   { id: "voices", label: "游戏语音", formats: ["bag_audio", "wav", "aud"], icon: "play" },
   { id: "sounds", label: "游戏音效", formats: ["bag_audio", "wav", "aud"], icon: "play" },
+  { id: "music", label: "游戏音乐", formats: ["wav", "aud"], icon: "sound" },
   { id: "maps", label: "地图", formats: ["map"], icon: "grid" },
   { id: "images", label: "图像", formats: ["pcx"], icon: "image" },
+  { id: "sprites", label: "精灵动画", formats: ["shp"], icon: "image" },
+  { id: "models", label: "三维模型", formats: ["vxl", "hva"], icon: "unit" },
+  { id: "palettes", label: "调色板", formats: ["pal", "vpl"], icon: "swatch" },
+  { id: "videos", label: "过场影片", formats: ["video"], icon: "play" },
   { id: "terrain", label: "地形素材", formats: ["tmp"], icon: "image" },
   { id: "rules", label: "规则文本", formats: ["ini", "csf", "text"], icon: "file" },
 ];
@@ -1433,8 +1445,8 @@ function ExplorerApp() {
     || visibleCategories[0]
     || null;
   const selectedCategoryId = selectedCategory?.id || "";
-  const isMediaCategory = selectedCategoryId === "voices" || selectedCategoryId === "sounds";
-  const mediaKind: MediaKind = selectedCategoryId === "voices" ? "voice" : "sound";
+  const isMediaCategory = selectedCategoryId in mediaCategoryKinds;
+  const mediaKind: MediaKind = mediaCategoryKinds[selectedCategoryId] || "sound";
   const categoryFormats = (selectedCategory?.formats || [])
     .filter((formatName) => enabledFormats.includes(formatName));
   const assetFormats = assetFormatTag && categoryFormats.includes(assetFormatTag)
@@ -2660,16 +2672,16 @@ function ExplorerApp() {
                   })}
                 </div>
               </section>
-              {visibleCategories.some((item) => ["voices", "sounds"].includes(item.id)) && <section className="tree-branch media-tree-branch">
+              {visibleCategories.some((item) => item.id in mediaCategoryKinds) && <section className="tree-branch media-tree-branch">
                 <div className="tree-parent"><Icon name="play" /><strong>声音</strong><em>{mediaKindCounts.reduce((count, item) => count + item.count, 0) || categoryCount(stats, audioFormats)}</em></div>
                 <div className="tree-children">
-                  {visibleCategories.filter((item) => ["voices", "sounds"].includes(item.id)).map((item) => <div className="tree-child-group" key={item.id}>
-                    <button title={item.label} className={view === "assets" && assetCategory === item.id && !mediaGroup ? "active" : ""} onClick={() => selectAssetCategory(item.id)}><span><Icon name={item.id === "voices" ? "voice" : "sound"} /><b>{item.label}</b></span>{mediaKindCounts.length > 0 && <em>{mediaKindCounts.find((count) => count.kind === (item.id === "voices" ? "voice" : "sound"))?.count || 0}</em>}</button>
-                    {view === "assets" && assetCategory === item.id && mediaGroups.filter((group) => group.group.endsWith(item.id === "voices" ? "_voice" : "_sound")).map((group) => <button title={mediaGroupLabels[group.group] || group.group} className={`tree-grandchild ${mediaGroup === group.group ? "active" : ""}`} key={group.group} onClick={() => selectMediaGroup(mediaGroup === group.group ? "" : group.group)}><span><Icon name={item.id === "voices" ? "voice" : "sound"} /><b>{mediaGroupLabels[group.group] || group.group}</b></span><em>{group.count}</em></button>)}
-                  </div>)}
+                  {visibleCategories.filter((item) => item.id in mediaCategoryKinds).map((item) => { const kind = mediaCategoryKinds[item.id]; return <div className="tree-child-group" key={item.id}>
+                    <button title={item.label} className={view === "assets" && assetCategory === item.id && !mediaGroup ? "active" : ""} onClick={() => selectAssetCategory(item.id)}><span><Icon name={item.id === "voices" ? "voice" : "sound"} /><b>{item.label}</b></span>{mediaKindCounts.length > 0 && <em>{mediaKindCounts.find((count) => count.kind === kind)?.count || 0}</em>}</button>
+                    {view === "assets" && assetCategory === item.id && mediaGroups.filter((group) => group.group.endsWith(`_${kind}`)).map((group) => <button title={mediaGroupLabels[group.group] || group.group} className={`tree-grandchild ${mediaGroup === group.group ? "active" : ""}`} key={group.group} onClick={() => selectMediaGroup(mediaGroup === group.group ? "" : group.group)}><span><Icon name={item.id === "voices" ? "voice" : "sound"} /><b>{mediaGroupLabels[group.group] || group.group}</b></span><em>{group.count}</em></button>)}
+                  </div>; })}
                 </div>
               </section>}
-              {visibleCategories.filter((item) => !["voices", "sounds"].includes(item.id)).map((item) => (
+              {visibleCategories.filter((item) => !(item.id in mediaCategoryKinds)).map((item) => (
                 <button key={item.id} title={item.label} className={`tree-leaf ${view === "assets" && assetCategory === item.id ? "active" : ""}`} onClick={() => selectAssetCategory(item.id)}>
                   <span><Icon name={item.icon} /><b>{item.label}</b></span><em>{categoryCount(stats, item.formats.filter((formatName) => enabledFormats.includes(formatName)))}</em>
                 </button>

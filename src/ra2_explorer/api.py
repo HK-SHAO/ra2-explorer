@@ -377,7 +377,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         limit: int = Query(default=500, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, object]:
-        if kind is not None and kind not in {"voice", "sound", "unknown"}:
+        if kind is not None and kind not in {"voice", "sound", "music", "unknown"}:
             raise HTTPException(status_code=422, detail="未知音频类型")
         if sort not in {"name_asc", "name_desc", "description_asc"}:
             raise HTTPException(status_code=422, detail="未知音频排序方式")
@@ -766,6 +766,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "tmp",
             "pcx",
             "map",
+            "vpl",
         }:
             raise HTTPException(status_code=409, detail="该格式没有图像预览")
         artifact_path = _asset_artifact_path(
@@ -791,6 +792,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         asset_record, data = services.reader.read(asset_id)
         if asset_record["format"] == "pal":
             image = parse_palette(data).preview(cell_size=max(4, scale * 3))
+        elif asset_record["format"] == "vpl":
+            image = parse_vpl(data).preview(cell_size=max(1, scale))
         elif asset_record["format"] == "shp":
             sprite = parse_shp(data)
             if frame >= len(sprite.frames) or (
