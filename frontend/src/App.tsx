@@ -1037,6 +1037,17 @@ function ruleColumnSpan(label: string, value: string) {
   return width > 72 ? 3 : width > 34 ? 2 : 1;
 }
 
+// Clamp spans against the 3-column cursor so every visual row is filled;
+// otherwise a wide cell jumps to the next grid row and leaves a blank hole.
+function ruleSpanLayout(rows: Array<[string, string]>, labels: Record<string, string>) {
+  let cursor = 0;
+  return rows.map(([key, value]) => {
+    const span = Math.min(ruleColumnSpan(labels[key], value), 3 - cursor);
+    cursor = (cursor + span) % 3;
+    return span;
+  });
+}
+
 const appliedRememberedScrollResets = new Map<string, number>();
 
 function useRememberedScroll<
@@ -4936,7 +4947,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   useEffect(() => {
     setFrame(0);
     setPreviewAngle(defaultPreviewAngleRef.current);
-    setPlayerColor("");
+    setPlayerColor(entity ? entityCardPlayerColor(entity) : "");
     setPlaying(false);
     setFrameMode("sequence");
     setActiveAnimation(null);
@@ -5112,6 +5123,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   if (loading && !entity) return <aside className="detail-panel panel empty-detail"><div className="radar small"><span /></div><strong>正在读取单位详情…</strong></aside>;
   if (!entity) return <aside className="detail-panel panel empty-detail"><div className="empty-detail-icon"><Icon name="unit" size={30} /></div><strong>选择单位</strong></aside>;
   const rules = Object.entries(entity.rules).filter(([key]) => ruleLabels[key]);
+  const ruleSpans = ruleSpanLayout(rules, ruleLabels);
   const soundAssociations = mergeSoundAssociations(entity.media);
   const soundCount = soundAssociations.reduce((count, association) => count + association.samples.length, 0);
   const hasBodySequences = bodyAnimationAssociations.length > 0;
@@ -5335,7 +5347,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
 
             {rules.length > 0 && <details className="entity-section compact-section entity-rules" open>
               <summary><span>规则属性</span><em>{rules.length}</em></summary>
-              <div className="metadata"><dl>{rules.map(([key, value]) => <div className={`rule-span-${ruleColumnSpan(ruleLabels[key], value)}`} key={key}><dt>{ruleLabels[key]}</dt><dd>{value}</dd></div>)}</dl></div>
+              <div className="metadata"><dl>{rules.map(([key, value], index) => <div className={`rule-span-${ruleSpans[index]}`} key={key}><dt>{ruleLabels[key]}</dt><dd>{value}</dd></div>)}</dl></div>
             </details>}
 
             {dependencyGroups.length > 0 && <div className="entity-dependencies">
