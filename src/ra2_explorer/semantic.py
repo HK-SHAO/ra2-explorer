@@ -2760,13 +2760,17 @@ def _merge_csf_inputs(
                 strings[folded] = label.values[0].text
                 if folded.startswith("vox:"):
                     value = label.values[0]
+                    # Chinese community installs often leave the CSF language
+                    # header at 0; treat CJK text as the localized column so
+                    # packaged Chinese voice lines are not misfiled as English.
+                    is_localized = parsed.language == 9 or _contains_cjk(value.text)
                     for alias in _voice_aliases(folded[4:], value.extra):
                         current = voice_strings.get(alias)
                         original_text = current.original_text if current else None
                         localized_text = current.localized_text if current else None
-                        if parsed.language == 9:
+                        if is_localized:
                             localized_text = value.text
-                        elif parsed.language == 0:
+                        else:
                             original_text = value.text
                         voice_strings[alias] = VoiceText(
                             label.name,
@@ -2797,6 +2801,13 @@ def _overlay_voice_transcripts(
             original_text,
             localized_text,
         )
+
+
+def _contains_cjk(text: str) -> bool:
+    return any(
+        0x2E80 <= ord(character) <= 0x9FFF or 0xF900 <= ord(character) <= 0xFAFF
+        for character in text
+    )
 
 
 def _voice_aliases(label_name: str, extra: str | None) -> tuple[str, ...]:

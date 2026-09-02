@@ -44,6 +44,59 @@ def test_sniff_detects_bink_video() -> None:
     assert sniff_format(b"BIKi" + b"\x00" * 64, None) == "video"
 
 
+def _csf_bytes(language: int, labels: tuple[tuple[str, str, str | None], ...]) -> bytes:
+    import struct
+
+    output = bytearray(b" FSC")
+    output.extend(struct.pack("<IIIII", 3, len(labels), len(labels), 0, language))
+    for name, text, extra in labels:
+        encoded_name = name.encode("ascii")
+        output.extend(b" LBL")
+        output.extend(struct.pack("<II", 1, len(encoded_name)))
+        output.extend(encoded_name)
+        output.extend(b"WRTS" if extra else b" RTS")
+        units = text.encode("utf-16-le")
+        output.extend(struct.pack("<I", len(units) // 2))
+        output.extend(byte ^ 0xFF for byte in units)
+        if extra:
+            encoded_extra = extra.encode("ascii")
+            output.extend(struct.pack("<I", len(encoded_extra)))
+            output.extend(encoded_extra)
+    return bytes(output)
+
+
+class _FakeReader:
+    def __init__(self, payloads: dict[str, bytes]) -> None:
+        self._payloads = payloads
+
+    def read(self, asset_id: str) -> tuple[str, bytes]:
+        return asset_id, self._payloads[asset_id]
+
+
+def test_csf_voice_text_falls_back_to_cjk_detection() -> None:
+    from ra2_explorer.semantic import _merge_csf_inputs
+
+    english = _csf_bytes(
+        0,
+        (("VOX:apocsea", "Soviet power supreme", "vaposea"),),
+    )
+    chinese = _csf_bytes(
+        0,
+        (("VOX:apocsea", "苏维埃联盟万岁", "vaposea"),),
+    )
+    assets = [
+        {"id": "csf-english", "display_name": "ra2.csf", "virtual_path": "ra2.csf"},
+        {"id": "csf-chinese", "display_name": "ra2zh.csf", "virtual_path": "ra2zh.csf"},
+    ]
+    reader = _FakeReader({"csf-english": english, "csf-chinese": chinese})
+
+    _, voice_strings = _merge_csf_inputs(reader, assets, [], {})
+
+    voice = voice_strings["vaposea"]
+    assert voice.original_text == "Soviet power supreme"
+    assert voice.localized_text == "苏维埃联盟万岁"
+
+
 def test_unnamed_audio_bag_pair_is_expanded(tmp_path: Path) -> None:
     import struct
 
