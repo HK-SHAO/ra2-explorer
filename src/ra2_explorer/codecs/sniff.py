@@ -63,6 +63,8 @@ def sniff_format(data: bytes | bytearray | memoryview, name: str | None = None) 
     if looks_like_shp(view):
         return "shp"
     sample = bytes(view[:4096])
+    if sample.startswith(b"BIK"):
+        return "video"
     if sample.startswith(b"RIFF") and sample[8:12] == b"WAVE":
         return "wav"
     if sample.startswith(b"GABA"):

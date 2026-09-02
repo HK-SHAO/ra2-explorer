@@ -41,7 +41,7 @@ from ra2_explorer.storage import Database
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
 ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
 UNAFFILIATED_SIDE = "unaffiliated"
-SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v19",)
+SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v20",)
 _PLANNING_SIDE_IDS = ("GDI", "Nod", "ThirdSide")
 _TYPE_SECTIONS = {
     "vehicle": "VehicleTypes",
@@ -1593,13 +1593,13 @@ class SemanticLibrary:
 
         warnings = []
         rules_assets = _edition_ini_inputs(
-            asset_index.by_name,
+            asset_index,
             "rules.ini",
             "rulesmd.ini",
         )
-        art_assets = _named_inputs(asset_index.by_name, ("art.ini", "artmd.ini"))
-        sound_assets = _named_inputs(asset_index.by_name, ("sound.ini", "soundmd.ini"))
-        eva_assets = _named_inputs(asset_index.by_name, ("eva.ini", "evamd.ini"))
+        art_assets = _named_inputs(asset_index, ("art.ini", "artmd.ini"))
+        sound_assets = _named_inputs(asset_index, ("sound.ini", "soundmd.ini"))
+        eva_assets = _named_inputs(asset_index, ("eva.ini", "evamd.ini"))
         csf_assets = sorted(
             (asset for asset in assets if asset["format"] == "csf"),
             key=_config_precedence,
@@ -2684,22 +2684,39 @@ def _build_media_items(
 
 
 def _named_inputs(
-    by_name: dict[str, list[dict[str, Any]]],
+    asset_index: _AssetIndex,
     names: tuple[str, ...],
 ) -> list[dict[str, Any]]:
-    assets = []
+    assets: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for name in names:
-        assets.extend(by_name.get(name.casefold(), ()))
+        candidates = list(asset_index.by_name.get(name.casefold(), ()))
+        if not candidates:
+            # Unnamed members are indexed under their CRC; resolve known
+            # configuration names through their MIX hashes as well.
+            try:
+                hashes = {ra2_mix_hash(name), classic_mix_hash(name)}
+            except ValueError:
+                continue
+            candidates = [
+                asset
+                for crc in hashes
+                for asset in asset_index.by_crc.get(crc, ())
+            ]
+        for asset in candidates:
+            if asset["id"] not in seen:
+                seen.add(asset["id"])
+                assets.append(asset)
     return sorted(assets, key=_config_precedence)
 
 
 def _edition_ini_inputs(
-    by_name: dict[str, list[dict[str, Any]]],
+    asset_index: _AssetIndex,
     base_name: str,
     expansion_name: str,
 ) -> list[dict[str, Any]]:
-    expansion = _named_inputs(by_name, (expansion_name,))
-    return expansion or _named_inputs(by_name, (base_name,))
+    expansion = _named_inputs(asset_index, (expansion_name,))
+    return expansion or _named_inputs(asset_index, (base_name,))
 
 
 def _merge_ini_inputs(

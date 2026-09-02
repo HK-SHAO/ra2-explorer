@@ -1530,13 +1530,16 @@ def test_expansion_rules_replace_the_base_edition() -> None:
         "storage_kind": "mix",
     }
 
+    def index_for(by_name: dict[str, list[dict[str, object]]]) -> _AssetIndex:
+        return _AssetIndex(by_name=dict(by_name), by_crc={})
+
     assert _edition_ini_inputs(
-        {"rules.ini": [base], "rulesmd.ini": [expansion]},
+        index_for({"rules.ini": [base], "rulesmd.ini": [expansion]}),
         "rules.ini",
         "rulesmd.ini",
     ) == [expansion]
     assert _edition_ini_inputs(
-        {"rules.ini": [base]},
+        index_for({"rules.ini": [base]}),
         "rules.ini",
         "rulesmd.ini",
     ) == [base]

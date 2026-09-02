@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from ra2_explorer.codecs.bag import parse_bag_index
 from ra2_explorer.codecs.mix import (
     MixHashType,
+    MixIndex,
     classic_mix_hash,
     parse_local_mix_database,
     parse_mix,
@@ -35,6 +36,24 @@ MAX_ARCHIVE_SIZE = 1_073_741_824
 MAX_NESTING_DEPTH = 6
 MAX_ARCHIVES_PER_SOURCE = 4096
 MAX_SNIFF_BYTES = 67_108_864
+# Smallest plausible archive: 6-byte header plus one 12-byte entry and payload.
+MIN_MIX_PROBE_SIZE = 64
+# Audio bag payloads carry no magic bytes and can accidentally satisfy MIX
+# header validation, so they are recognized by CRC pairing with AUDIO.IDX.
+AUDIO_INDEX_CRCES = frozenset(
+    crc for name in ("audio.idx",) for crc in (ra2_mix_hash(name), classic_mix_hash(name))
+)
+AUDIO_BAG_CRCES = frozenset(
+    crc for name in ("audio.bag",) for crc in (ra2_mix_hash(name), classic_mix_hash(name))
+)
+
+
+def _probe_mix(payload: memoryview) -> MixIndex | None:
+    """Return a parsed MIX index for payloads that parse as MIX, else None."""
+    try:
+        return parse_mix(payload)
+    except Ra2ExplorerError:
+        return None
 
 
 class NameResolver:
@@ -302,12 +321,27 @@ class SourceLibrary:
             )
         )
 
-        direct_assets: dict[str, tuple[AssetRecord, memoryview]] = {}
+        audio_index_pair: tuple[AssetRecord, memoryview] | None = None
+        audio_bag_pair: tuple[AssetRecord, memoryview] | None = None
         for entry in index.entries:
             name = resolved_names.get(entry.crc)
             payload = index.payload(data, entry)
             asset_format = format_from_name(name)
             confidence = "name" if asset_format else "unknown"
+            is_audio_bag = entry.crc in AUDIO_BAG_CRCES
+            if (
+                name is None
+                and not is_audio_bag
+                and entry.size >= MIN_MIX_PROBE_SIZE
+                and _probe_mix(payload) is not None
+            ):
+                # Unnamed retail entries inside ra2.mix/ra2md.mix/language.mix
+                # are often encrypted nested MIX archives. Their headers carry
+                # no recognizable extension, so probe the MIX parser before
+                # falling back to content sniffing; otherwise the archive is
+                # misclassified and its members are lost to the index.
+                asset_format = "mix"
+                confidence = "content"
             if not asset_format and entry.size <= MAX_SNIFF_BYTES:
                 asset_format = sniff_format(payload, name)
                 if asset_format != "binary":
@@ -336,8 +370,10 @@ class SourceLibrary:
                 loose_relative_path=None,
             )
             result.assets.append(asset_record)
-            if name:
-                direct_assets[Path(name).name.casefold()] = (asset_record, payload)
+            if entry.crc in AUDIO_INDEX_CRCES:
+                audio_index_pair = (asset_record, payload)
+            elif is_audio_bag:
+                audio_bag_pair = (asset_record, payload)
 
             if asset_format != "mix" or depth >= MAX_NESTING_DEPTH:
                 continue
@@ -353,15 +389,13 @@ class SourceLibrary:
                 result=result,
             )
 
-        audio_index = direct_assets.get("audio.idx")
-        audio_bag = direct_assets.get("audio.bag")
-        if audio_index and audio_bag:
+        if audio_index_pair is not None and audio_bag_pair is not None:
             try:
                 self._expand_audio_bag(
                     source_id,
-                    audio_bag[0],
-                    audio_index[1],
-                    len(audio_bag[1]),
+                    audio_bag_pair[0],
+                    audio_index_pair[1],
+                    audio_bag_pair[0].size,
                     result,
                 )
             except Ra2ExplorerError as error:
