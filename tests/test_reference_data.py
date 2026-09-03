@@ -169,7 +169,7 @@ def test_bundled_translation_terminal_punctuation_follows_original(tmp_path) -> 
 def test_bundled_unit_voice_translation_catalog_is_well_formed() -> None:
     payload = json.loads(BUNDLED_UNIT_VOICE_TRANSCRIPT_PATH.read_text(encoding="utf-8"))
 
-    assert len(payload["entries"]) == 617
+    assert len(payload["entries"]) == 841
     assert all(entry.get("translated_text") for entry in payload["entries"].values())
     for entry in payload["entries"].values():
         text = entry["translated_text"]
@@ -189,6 +189,9 @@ def test_bundled_unit_voice_translation_catalog_is_well_formed() -> None:
     assert payload["entries"]["ibrusea"]["translated_text"] == "嗯？"
     assert payload["entries"]["iflafea"]["translated_text"] == "穿不过这片弹幕。"
     assert payload["entries"]["irommoe"]["translated_text"] == "这双靴子太紧了"
+    assert payload["entries"]["vchosea"]["translated_text"] == "武装直升机报到"
+    assert payload["entries"]["vintate"]["translated_text"] == "仪器已锁定目标。"
+    assert payload["entries"]["vmasmod"]["translated_text"] == "那些傻瓜在哪里？"
     assert payload["entries"]["ienafec"] == {
         "translated_text": "<惊恐声>",
         "translation_kind": "nonverbal",
