@@ -370,9 +370,16 @@ export interface EntityPage {
   total: number;
   kinds: Array<{ kind: EntityKind; count: number }>;
   usages: Array<{ usage: EntityUsage; count: number }>;
-  countries: Array<{ id: string; display_name: string; side: string; count: number }>;
+  countries: CountryFacet[];
   sides: Array<{ id: string; count: number }>;
   warnings: string[];
+}
+
+export interface CountryFacet {
+  id: string;
+  display_name: string;
+  side: string;
+  count: number;
 }
 
 export type MediaKind = "voice" | "sound" | "unknown";
@@ -420,6 +427,7 @@ export interface MediaPage {
   kinds: Array<{ kind: MediaKind; count: number }>;
   groups: Array<{ group: string; count: number }>;
   event_types: Array<{ event_type: string; count: number }>;
+  countries: CountryFacet[];
 }
 
 export interface EntityListOptions {

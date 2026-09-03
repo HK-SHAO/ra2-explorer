@@ -23,6 +23,7 @@ import {
   AssetAssociationPage,
   AssetMetadata,
   AssetSort,
+  CountryFacet,
   DiscoveryResult,
   EntityDependency,
   EntityKind,
@@ -1371,6 +1372,7 @@ function ExplorerApp() {
   const mediaLoadedCountRef = useRef(0);
   const [mediaGroups, setMediaGroups] = useState<Array<{ group: string; count: number }>>([]);
   const [mediaEventTypes, setMediaEventTypes] = useState<Array<{ event_type: string; count: number }>>([]);
+  const [mediaCountries, setMediaCountries] = useState<CountryFacet[]>([]);
   const [mediaKindCounts, setMediaKindCounts] = useState<Array<{ kind: MediaKind; count: number }>>([]);
   const [searchEntityItems, setSearchEntityItems] = useState<EntitySummary[]>([]);
   const [searchEntityTotal, setSearchEntityTotal] = useState(0);
@@ -2081,6 +2083,7 @@ function ExplorerApp() {
     setMediaGroups([]);
     setMediaKindCounts([]);
     setMediaEventTypes([]);
+    setMediaCountries([]);
     setSearchEntityItems([]);
     setSearchEntityTotal(0);
     setSearchMediaItems([]);
@@ -2181,6 +2184,7 @@ function ExplorerApp() {
           setMediaGroups(orderedMediaGroups(page.groups));
           setMediaKindCounts(page.kinds);
           setMediaEventTypes(page.event_types || []);
+          setMediaCountries(page.countries || []);
           const remembered = assetSelectionsRef.current.get(
             assetSelectionKey(sourceId, selectedCategoryId, mediaGroup),
           ) || "";
@@ -2574,6 +2578,7 @@ function ExplorerApp() {
       mediaLoadedCountRef.current += page.items.length;
       setMediaTotal(page.total);
       setMediaEventTypes(page.event_types || []);
+      setMediaCountries(page.countries || []);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "载入失败");
     } finally {
@@ -2717,6 +2722,7 @@ function ExplorerApp() {
             loading={mediaLoading}
             search={catalogSearch}
             groups={mediaGroups.filter((group) => group.group.endsWith(mediaKind === "voice" ? "_voice" : "_sound"))}
+            countries={mediaCountries}
             selectedGroup={mediaGroup}
             setSelectedGroup={selectMediaGroup}
             eventTypes={mediaEventTypes}
@@ -3050,7 +3056,33 @@ function semanticSoundSectionIdentity(item: MediaItem, selectedGroup: string) {
   return null;
 }
 
-function mediaSectionIdentity(item: MediaItem, selectedGroup: string) {
+interface MediaSectionIdentity {
+  key: string;
+  label: string;
+  subtitle: string;
+  countryOrder?: number;
+}
+
+function mediaSectionIdentity(
+  item: MediaItem,
+  selectedGroup: string,
+  countryNames: ReadonlyMap<string, { label: string; order: number }>,
+): MediaSectionIdentity {
+  if (["multiplayer_voice", "taunt_voice"].includes(selectedGroup) && item.countries.length > 0) {
+    const countryIds = [...item.countries].sort((left, right) => (
+      (countryNames.get(left)?.order ?? Number.MAX_SAFE_INTEGER)
+      - (countryNames.get(right)?.order ?? Number.MAX_SAFE_INTEGER)
+      || left.localeCompare(right)
+    ));
+    return {
+      key: `country:${countryIds.join("|")}`,
+      label: countryIds.map((id) => countryNames.get(id)?.label || id).join(" · "),
+      subtitle: "",
+      countryOrder: Math.min(...countryIds.map(
+        (id) => countryNames.get(id)?.order ?? Number.MAX_SAFE_INTEGER,
+      )),
+    };
+  }
   const semanticSection = semanticSoundSectionIdentity(item, selectedGroup);
   if (semanticSection) return semanticSection;
   if (item.entities.length === 1) {
@@ -3442,12 +3474,13 @@ function SearchResultsPanel({
   </section>;
 }
 
-function MediaListPanel({ items, total, loading, search, groups, selectedGroup, setSelectedGroup, eventTypes, selectedEventType, setSelectedEventType, grouped, setGrouped, headerAlignment, voiceTextPreference, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore, scrollKey, scrollResetRevision, catalogFocus, onCatalogFocusComplete }: {
+function MediaListPanel({ items, total, loading, search, groups, countries, selectedGroup, setSelectedGroup, eventTypes, selectedEventType, setSelectedEventType, grouped, setGrouped, headerAlignment, voiceTextPreference, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore, scrollKey, scrollResetRevision, catalogFocus, onCatalogFocusComplete }: {
   items: MediaItem[];
   total: number;
   loading: boolean;
   search: CatalogSearchBarProps;
   groups: Array<{ group: string; count: number }>;
+  countries: CountryFacet[];
   selectedGroup: string;
   setSelectedGroup: (value: string) => void;
   eventTypes: Array<{ event_type: string; count: number }>;
@@ -3473,15 +3506,29 @@ function MediaListPanel({ items, total, loading, search, groups, selectedGroup, 
   const listScroll = useRememberedScroll(scrollKey, items.length, scrollResetRevision);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
   const sections = useMemo(() => {
-    const groupedItems = new Map<string, { label: string; subtitle: string; items: MediaItem[] }>();
+    const countryNames = new Map<string, { label: string; order: number }>(
+      countries.map((country, order) => [
+        country.id,
+        { label: country.display_name, order },
+      ] as const),
+    );
+    const groupedItems = new Map<string, { label: string; subtitle: string; countryOrder: number; items: MediaItem[] }>();
     for (const item of items) {
-      const identity = mediaSectionIdentity(item, selectedGroup);
-      const section = groupedItems.get(identity.key) || { label: identity.label, subtitle: identity.subtitle, items: [] };
+      const identity = mediaSectionIdentity(item, selectedGroup, countryNames);
+      const section: { label: string; subtitle: string; countryOrder: number; items: MediaItem[] } = groupedItems.get(identity.key) || {
+        label: identity.label,
+        subtitle: identity.subtitle,
+        countryOrder: identity.countryOrder ?? Number.MAX_SAFE_INTEGER,
+        items: [],
+      };
       section.items.push(item);
       groupedItems.set(identity.key, section);
     }
-    return [...groupedItems.entries()].map(([key, section]) => ({ key, ...section }));
-  }, [items, selectedGroup]);
+    const result = [...groupedItems.entries()].map(([key, section]) => ({ key, ...section }));
+    return ["multiplayer_voice", "taunt_voice"].includes(selectedGroup)
+      ? result.sort((left, right) => left.countryOrder - right.countryOrder || left.label.localeCompare(right.label))
+      : result;
+  }, [countries, items, selectedGroup]);
   const allSectionsExpanded = sections.every((section) => !collapsedSections.has(section.key));
 
   useEffect(() => {

@@ -313,7 +313,7 @@ async function filterEntities(params: URLSearchParams): Promise<EntityPage> {
     usages: catalog.usages
       .map((item) => ({ ...item, count: usageCounts.get(item.usage) || 0 }))
       .filter((item) => item.count > 0),
-    countries: catalog.countries
+    countries: (catalog.countries || [])
       .map((item) => ({ ...item, count: countryCounts.get(item.id) || 0 }))
       .filter((item) => item.count > 0),
     sides: [...sideCounts.entries()].sort(([left], [right]) => left.localeCompare(right))
@@ -349,6 +349,7 @@ async function filterMedia(params: URLSearchParams): Promise<MediaPage> {
     )));
   }
   const eventCounts = countBy(items, (item) => item.slots);
+  const countryCounts = countBy(items, (item) => item.countries);
   const eventType = params.get("event_type");
   if (eventType) items = items.filter((item) => item.slots.includes(eventType));
   const sort = params.get("sort") || "name_asc";
@@ -375,6 +376,9 @@ async function filterMedia(params: URLSearchParams): Promise<MediaPage> {
       .map(([value, count]) => ({ group: value, count })),
     event_types: [...eventCounts.entries()].sort(([left], [right]) => left.localeCompare(right))
       .map(([value, count]) => ({ event_type: value, count })),
+    countries: catalog.countries
+      .map((item) => ({ ...item, count: countryCounts.get(item.id) || 0 }))
+      .filter((item) => item.count > 0),
   };
 }
 
