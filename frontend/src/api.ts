@@ -711,7 +711,7 @@ export const api = {
     return `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}/model.json?${params}`;
   },
   assetModelUrl: (assetId: string, frame = 0, playerColor = "", paletteId = "") => {
-    if (isStaticSnapshot) return staticAssetModelUrl(assetId, frame);
+    if (isStaticSnapshot) return staticAssetModelUrl(assetId, frame, playerColor);
     const params = new URLSearchParams({ frame: String(frame), v: "5" });
     if (playerColor) params.set("player_color", playerColor);
     if (paletteId) params.set("palette_id", paletteId);
@@ -725,7 +725,13 @@ export const api = {
     playerColor = "",
     options: { palette?: "unit" | "animation"; shadowFrame?: number } = {},
   ) => {
-    if (isStaticSnapshot) return staticAssetPreviewUrl(assetId, frame, options.palette, options.shadowFrame);
+    if (isStaticSnapshot) return staticAssetPreviewUrl(
+      assetId,
+      frame,
+      options.palette,
+      options.shadowFrame,
+      playerColor,
+    );
     const params = new URLSearchParams({ frame: String(frame), scale: String(scale) });
     if (paletteId) params.set("palette_id", paletteId);
     if (playerColor) params.set("player_color", playerColor);

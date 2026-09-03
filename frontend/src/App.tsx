@@ -4840,7 +4840,18 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   const renderFacing = entity?.preview.supports_facing
     ? entityFacingForPreviewAngle(entity.preview.facing_format, previewAngle)
     : 0;
-  const [playerColor, setPlayerColor] = useState("");
+  const defaultPlayerColor = entity ? entityCardPlayerColor(entity) : "";
+  const [playerColorSelection, setPlayerColorSelection] = useState<{
+    entityId: string;
+    color: string;
+  } | null>(null);
+  const playerColor = playerColorSelection && playerColorSelection.entityId === entity?.id
+    ? playerColorSelection.color
+    : defaultPlayerColor;
+  const selectablePlayerColors = defaultPlayerColor
+    && !playerColors.some((color) => color.id === defaultPlayerColor)
+    ? [{ id: defaultPlayerColor, rgb: [], hex: "" }, ...playerColors]
+    : playerColors;
   const [playing, setPlaying] = useState(false);
   const [frameMode, setFrameMode] = useState<"sequence" | "grid">("sequence");
   const [soundAssociationLayout, setSoundAssociationLayout] = useState<LayoutMode>("list");
@@ -5013,7 +5024,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   useEffect(() => {
     setFrame(0);
     setPreviewAngle(defaultPreviewAngleRef.current);
-    setPlayerColor("");
+    setPlayerColorSelection(null);
     setPlaying(false);
     setFrameMode("sequence");
     setActiveAnimation(null);
@@ -5365,7 +5376,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
             </div>}
             <div className="entity-render-options compact-render-options">
               {(entity.voxel || entity.preview.supports_facing) && <label><span>角度</span><select aria-label="单位预览角度" value={previewAngle} onChange={(event) => setPreviewAngle(normalizePreviewAngle(Number(event.target.value)))}>{previewAngleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
-              {entity.preview.supports_player_color && <label title="选择玩家颜色"><select aria-label="玩家颜色" value={playerColor} onChange={(event) => setPlayerColor(event.target.value)}><option value="">原始色</option>{playerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
+              {entity.preview.supports_player_color && <label title="选择玩家颜色"><select aria-label="玩家颜色" value={playerColor} onChange={(event) => setPlayerColorSelection({ entityId: entity.id, color: event.target.value })}><option value="">原始色</option>{selectablePlayerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
             </div>
           </div> : <div className="unsupported-preview"><Icon name="unit" size={34} /><strong>{entityBodyStatusLabel(entity)}</strong></div>}
         </div>

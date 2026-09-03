@@ -474,8 +474,10 @@ export function staticEntityModelUrl(entityId: string, frame = 0) {
   return snapshotUrl(`models/entities/${encodeURIComponent(entityId)}/${frame}.json`);
 }
 
-export function staticAssetModelUrl(assetId: string, frame = 0) {
-  return snapshotUrl(`models/assets/${encodeURIComponent(assetId)}/${frame}.json`);
+export function staticAssetModelUrl(assetId: string, frame = 0, playerColor = "") {
+  return snapshotUrl(
+    `models/assets/${encodeURIComponent(assetId)}/color-${playerColor || "original"}/${frame}.json`,
+  );
 }
 
 export function staticAssetPreviewUrl(
@@ -483,9 +485,10 @@ export function staticAssetPreviewUrl(
   frame: number,
   palette: "unit" | "animation" | undefined,
   shadowFrame: number | undefined,
+  playerColor = "",
 ) {
   return snapshotUrl(
-    `previews/assets/${encodeURIComponent(assetId)}/${palette || "auto"}/${frame}-shadow-${shadowFrame ?? "none"}.webp`,
+    `previews/assets/${encodeURIComponent(assetId)}/color-${playerColor || "original"}/${palette || "auto"}/${frame}-shadow-${shadowFrame ?? "none"}.webp`,
   );
 }
 
