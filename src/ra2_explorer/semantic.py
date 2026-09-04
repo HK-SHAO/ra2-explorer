@@ -41,7 +41,7 @@ from ra2_explorer.storage import Database
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
 ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
 UNAFFILIATED_SIDE = "unaffiliated"
-SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v22",)
+SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v23",)
 _PLANNING_SIDE_IDS = ("GDI", "Nod", "ThirdSide")
 _TYPE_SECTIONS = {
     "vehicle": "VehicleTypes",
@@ -2971,15 +2971,24 @@ def _build_eva_events(
             )
             for sample_name in sample_names:
                 sample = _audio_sample(sample_name, assets, voice_strings)
-                if sample.text is None and fallback_voice_text is not None:
+                if fallback_voice_text is not None:
                     sample = replace(
                         sample,
-                        text=fallback_voice_text.text,
-                        original_text=fallback_voice_text.original_text,
-                        localized_text=fallback_voice_text.localized_text,
-                        text_label=fallback_voice_text.label,
-                        localized_text_origin=fallback_voice_text.localized_text_origin,
-                        translated_text=fallback_voice_text.translated_text,
+                        text=sample.text or fallback_voice_text.text,
+                        original_text=(
+                            sample.original_text or fallback_voice_text.original_text
+                        ),
+                        localized_text=(
+                            sample.localized_text or fallback_voice_text.localized_text
+                        ),
+                        text_label=sample.text_label or fallback_voice_text.label,
+                        localized_text_origin=(
+                            sample.localized_text_origin
+                            or fallback_voice_text.localized_text_origin
+                        ),
+                        translated_text=(
+                            sample.translated_text or fallback_voice_text.translated_text
+                        ),
                     )
                 slot = advisor_slot or f"eva_{faction}"
                 if advisor_slot is not None:

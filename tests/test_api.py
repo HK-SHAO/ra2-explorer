@@ -731,6 +731,32 @@ def test_eva_unit_intros_collapse_identical_player_faction_variants() -> None:
     ]
 
 
+def test_eva_event_fallback_preserves_original_alongside_direct_translation() -> None:
+    events = _build_eva_events(
+        {
+            "mis_xa1_tanyaswimhint": {
+                "allied": "XA1TA01",
+                "text": "One short swim to Alcatraz.",
+            }
+        },
+        _AssetIndex({}, {}),
+        {
+            "xa1ta01": VoiceText(
+                "TRANSCRIPT:xa1ta01",
+                "只要游一小段到恶魔岛。",
+                None,
+                None,
+                translated_text="只要游一小段到恶魔岛。",
+            )
+        },
+    )
+
+    sample = events[0].samples[0]
+    assert sample.text == "只要游一小段到恶魔岛。"
+    assert sample.original_text == "One short swim to Alcatraz."
+    assert sample.translated_text == "只要游一小段到恶魔岛。"
+
+
 def test_asset_associations_hide_legacy_unit_intro_player_variants() -> None:
     asset = {
         "id": "ifv-intro",
