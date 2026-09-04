@@ -528,6 +528,19 @@ def _entity_tasks(
         )
         exported_frames = range(frame_count) if has_raw_body_animation else range(1)
         if preview.get("format") == "vxl":
+            # 体素实体导出模型场景而非帧图，但卡片图集仍需要一张缩略图。
+            thumbnail_output = (
+                root / "previews" / "entities" / safe_id / "thumbnail" / "0" / "0.webp"
+            )
+            images[thumbnail_output] = _EntityPreviewTask(
+                entity_id=entity_id,
+                frame=0,
+                facing=0,
+                scale=2,
+                thumbnail=True,
+                player_color=player_color,
+                output=thumbnail_output,
+            )
             for frame in exported_frames:
                 output = root / "models" / "entities" / safe_id / f"{frame}.json"
                 models[output] = _ExportTask(
@@ -858,13 +871,14 @@ def _export_entity_thumbnail_atlases(
             ):
                 source_facing = facing if facing < facing_count else 0
                 entity_id = _safe_filename(str(item["id"]))
+                uses_voxel = (item.get("preview") or {}).get("format") == "vxl"
                 source = (
                     root
                     / "previews"
                     / "entities"
                     / entity_id
-                    / "frame"
-                    / str(source_facing)
+                    / ("thumbnail" if uses_voxel else "frame")
+                    / "0"
                     / "0.webp"
                 )
                 if not source.is_file():
@@ -944,13 +958,14 @@ def _export_entity_search_thumbnail_atlases(
             )
             source_facing = (4 + preview_angle) % 8 if supports_facing else 0
             entity_id = _safe_filename(str(item["id"]))
+            uses_voxel = preview.get("format") == "vxl"
             source = (
                 root
                 / "previews"
                 / "entities"
                 / entity_id
-                / "frame"
-                / str(source_facing)
+                / ("thumbnail" if uses_voxel else "frame")
+                / ("0" if uses_voxel else str(source_facing))
                 / "0.webp"
             )
             if not source.is_file():

@@ -612,14 +612,15 @@ def test_pages_exports_one_shared_search_thumbnail_atlas_per_angle(
         ("TANK", "vxl", False),
         ("SOLDIER", "shp", True),
     ):
+        source_dir = "thumbnail" if image_format == "vxl" else "frame"
         for facing in range(8 if supports_facing else 1):
             output = (
                 tmp_path
                 / "previews"
                 / "entities"
                 / entity_id
-                / "frame"
-                / str(facing)
+                / source_dir
+                / ("0" if image_format == "vxl" else str(facing))
                 / "0.webp"
             )
             output.parent.mkdir(parents=True, exist_ok=True)
