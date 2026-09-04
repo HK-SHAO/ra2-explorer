@@ -155,8 +155,9 @@ const iconPaths: Record<IconName, ReactNode> = {
 };
 
 const Icon = memo(function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
+  const box = `${size / 16}rem`;
   return (
-    <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg className="icon" style={{ width: box, height: box }} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <g stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{iconPaths[name]}</g>
     </svg>
   );

@@ -979,8 +979,13 @@ body { font-size: .875rem; }
   .summary-grid, .reference-card { display: none; }
   .library-tree { max-height: min(19.375rem, 40dvh); }
   .asset-panel { height: 30rem; }
-  .asset-toolbar { height: 3.625rem; padding: 0 .75rem; }
-  .entity-filter { width: 5.375rem; }
+  .asset-toolbar { height: auto; min-height: 3.625rem; padding: .5rem .75rem; }
+  .entity-search-cluster { flex-wrap: wrap; row-gap: .5rem; }
+  .entity-search-options { flex: 1 1 100%; justify-content: space-between; }
+  .entity-search-input { flex: 1 1 0; min-width: 0; }
+  .media-filter-actions { flex-wrap: wrap; row-gap: .5rem; }
+  .sort-control { flex: 1 1 11rem; }
+  .sort-control select { width: 100%; }
   .result-count { display: none; }
   .asset-row { padding-left: .75rem; }
   .asset-list.list-columns { grid-template-columns: 1fr; }
