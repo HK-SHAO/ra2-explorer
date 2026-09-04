@@ -31,4 +31,3 @@ dist-pages/
 *.swp
 
 # uv
-uv.lock

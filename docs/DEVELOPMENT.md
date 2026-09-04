@@ -8,12 +8,10 @@
 - Node.js 18 或更高版本；
 - 游戏安装只作为静态、只读测试输入，禁止运行其中的程序。
 
-初始化（命令在仓库根目录执行；Windows 把 `source .venv/bin/activate` 换成 `.venv\Scripts\activate`）：
+初始化（依赖与环境由 [uv](https://docs.astral.sh/uv/) 管理，`uv.lock` 随仓库提交锁定版本）：
 
 ```sh
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .[dev,release]
+uv sync --all-extras
 cd frontend
 npm ci
 cd ..
@@ -31,19 +29,17 @@ git config core.hooksPath .githooks
 
 常用初始化和导入命令：
 
-```bat
-.venv\Scripts\ra2exp.exe sync-names
-.venv\Scripts\ra2exp.exe sync-audio-text
-.venv\Scripts\ra2exp.exe import .runtime\RA2MD --name 本地游戏文件
+```sh
+uv run ra2exp sync-names
+uv run ra2exp sync-audio-text
+uv run ra2exp import .runtime/RA2MD --name 本地游戏文件
 ```
 
 构建前端并安装当前用户后台服务：
 
-```bat
-cd frontend
-npm run build
-cd ..
-.venv\Scripts\ra2exp.exe background install
+```sh
+cd frontend && npm run build && cd ..
+uv run ra2exp background install
 ```
 
 服务监听 `http://127.0.0.1:46120`。管理命令是 `background status/start/stop/uninstall`。前端热更新使用 `frontend` 目录的 `npm run dev`；仅调试 API 时使用 `ra2exp serve`，只有显式传入 `--open-browser` 才会调用系统浏览器。
@@ -54,23 +50,20 @@ cd ..
 
 提交前的完整基础验证：
 
-```bat
-.venv\Scripts\python.exe -m pytest
-.venv\Scripts\python.exe -m ruff check src tests packaging\hooks scripts
-cd frontend
-npm run build
-npm run build:pages
-cd ..
-.venv\Scripts\python.exe scripts\privacy_scan.py --mode tracked
-.venv\Scripts\python.exe scripts\privacy_scan.py --mode history
+```sh
+uv run pytest
+uv run ruff check src tests packaging/hooks scripts
+cd frontend && npm run build && npm run build:pages && cd ..
+uv run python scripts/privacy_scan.py --mode tracked
+uv run python scripts/privacy_scan.py --mode history
 git diff --check
 ```
 
 涉及真实格式或语义关系时，再运行：
 
-```bat
-.venv\Scripts\ra2exp.exe verify SOURCE_ID --samples-per-format 20
-.venv\Scripts\ra2exp.exe semantic-check SOURCE_ID
+```sh
+uv run ra2exp verify SOURCE_ID --samples-per-format 20
+uv run ra2exp semantic-check SOURCE_ID
 ```
 
 涉及 UI、媒体或性能时使用 Playwright 覆盖真实生产构建，至少检查主流桌面宽度、820px 附近降级、滚动、分类切换、控制台错误和重复网络请求。QA 截图、脚本和 profile 结果只放在 `.runtime\RA2MD-Ext`，不提交到源码。
@@ -91,10 +84,10 @@ scripts\build_windows.cmd
 
 只有单位、声音、语义或渲染产物实际变化时才重建数据：
 
-```bat
-.venv\Scripts\ra2exp.exe pages export SOURCE_ID --audio-bitrate 24k --workers 8 --overwrite
-.venv\Scripts\ra2exp.exe movies build SOURCE_ID
-.venv\Scripts\python.exe scripts\verify_pages_snapshot.py .outputs\toy\pages-data.zip
+```sh
+uv run ra2exp pages export SOURCE_ID --audio-bitrate 24k --workers 8 --overwrite
+uv run ra2exp movies build SOURCE_ID
+uv run python scripts/verify_pages_snapshot.py .outputs/toy/pages-data-final.zip
 ```
 
 `npm run build:pages` 构建静态前端到 `frontend\dist-pages`（相对路径 base），不会覆盖本地版 `frontend\dist`。把快照数据放进 `frontend\dist-pages\data` 后整体打包，即得到可离线浏览、可直接发布到 Toy 的单文件 ZIP。

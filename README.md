@@ -20,22 +20,7 @@
 
 ## 构建与开发
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -e .[dev]
-git config core.hooksPath .githooks
-cd frontend && npm install && npm run build
-
-ra2exp serve                       # 本地版：启动服务（开发热更新：npm run dev）
-
-# 离线网页包（Toy 版）：三步产出 toy.zip
-ra2exp pages export SOURCE_ID      # 导出派生快照
-ra2exp movies build SOURCE_ID      # 合成过场影片，生成 BV 引用清单
-python scripts/build_toy_package.py
-```
-
-`SOURCE_ID` 由首次扫描游戏目录后列出，可用 `ra2exp sources` 查看。
+Python 侧使用 [uv](https://docs.astral.sh/uv/) 管理依赖，`uv.lock` 锁定版本。初始化、本地服务、测试与离线网页包（Toy 版）的完整命令见 [开发指南](docs/DEVELOPMENT.md)。
 
 ## 亮点
 
