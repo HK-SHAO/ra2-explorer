@@ -121,12 +121,12 @@ def _write_webp(data: bytes, output: Path) -> None:
         _save_webp(image, output)
 
 
-WEBP_QUALITY = 85
+WEBP_LOSSLESS_METHOD = 6
 
 
 def _save_webp(image: Image.Image, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
-    image.save(output, format="WEBP", quality=WEBP_QUALITY, method=4)
+    image.save(output, format="WEBP", lossless=True, method=WEBP_LOSSLESS_METHOD)
 
 
 def _run_parallel(
@@ -572,7 +572,7 @@ def _entity_tasks(
                     entity_id=entity_id,
                     frame=frame,
                     facing=facing,
-                    scale=4,
+                    scale=3,
                     thumbnail=False,
                     player_color=player_color,
                     output=output,
@@ -648,7 +648,7 @@ def _entity_operation_effect_tasks(
                         params: dict[str, object] = {
                             "frame": 0,
                             "facing": facing,
-                            "scale": 4,
+                            "scale": 3,
                             "effect_asset_id": asset_id,
                             "effect_frame": effect_frame,
                         }
