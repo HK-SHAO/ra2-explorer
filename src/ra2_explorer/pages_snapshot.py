@@ -1207,6 +1207,23 @@ def _export_render_tasks(
     _run_parallel(label, tasks, export, workers=workers)
 
 
+def _dedupe_previews(root: Path) -> dict[str, str]:
+    """内容相同的预览只保留一份，其余删除并以别名指向保留文件。"""
+    hashes: dict[str, str] = {}
+    aliases: dict[str, str] = {}
+    previews = root / "previews"
+    for path in sorted(previews.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root).as_posix()
+        digest = hashlib.md5(path.read_bytes()).hexdigest()
+        canonical = hashes.setdefault(digest, relative)
+        if canonical != relative:
+            aliases[relative] = canonical
+            path.unlink()
+    return aliases
+
+
 def _directory_stats(
     root: Path,
     *,
@@ -1420,6 +1437,8 @@ def build_pages_snapshot(
             },
         )
 
+        preview_aliases = _dedupe_previews(staging)
+
         audio_stats = _pages_audio_stats(media_cn, audio_ids)
         diagnostics = _request_json(
             client,
@@ -1467,6 +1486,7 @@ def build_pages_snapshot(
             "contains_original_game_files": False,
             "audio_codec": "opus",
             "audio_bitrate": audio_bitrate,
+            "preview_aliases": preview_aliases,
             "source": sanitized_source,
             "stats": audio_stats,
             "diagnostics": public_diagnostics,

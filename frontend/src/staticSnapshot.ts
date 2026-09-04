@@ -26,6 +26,7 @@ interface StaticAssetBundle {
 interface StaticSnapshotManifest {
   schema_version: 1 | 2;
   snapshot_id: string;
+  preview_aliases?: Record<string, string>;
   created_at: string;
   app_version: string;
   edition: "pages-slim";
@@ -48,7 +49,8 @@ function snapshotUrl(path: string) {
   const base = import.meta.env.BASE_URL.endsWith("/")
     ? import.meta.env.BASE_URL
     : `${import.meta.env.BASE_URL}/`;
-  return `${base}data/${path.replace(/^\/+/, "")}`;
+  const normalized = path.replace(/^\/+/, "");
+  return `${base}data/${previewAliases[normalized] ?? normalized}`;
 }
 
 async function fetchJson<T>(url: string) {
@@ -235,8 +237,12 @@ function entityFactionIds(item: EntityPage["items"][number]) {
   return ["unaffiliated"];
 }
 
+let previewAliases: Record<string, string> = {};
+
 async function manifest() {
-  return await loadJson<StaticSnapshotManifest>("manifest.json");
+  const loaded = await loadJson<StaticSnapshotManifest>("manifest.json");
+  previewAliases = loaded.preview_aliases ?? {};
+  return loaded;
 }
 
 async function entityCatalog(language: GameLanguage) {
