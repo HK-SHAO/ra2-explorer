@@ -23,6 +23,22 @@ function pagesCdnBase(mode: string, override: string | undefined) {
   }
 }
 
+function pagesDataVersion(mode: string, override: string | undefined) {
+  if (override?.trim()) return override.trim();
+  if (mode !== "pages") return "";
+  try {
+    const lockUrl = new URL("../packaging/pages-data.json", import.meta.url);
+    const lock = JSON.parse(readFileSync(lockUrl, "utf8")) as {
+      tag?: unknown;
+      snapshot_id?: unknown;
+    };
+    if (typeof lock.tag === "string" && lock.tag.trim()) return lock.tag.trim();
+    return typeof lock.snapshot_id === "string" ? lock.snapshot_id.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
 export default defineConfig(({ mode }) => {
   // Vite's loadEnv() only reads env files. Preserve the documented precedence
   // of variables supplied by the caller/CI over values from .env files.
@@ -41,6 +57,9 @@ export default defineConfig(({ mode }) => {
   const normalizedBase = publicBase.endsWith("/") ? publicBase : `${publicBase}/`;
   const defaultAtlas = env.RA2EXP_DEFAULT_ATLAS?.replace(/^\/+/, "");
   const staticCdnBase = pagesCdnBase(mode, env.RA2EXP_STATIC_CDN_BASE);
+  const staticDataVersion = pagesDataVersion(mode, env.VITE_RA2EXP_STATIC_DATA_VERSION);
+  const browserStateVersion = env.VITE_RA2EXP_BROWSER_STATE_VERSION
+    || [buildCommit || buildTag || "development", staticDataVersion].filter(Boolean).join(":");
   const preloadPagesAssets = {
     name: "preload-pages-startup-assets",
     transformIndexHtml() {
@@ -88,6 +107,8 @@ export default defineConfig(({ mode }) => {
       "import.meta.env.VITE_RA2EXP_STABLE_BEHIND": JSON.stringify(env.VITE_RA2EXP_STABLE_BEHIND || stableBehind),
       "import.meta.env.VITE_RA2EXP_REPOSITORY_URL": JSON.stringify(repositoryUrl),
       "import.meta.env.VITE_RA2EXP_STATIC_CDN_BASE": JSON.stringify(staticCdnBase),
+      "import.meta.env.VITE_RA2EXP_STATIC_DATA_VERSION": JSON.stringify(staticDataVersion),
+      "import.meta.env.VITE_RA2EXP_BROWSER_STATE_VERSION": JSON.stringify(browserStateVersion),
     },
     build: {
       outDir: mode === "pages" ? "dist-pages" : "dist",

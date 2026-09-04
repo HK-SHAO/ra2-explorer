@@ -21,6 +21,8 @@ const externalSnapshotBase = (import.meta.env.VITE_RA2EXP_STATIC_CDN_BASE || "")
   .trim()
   .replace(/\/+$/, "");
 
+const staticDataVersion = import.meta.env.VITE_RA2EXP_STATIC_DATA_VERSION?.trim() || "";
+
 interface StaticAssetBundle {
   asset: Asset;
   metadata: AssetMetadata;
@@ -56,7 +58,10 @@ function publicUrl(path: string) {
 }
 
 function localSnapshotUrl(path: string) {
-  return publicUrl(`data/${path}`);
+  const url = publicUrl(`data/${path}`);
+  return staticDataVersion
+    ? `${url}?data=${encodeURIComponent(staticDataVersion)}`
+    : url;
 }
 
 function isExternalSnapshotPath(path: string) {
