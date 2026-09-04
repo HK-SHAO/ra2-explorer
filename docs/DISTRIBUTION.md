@@ -34,7 +34,7 @@
 
 ## 静态网页包
 
-由 `ra2exp pages export` 导出派生快照、`npm run build:pages` 构建静态前端，两者合并后压缩为单文件 ZIP：包根含 `index.html`，全部资源为相对路径，可直接离线浏览或发布到 B 站 Toy。浏览器按页面、预取队列和用户操作请求静态文件。`.ra2pack`、游戏文件和本地发行输出均位于被 Git 忽略的目录。
+由 `ra2exp pages export` 导出派生快照、`ra2exp movies build` 合成过场影片、`npm run build:pages` 构建静态前端，三者合并后压缩为单文件 ZIP：包根含 `index.html`，全部资源为相对路径，可直接离线浏览或发布到 B 站 Toy。浏览器按页面、预取队列和用户操作请求静态文件。`.ra2pack`、游戏文件和本地发行输出均位于被 Git 忽略的目录。
 
 ## 自动发布
 

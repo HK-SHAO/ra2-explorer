@@ -141,6 +141,14 @@ def build_parser() -> argparse.ArgumentParser:
     pages_export.add_argument("--workers", type=int, default=4)
     pages_export.add_argument("--overwrite", action="store_true")
 
+    movies = subcommands.add_parser("movies", help="合成过场影片并生成 BV 引用清单")
+    movies_commands = movies.add_subparsers(dest="movies_action", required=True)
+    movies_build = movies_commands.add_parser("build", help="排序、统一规格并拼接为单支影片")
+    movies_build.add_argument("source_id")
+    movies_build.add_argument("--output-dir", type=Path)
+    movies_build.add_argument("--bvid", default="", help="成片上传 B 站后的 BV 号")
+    movies_build.add_argument("--skip-encode", action="store_true", help="复用已有分片，只重建清单")
+
     cache = subcommands.add_parser("cache", help="统计或清理可再生成的本地缓存")
     cache.add_argument("action", choices=("stats", "prune"))
     cache.add_argument("--kind", action="append", choices=sorted(ARTIFACT_KINDS))
@@ -184,6 +192,24 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     settings = load_settings()
+    if args.command == "movies":
+        from ra2_explorer.movies import build_movie_compilation
+
+        output_dir = args.output_dir or settings.data_dir.parent / ".outputs" / "ra2-movies"
+        try:
+            result = build_movie_compilation(
+                Services(settings),
+                args.source_id,
+                output_dir=output_dir,
+                bvid=args.bvid,
+                skip_encode=args.skip_encode,
+            )
+        except (Ra2ExplorerError, OSError, RuntimeError, ValueError) as error:
+            print(str(error), file=sys.stderr)
+            return 1
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
     if args.command == "pages":
         from ra2_explorer.pages_snapshot import build_pages_snapshot
 
