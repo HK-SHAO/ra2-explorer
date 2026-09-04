@@ -1544,7 +1544,7 @@ function ExplorerApp() {
     ? compactAudioDetail ? audioDetailBottomSize : detailBottomSize
     : detailRightSize;
   const workspaceStyle = {
-    "--sidebar-width": sidebarCollapsedRef.current ? "58px" : "224px",
+    "--sidebar-width": sidebarCollapsedRef.current ? "3.625rem" : "14rem",
     "--detail-panel-size": `${detailSize}px`,
   } as CSSProperties;
   const assetScrollKey = [sourceId, selectedCategoryId, assetFormatTag, mediaEventType, isMediaCategory ? "" : assetQuery, assetSort, layout]
@@ -1614,7 +1614,7 @@ function ExplorerApp() {
       return;
     }
     workspace.classList.toggle("sidebar-collapsed", next);
-    workspace.style.setProperty("--sidebar-width", next ? "58px" : "224px");
+    workspace.style.setProperty("--sidebar-width", next ? "3.625rem" : "14rem");
     window.requestAnimationFrame(() => window.requestAnimationFrame(resumeCardPreviews));
   }
 
