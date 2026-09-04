@@ -6,10 +6,21 @@ import threading
 import uuid
 from pathlib import Path
 
+from PIL import Image
+
 from ra2_explorer.derived import DerivedStore
 from ra2_explorer.errors import Ra2ExplorerError
 from ra2_explorer.library import AssetReader
 from ra2_explorer.storage import Database
+
+# Posters skip the opening seconds because these movies fade in from black,
+# then walk deeper until something readable shows up. The last attempt has no
+# seek at all, so even a clip shorter than every seek still gets a poster.
+POSTER_SEEK_SECONDS: tuple[float, ...] = (1, 2, 4, 6, 8)
+# A frame where fewer than this share of pixels are brighter than the luma
+# floor counts as black and is not worth showing.
+POSTER_DARK_LUMA = 16
+POSTER_DARK_MAX_RATIO = 0.02
 
 
 class VideoTranscoder:
@@ -90,7 +101,7 @@ class VideoTranscoder:
             "video",
             source_id=source["id"],
             revision=source.get("scanned_at") or source["created_at"],
-            identity=(asset["id"], "poster-v1"),
+            identity=(asset["id"], "poster-v2"),
             extension="png",
         )
         if output.is_file():
@@ -104,28 +115,54 @@ class VideoTranscoder:
             _, source_path = self.reader.materialize(asset_id)
             output.parent.mkdir(parents=True, exist_ok=True)
             temporary = output.with_name(f".{output.stem}.{uuid.uuid4().hex}.tmp.png")
-            # Seek past the fade-in these movies open with, otherwise the
-            # poster would be a black frame.
-            self._run_ffmpeg(
-                [
-                    ffmpeg,
-                    "-hide_banner",
-                    "-loglevel",
-                    "error",
-                    "-nostdin",
-                    "-y",
-                    "-i",
-                    str(source_path),
-                    "-ss",
-                    "1",
-                    "-frames:v",
-                    "1",
-                    str(temporary),
-                ],
-                output,
-                "视频封面生成失败",
-            )
+            self._capture_poster(ffmpeg, source_path, output, temporary)
         return output
+
+    def _capture_poster(
+        self,
+        ffmpeg: str,
+        source_path: Path,
+        output: Path,
+        temporary: Path,
+    ) -> None:
+        """Seek progressively deeper until the poster is not a black frame."""
+        attempts: list[float | None] = [*POSTER_SEEK_SECONDS, None]
+        detail = "FFmpeg 未生成输出"
+        for seconds in attempts:
+            command = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y"]
+            if seconds is not None:
+                command += ["-ss", f"{seconds:g}"]
+            command += ["-i", str(source_path), "-frames:v", "1", str(temporary)]
+            ok, attempt_detail = self._extract_frame(command)
+            if ok and (seconds is None or not _frame_is_dark(temporary)):
+                self.derived.commit_file(output, temporary)
+                temporary.unlink(missing_ok=True)
+                return
+            temporary.unlink(missing_ok=True)
+            detail = attempt_detail or detail
+        raise Ra2ExplorerError(f"视频封面生成失败：{detail or '未找到可用的画面帧'}")
+
+    def _extract_frame(self, command: list[str]) -> tuple[bool, str]:
+        """Extract a single frame without publishing it."""
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=120,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except subprocess.TimeoutExpired:
+            return False, "单帧抽取超过 120 秒已停止"
+        detail = result.stderr.decode("utf-8", errors="replace").strip()[-600:]
+        if result.returncode != 0:
+            return False, detail or f"FFmpeg 退出码 {result.returncode}"
+        if not Path(command[-1]).is_file():
+            # Seeking past the end of a very short clip yields no frame.
+            return False, detail or "FFmpeg 未生成输出"
+        return True, ""
 
     def _run_ffmpeg(self, command: list[str], output: Path, failure: str) -> None:
         temporary = Path(command[-1])
@@ -151,6 +188,19 @@ class VideoTranscoder:
     def _lock_for(self, path: Path) -> threading.Lock:
         with self._locks_guard:
             return self._locks.setdefault(path, threading.Lock())
+
+
+def _frame_is_dark(path: Path) -> bool:
+    """Return True when a frame is essentially black, such as a fade-in."""
+    try:
+        with Image.open(path) as image:
+            histogram = image.convert("L").histogram()
+    except OSError:
+        return True
+    total = sum(histogram)
+    if not total:
+        return True
+    return sum(histogram[POSTER_DARK_LUMA:]) / total < POSTER_DARK_MAX_RATIO
 
 
 __all__ = ["VideoTranscoder"]
