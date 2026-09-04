@@ -131,7 +131,8 @@ def _payload_stats(entries: Iterable[SnapshotEntry]) -> dict[str, object]:
     files = 0
     total_bytes = 0
     for entry in entries:
-        if entry.path == "manifest.json":
+        # movies.json 是打包阶段注入的影片引用清单，不计入快照负载统计。
+        if entry.path in {"manifest.json", "movies.json"}:
             continue
         files += 1
         total_bytes += entry.size
