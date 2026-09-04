@@ -23,7 +23,7 @@ SUPPORTED_SNAPSHOT_SCHEMA_VERSIONS = {1, 2}
 MAX_FILES = 50_000
 MAX_BYTES = 256 * 1024 * 1024
 MAX_FILE_BYTES = 64 * 1024 * 1024
-ALLOWED_FILES = {"manifest.json", "ASSET-NOTICE.txt"}
+ALLOWED_FILES = {"manifest.json", "ASSET-NOTICE.txt", "movies.json"}
 ALLOWED_AUDIO_FORMATS = {"aud", "bag_audio", "wav"}
 ALLOWED_SUFFIXES = {
     "assets": {".json"},
