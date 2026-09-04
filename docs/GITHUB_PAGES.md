@@ -17,9 +17,9 @@ Pages 不运行 Python、FastAPI 或 SQLite。发布前由本地解析器把真�
 | 单位 | 559 | — |
 | 声音 | 3,322 | — |
 | 发布文件 | 32,801 | — |
-| 解包后的 Pages 数据 | 198,537,192 字节 | 约 189.3 MiB |
-| 固定数据 ZIP | 131,269,657 字节 | 约 125.2 MiB |
-| 四个 npm/jsDelivr 按需分包 | 132,016,070 字节 | 约 125.9 MiB |
+| 解包后的 Pages 数据 | 199,062,644 字节 | 约 189.8 MiB |
+| 固定数据 ZIP | 131,453,873 字节 | 约 125.4 MiB |
+| 四个 npm/jsDelivr 按需分包 | 132,541,555 字节 | 约 126.4 MiB |
 
 精确的快照 ID、文件数、字节数、分片和 SHA-256 只记录在 [`packaging/pages-data.json`](../packaging/pages-data.json)；高频子集的固定 npm 版本、字节数和摘要只记录在 [`packaging/pages-cdn.json`](../packaging/pages-cdn.json)。这样发布数据变化时不会在多份文档中遗留旧标签或旧哈希。
 

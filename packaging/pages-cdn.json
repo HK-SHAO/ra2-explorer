@@ -2,40 +2,40 @@
   "schema_version": 2,
   "provider": "npm+jsdelivr",
   "registry": "https://registry.npmjs.org/",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "snapshot_id": "ra2md-slim-38b9fe4eb9c1",
   "routes": [
     {
       "prefix": "manifest.json",
-      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-core@0.15.0/data"
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-core@0.16.0/data"
     },
     {
       "prefix": "catalog/",
-      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-core@0.15.0/data"
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-core@0.16.0/data"
     },
     {
       "prefix": "previews/entity-atlases/",
-      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-core@0.15.0/data"
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-core@0.16.0/data"
     },
     {
       "prefix": "previews/entity-search-atlases/",
-      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-core@0.15.0/data"
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-core@0.16.0/data"
     },
     {
       "prefix": "assets/",
-      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-metadata@0.15.0/data"
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-metadata@0.16.0/data"
     },
     {
       "prefix": "entities/",
-      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-metadata@0.15.0/data"
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-metadata@0.16.0/data"
     },
     {
       "prefix": "previews/entities/",
-      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-entity-previews@0.15.0/data"
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-entity-previews@0.16.0/data"
     },
     {
       "prefix": "previews/assets/",
-      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-animation-previews@0.15.0/data"
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-animation-previews@0.16.0/data"
     }
   ],
   "packages": [
@@ -43,9 +43,9 @@
       "schema_version": 1,
       "provider": "npm+jsdelivr",
       "package": "ra2-explorer-pages-core",
-      "version": "0.15.0",
+      "version": "0.16.0",
       "registry": "https://registry.npmjs.org/",
-      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-core@0.15.0/data",
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-core@0.16.0/data",
       "snapshot_id": "ra2md-slim-38b9fe4eb9c1",
       "profile": "core",
       "routes": [
@@ -55,8 +55,8 @@
         "previews/entity-search-atlases/"
       ],
       "files": 38,
-      "bytes": 16252082,
-      "sha256": "d731695600f8bac59418e8c8546af088b2e437b1124cb759f0ea9e74f2892b51",
+      "bytes": 16502303,
+      "sha256": "60c8905c563956a56c6e53eaf7449570c79124fd32e7a303363b1c2c038f259e",
       "included": [
         "manifest",
         "bilingual_catalogs",
@@ -64,19 +64,19 @@
         "entity_search_atlases"
       ],
       "contains_original_game_files": false,
-      "package_bytes": 9819186,
-      "package_unpacked_bytes": 16253553,
-      "integrity": "sha512-X+ZtmKMfo69E1whVcVdympjn5rhIZ4303C7O1q74KOVihX2vB1Y1i9Pv/tk9LSers9uHvPEo8S89wUi6rle+mQ==",
-      "shasum": "5072407d46763c391bca236809364c061cf6cda6",
+      "package_bytes": 9944595,
+      "package_unpacked_bytes": 16503774,
+      "integrity": "sha512-r4iwMRlpqHwYOQjCVEEQVqWLJjeStgMd/G2QtH/9rpKXNpOHlmawgA/pHUkbPhDe1GOGwIQL/23+KLtS5x+e4w==",
+      "shasum": "bf08d3ad34260350d2856ec78af3dfed396dc69a",
       "published": true
     },
     {
       "schema_version": 1,
       "provider": "npm+jsdelivr",
       "package": "ra2-explorer-pages-metadata",
-      "version": "0.15.0",
+      "version": "0.16.0",
       "registry": "https://registry.npmjs.org/",
-      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-metadata@0.15.0/data",
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-metadata@0.16.0/data",
       "snapshot_id": "ra2md-slim-38b9fe4eb9c1",
       "profile": "metadata",
       "routes": [
@@ -84,26 +84,26 @@
         "entities/"
       ],
       "files": 5456,
-      "bytes": 34551532,
-      "sha256": "2e90062c17c801497d9d7b349c6d5857f6922d0e764e5ec38a881ec8c2e07def",
+      "bytes": 34826796,
+      "sha256": "7e79563cff6356f2830279046b7bcc588494f820604a2034617739c9c787d893",
       "included": [
         "entity_details",
         "generated_asset_metadata"
       ],
       "contains_original_game_files": false,
-      "package_bytes": 2687180,
-      "package_unpacked_bytes": 34553019,
-      "integrity": "sha512-IWY2mI/DGQ1cab7Zdo//NzLdwzi+SUUx0NNmSDdYljM5GUnjj+y55AWTqlxcpH48DxD6xCRCVaDuhpqGq6Q+oQ==",
-      "shasum": "2eadc59ae8469f9f274c0d61289e32973a106b6d",
+      "package_bytes": 2735709,
+      "package_unpacked_bytes": 34828283,
+      "integrity": "sha512-Yr3/0DmW1s78Z53p3Zeu+KkULMpbQthrmah1c20IuOperiA5ZGgVnKEOAPkfkEsW4U5hwJz4PV6Y/f31fgr10g==",
+      "shasum": "b729f14f5d62610e0defb849bcc21aa991c4214c",
       "published": true
     },
     {
       "schema_version": 1,
       "provider": "npm+jsdelivr",
       "package": "ra2-explorer-pages-entity-previews",
-      "version": "0.15.0",
+      "version": "0.16.0",
       "registry": "https://registry.npmjs.org/",
-      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-entity-previews@0.15.0/data",
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-entity-previews@0.16.0/data",
       "snapshot_id": "ra2md-slim-38b9fe4eb9c1",
       "profile": "entity-previews",
       "routes": [
@@ -118,17 +118,17 @@
       "contains_original_game_files": false,
       "package_bytes": 46020763,
       "package_unpacked_bytes": 47115439,
-      "integrity": "sha512-HchBG+NNb/kBgtJxAgYFK/B6InB5gFTuKbE6oF7pIhoTH21FQRZ+0bYDD5Rp53mE1WV5QnkPUbU7n1iHZPhc1g==",
-      "shasum": "9e02f6783f62baa806cd03ce59a1809cb8c76819",
+      "integrity": "sha512-dQqB9V3EOvc2+WKFNPksbvIIpB89YsYwPuM4YFbK1b4Mg9ZVrwLCTrO6Jmj1O9UslYO9qKUe2KAbScOp+9EXBA==",
+      "shasum": "4a9c871dfedc7a12ad242c7c715a32c6c31a09ca",
       "published": true
     },
     {
       "schema_version": 1,
       "provider": "npm+jsdelivr",
       "package": "ra2-explorer-pages-animation-previews",
-      "version": "0.15.0",
+      "version": "0.16.0",
       "registry": "https://registry.npmjs.org/",
-      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-animation-previews@0.15.0/data",
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-animation-previews@0.16.0/data",
       "snapshot_id": "ra2md-slim-38b9fe4eb9c1",
       "profile": "animation-previews",
       "routes": [
@@ -143,14 +143,14 @@
       "contains_original_game_files": false,
       "package_bytes": 32474352,
       "package_unpacked_bytes": 34100059,
-      "integrity": "sha512-uCJI4W+klW3oLkxRIG3sayME4Yw+q9czDnyADlcpFhM+geHfUFq27F6PPkjTjlTWIzLsPkq2Hk9rK2hCpW9SFg==",
-      "shasum": "b218f0894913467a454468671f2904253591becc",
+      "integrity": "sha512-f9z6cZh9wgMfb33FJcycVx/QJSxDruACwZr1pNX5mPfWa4dGwjMkAiV3O6uhskbb1oF0SszZX225slIz7q/iVg==",
+      "shasum": "028ef0568533e6d102c335c6dfbdd461ecb6d8f8",
       "published": true
     }
   ],
   "files": 29388,
-  "bytes": 132016070,
-  "package_bytes": 91001481,
+  "bytes": 132541555,
+  "package_bytes": 91175419,
   "included": [
     "manifest",
     "bilingual_catalogs",
