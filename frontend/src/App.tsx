@@ -5788,6 +5788,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   onPopout?: () => void;
   scrollKey?: string;
 }) {
+  const movieEntry = useMovieEntry(asset?.id ?? "");
   const [playerColor, setPlayerColor] = useState("");
   const [videoRequested, setVideoRequested] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
@@ -5923,7 +5924,6 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
     ...(preferredTexts.values.length > 0 ? [{ label: preferredTexts.label, value: preferredTexts.values.join("\n") }] : []),
   ] : [];
   const audioDataCount = audioMetadataTags.length + audioTextRows.length;
-  const movieEntry = useMovieEntry(asset.id);
   const movieLink = isStaticSnapshot && movieEntry?.bvid
     ? `https://www.bilibili.com/video/${movieEntry.bvid}?t=${Math.floor(movieEntry.start)}`
     : null;
