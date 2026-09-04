@@ -4513,85 +4513,128 @@ function StablePreviewImage({ src, alt, style, className, draggable = false, onB
   onLoad?: (image: HTMLImageElement) => void;
   onError?: () => void;
 }) {
-  const [displayedSrc, setDisplayedSrc] = useState(() => decodedImageFrameUrl(src));
-  const [resolvedRequest, setResolvedRequest] = useState(() => ({
-    source: src,
-    url: decodedImageFrameUrl(src) || src,
-  }));
-  const requestedUrl = resolvedRequest.source === src
-    ? resolvedRequest.url
-    : decodedImageFrameUrl(src) || src;
-  const requestedSrc = useRef(requestedUrl);
+  interface PreviewSlot {
+    src: string;
+    request: string;
+    generation: number;
+  }
+
+  const emptySlot = (): PreviewSlot => ({ src: "", request: "", generation: 0 });
+  const [slots, setSlots] = useState<[PreviewSlot, PreviewSlot]>(() => [emptySlot(), emptySlot()]);
+  const [activeSlot, setActiveSlot] = useState(-1);
+  const firstSlotRef = useRef<HTMLImageElement>(null);
+  const secondSlotRef = useRef<HTMLImageElement>(null);
+  const slotsRef = useRef(slots);
+  const activeSlotRef = useRef(activeSlot);
+  const requestedSrcRef = useRef(src);
+  const requestGenerationRef = useRef(0);
+  const scheduledRevealRef = useRef(0);
   const onBeforeRevealRef = useRef(onBeforeReveal);
   const onLoadRef = useRef(onLoad);
   const onErrorRef = useRef(onError);
-  requestedSrc.current = requestedUrl;
+  slotsRef.current = slots;
+  activeSlotRef.current = activeSlot;
+  requestedSrcRef.current = src;
   onBeforeRevealRef.current = onBeforeReveal;
   onLoadRef.current = onLoad;
   onErrorRef.current = onError;
 
-  function revealPending(image: HTMLImageElement, pendingSrc: string) {
+  const slotImage = (index: number) => index === 0 ? firstSlotRef.current : secondSlotRef.current;
+
+  function revealSlot(index: number, image: HTMLImageElement, generation: number) {
+    const slot = slotsRef.current[index];
+    if (
+      generation !== requestGenerationRef.current
+      || slot.generation !== generation
+      || slot.request !== requestedSrcRef.current
+      || scheduledRevealRef.current === generation
+    ) return;
+    scheduledRevealRef.current = generation;
     const reveal = () => {
-      if (requestedSrc.current !== pendingSrc || !image.naturalWidth) {
-        if (requestedSrc.current === pendingSrc && !image.naturalWidth) onErrorRef.current?.();
+      const current = slotsRef.current[index];
+      if (
+        generation !== requestGenerationRef.current
+        || current.generation !== generation
+        || current.request !== requestedSrcRef.current
+        || !image.naturalWidth
+      ) {
+        if (generation === requestGenerationRef.current && !image.naturalWidth) onErrorRef.current?.();
         return;
       }
       onBeforeRevealRef.current?.(image);
-      onLoadRef.current?.(image);
-      setDisplayedSrc(pendingSrc);
+      window.requestAnimationFrame(() => {
+        const ready = slotsRef.current[index];
+        if (
+          generation !== requestGenerationRef.current
+          || ready.generation !== generation
+          || ready.request !== requestedSrcRef.current
+          || !image.naturalWidth
+        ) return;
+        activeSlotRef.current = index;
+        setActiveSlot(index);
+        onLoadRef.current?.(image);
+      });
     };
-    const revealAfterPaint = () => window.requestAnimationFrame(() => window.requestAnimationFrame(reveal));
-    if (typeof image.decode === "function") void image.decode().catch(() => undefined).then(revealAfterPaint);
-    else revealAfterPaint();
-  }
-
-  function handleImageError(failedSrc: string) {
-    const fallbackSrc = api.snapshotFallbackUrl(failedSrc);
-    if (fallbackSrc !== failedSrc) {
-      setResolvedRequest({ source: src, url: fallbackSrc });
-      return;
+    if (typeof image.decode === "function") {
+      void image.decode().catch(() => undefined).then(() => window.requestAnimationFrame(reveal));
+    } else {
+      window.requestAnimationFrame(reveal);
     }
-    onErrorRef.current?.();
   }
 
-  const pendingSrc = requestedUrl && requestedUrl !== displayedSrc ? requestedUrl : "";
-  return <>
-    {displayedSrc && <img
-      key={displayedSrc}
-      src={displayedSrc}
-      data-requested-src={requestedUrl}
-      data-frame-state="active"
-      alt={alt}
-      className={className}
-      draggable={draggable}
+  useEffect(() => {
+    const generation = requestGenerationRef.current + 1;
+    requestGenerationRef.current = generation;
+    scheduledRevealRef.current = 0;
+    requestedSrcRef.current = src;
+    if (!src) return;
+
+    const current = slotsRef.current[activeSlotRef.current];
+    if (current?.request === src) return;
+
+    let cancelled = false;
+    void preloadDecodedImageFrame(src, "high").then((decoded) => {
+      if (cancelled || generation !== requestGenerationRef.current || requestedSrcRef.current !== src) return;
+      if (!decoded.naturalWidth) {
+        onErrorRef.current?.();
+        return;
+      }
+      const targetIndex = activeSlotRef.current === 0 ? 1 : 0;
+      const resolvedSrc = decoded.currentSrc || decoded.src || decodedImageFrameUrl(src) || src;
+      const nextSlots = [...slotsRef.current] as [PreviewSlot, PreviewSlot];
+      nextSlots[targetIndex] = { src: resolvedSrc, request: src, generation };
+      slotsRef.current = nextSlots;
+      setSlots(nextSlots);
+      window.requestAnimationFrame(() => {
+        const target = slotImage(targetIndex);
+        if (target?.complete && target.naturalWidth) revealSlot(targetIndex, target, generation);
+      });
+    });
+    return () => { cancelled = true; };
+  }, [src]);
+
+  return <>{slots.map((slot, index) => {
+    const active = index === activeSlot;
+    return <img
+      ref={index === 0 ? firstSlotRef : secondSlotRef}
+      key={index}
+      src={slot.src || undefined}
+      data-requested-src={slot.src}
+      data-frame-request={slot.request}
+      data-frame-state={active ? "active" : "buffer"}
+      alt={active ? alt : ""}
+      aria-hidden={!active}
+      className={`${className || ""} stable-preview-frame ${active ? "stable-preview-active" : "stable-preview-buffer"}`.trim()}
+      draggable={active ? draggable : false}
       decoding="async"
       fetchPriority="high"
       style={style}
-      onLoad={(event) => {
-        if (requestedSrc.current === displayedSrc) onLoadRef.current?.(event.currentTarget);
-      }}
+      onLoad={(event) => revealSlot(index, event.currentTarget, slot.generation)}
       onError={() => {
-        if (requestedSrc.current === displayedSrc) handleImageError(displayedSrc);
+        if (slot.generation === requestGenerationRef.current) onErrorRef.current?.();
       }}
-    />}
-    {pendingSrc && <img
-      key={pendingSrc}
-      src={pendingSrc}
-      data-requested-src={requestedUrl}
-      data-frame-state="pending"
-      alt=""
-      aria-hidden="true"
-      className={`${className || ""} stable-preview-pending`}
-      draggable={false}
-      decoding="async"
-      fetchPriority="high"
-      style={style}
-      onLoad={(event) => revealPending(event.currentTarget, pendingSrc)}
-      onError={() => {
-        if (requestedSrc.current === pendingSrc) handleImageError(pendingSrc);
-      }}
-    />}
-  </>;
+    />;
+  })}</>;
 }
 
 interface ImageFrameFit {
@@ -4813,7 +4856,7 @@ function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, b
 
   useEffect(() => {
     if (!fitContent) return;
-    const image = viewportRef.current?.querySelector<HTMLImageElement>(".image-viewport-canvas img");
+    const image = viewportRef.current?.querySelector<HTMLImageElement>(".image-viewport-canvas img[data-frame-state='active']");
     if (
       image?.complete
       && image.getAttribute("src") === image.dataset.requestedSrc
