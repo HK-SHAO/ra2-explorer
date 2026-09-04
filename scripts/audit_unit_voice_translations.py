@@ -53,6 +53,7 @@ def _request_json(base_url: str, path: str, query: dict[str, str] | None = None)
 def translation_format_violations(entries: dict[str, dict[str, Any]]) -> list[dict[str, str]]:
     violations: list[dict[str, str]] = []
     for stem, entry in entries.items():
+        display_stem = str(entry.get("stem") or stem)
         originals = entry["original_texts"]
         translations = entry["translated_texts"]
         if not originals or not translations:
@@ -65,7 +66,7 @@ def translation_format_violations(entries: dict[str, dict[str, Any]]) -> list[di
         if source_has_cue != translation_has_cue:
             violations.append(
                 {
-                    "stem": stem,
+                    "stem": display_stem,
                     "reason": "missing-cue" if source_has_cue else "unexpected-cue",
                     "original": " / ".join(originals),
                     "translation": " / ".join(translations),
@@ -80,7 +81,7 @@ def translation_format_violations(entries: dict[str, dict[str, Any]]) -> list[di
         ):
             violations.append(
                 {
-                    "stem": stem,
+                    "stem": display_stem,
                     "reason": "terminal-punctuation",
                     "original": originals[0],
                     "translation": translations[0],
