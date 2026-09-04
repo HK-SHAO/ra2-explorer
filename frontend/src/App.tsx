@@ -4525,14 +4525,19 @@ function AudioProgress({ assetId, durationSeconds }: {
 }
 
 // 离线包不携带视频文件：过场影片引用 B 站成片，按时间戳跳到对应段落。
-function StaticMoviePlayer({ assetId }: { assetId: string }) {
-  const [entry, setEntry] = useState<{ bvid: string; start: number } | null | undefined>(undefined);
+function useMovieEntry(assetId: string) {
+  const [entry, setEntry] = useState<{ bvid: string; start: number; duration: number; name: string } | null | undefined>(undefined);
   useEffect(() => {
     let cancelled = false;
     setEntry(undefined);
     void staticMovieEntry(assetId).then((result) => { if (!cancelled) setEntry(result); });
     return () => { cancelled = true; };
   }, [assetId]);
+  return entry;
+}
+
+function StaticMoviePlayer({ assetId }: { assetId: string }) {
+  const entry = useMovieEntry(assetId);
   if (entry === undefined) return <span className="video-static-status">正在读取影片信息…</span>;
   if (!entry) return <span className="video-static-status">该影片未收录进离线包</span>;
   if (!entry.bvid) return <span className="video-static-status">成片视频整理中，敬请期待</span>;
@@ -5918,6 +5923,10 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
     ...(preferredTexts.values.length > 0 ? [{ label: preferredTexts.label, value: preferredTexts.values.join("\n") }] : []),
   ] : [];
   const audioDataCount = audioMetadataTags.length + audioTextRows.length;
+  const movieEntry = useMovieEntry(asset.id);
+  const movieLink = isStaticSnapshot && movieEntry?.bvid
+    ? `https://www.bilibili.com/video/${movieEntry.bvid}?t=${Math.floor(movieEntry.start)}`
+    : null;
   return (
     <aside ref={detailScroll.ref} onScroll={detailScroll.remember} className={`detail-panel asset-detail panel ${wide ? "detail-panel-wide" : "detail-panel-narrow"}`}>
       <div className={`detail-title ${isAudio ? "audio-detail-title" : ""}`}>
@@ -6028,6 +6037,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
         {hasAudioRelationshipTabs && <h3>资产信息</h3>}
         <ul className="sound-metadata-tags" aria-label="音频元信息">{audioMetadataTags.map((tag) => <li key={`${tag.label}-${tag.value}`} title={`${tag.label}：${tag.value}`}><span>{tag.label}</span><strong className={tag.mono ? "mono" : ""}>{tag.value}</strong></li>)}</ul>
         {audioTextRows.length > 0 && <dl className="sound-transcript-list">{audioTextRows.map((row) => <div className={canUseCompactTextTag(row.value) ? "sound-transcript-tag" : "sound-transcript-block"} key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl>}
+        {audioTextRows.length === 0 && movieLink && <a className="movie-reference" href={movieLink} target="_blank" rel="noreferrer">这段录音出自成片「{movieEntry?.name}」，{formatDuration(movieEntry?.start ?? 0)} 起可在 B 站观看 ↗</a>}
       </div>}
       {!isAudio && <div className="metadata">
         <h3>资产信息</h3>

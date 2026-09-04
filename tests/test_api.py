@@ -31,8 +31,8 @@ from ra2_explorer.semantic import (
     _art_end_is_frame_count,
     _art_sibling_frame_count,
     _AssetIndex,
-    _build_eva_events,
     _build_country_definitions,
+    _build_eva_events,
     _build_media_items,
     _edition_ini_inputs,
     _effective_entity_countries,
@@ -216,8 +216,8 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert entity_summaries["DemoInfantry"]["affiliation"]["id"] == "Americans"
     assert entity_page["sides"] == [{"id": "GDI", "count": 2}]
     assert {item["display_name"] for item in entity_page["countries"]} == {
-        "United States",
-        "Russia",
+        "美国",
+        "俄罗斯",
     }
     assert entity_page["usages"] == [{"usage": "buildable", "count": 2}]
     allied_vehicles = client.get(
@@ -1098,7 +1098,7 @@ def test_unassociated_voice_keeps_catalog_transcript_in_asset_data(
     assert item["countries"] == ["Africans"]
     assert item["sides"] == ["Nod"]
     assert media["countries"] == [
-        {"id": "Africans", "display_name": "Libya", "side": "Nod", "count": 1}
+        {"id": "Africans", "display_name": "利比亚", "side": "Nod", "count": 1}
     ]
     asset = item["asset"]
 

@@ -27,7 +27,9 @@ AUDIO_TRANSCRIPT_SOURCE_URL = (
 )
 BUNDLED_UNIT_INTEL_TRANSCRIPT_PATH = Path(__file__).with_name("data") / "unit-intel-transcript.json"
 BUNDLED_UNIT_VOICE_TRANSCRIPT_PATH = Path(__file__).with_name("data") / "unit-voice-transcript.json"
-BUNDLED_UNIT_NAME_TRANSLATIONS_PATH = Path(__file__).with_name("data") / "unit-name-translations.json"
+BUNDLED_UNIT_NAME_TRANSLATIONS_PATH = (
+    Path(__file__).with_name("data") / "unit-name-translations.json"
+)
 BUNDLED_VOICE_TRANSLATION_PATH = (
     Path(__file__).with_name("data") / "voice-translation-supplement.json"
 )

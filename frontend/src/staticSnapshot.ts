@@ -490,6 +490,7 @@ export interface MovieItem {
   group: string;
   start: number;
   duration: number;
+  audio_asset_ids?: string[];
 }
 
 export interface MovieManifest {
@@ -543,8 +544,11 @@ export async function staticMoviePage(sourceId: string, formats: string[], query
 
 export async function staticMovieEntry(assetId: string) {
   const movies = await loadMovies();
-  const item = movies.items.find((candidate) => candidate.asset_id === assetId);
-  return item ? { bvid: movies.bvid, start: item.start, duration: item.duration } : null;
+  const item = movies.items.find(
+    (candidate) =>
+      candidate.asset_id === assetId || candidate.audio_asset_ids?.includes(assetId),
+  );
+  return item ? { bvid: movies.bvid, start: item.start, duration: item.duration, name: item.name } : null;
 }
 
 async function movieBundle(assetId: string, sourceId: string) {

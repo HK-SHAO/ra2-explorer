@@ -141,6 +141,14 @@ def build_movie_compilation(
                 failures.append(str(item["display_name"]))
                 print(f"  [{index:03d}/{len(ordered)}] {item['display_name']} ✗", flush=True)
 
+    audio_stems: dict[str, str] = {}
+    for audio_format in ("wav", "bag_audio", "aud"):
+        for asset in services.database.list_assets(
+            source_id=source_id, asset_format=audio_format, limit=5000
+        )["items"]:
+            stem = str(asset["display_name"]).rsplit(".", 1)[0].casefold()
+            audio_stems.setdefault(stem, str(asset["id"]))
+
     items: list[dict[str, object]] = []
     part_names: list[str] = []
     start = 0.0
@@ -150,6 +158,11 @@ def build_movie_compilation(
             continue
         duration = _probe_duration(part)
         part_names.append(f"parts/{item['part']}")
+        movie_stem = str(item["display_name"]).rsplit(".", 1)[0].casefold()
+        audio_asset_ids = [
+            asset_id for stem, asset_id in audio_stems.items()
+            if movie_stem == stem or movie_stem.startswith(stem)
+        ]
         items.append({
             "asset_id": str(item["id"]),
             "name": str(item["display_name"]),
@@ -158,6 +171,7 @@ def build_movie_compilation(
             "group": item["group"],
             "start": round(start, 2),
             "duration": round(duration, 2),
+            "audio_asset_ids": audio_asset_ids,
         })
         start += duration
 
