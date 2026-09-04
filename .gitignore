@@ -29,5 +29,6 @@ dist-pages/
 *.bak
 *.bak-*
 *.swp
+.DS_Store
 
 # uv
