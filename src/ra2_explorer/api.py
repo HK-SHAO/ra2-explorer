@@ -6,6 +6,7 @@ import math
 import os
 import re
 import uuid
+from collections.abc import Collection
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
@@ -53,6 +54,7 @@ from ra2_explorer.reference_data import (
     BUNDLED_UNIT_VOICE_TRANSCRIPT_PATH,
     BUNDLED_VOICE_TRANSLATION_PATH,
     load_audio_transcript,
+    load_audio_translations,
     load_known_names,
     reference_status,
     sync_known_names,
@@ -125,6 +127,12 @@ class Services:
                     BUNDLED_UNIT_VOICE_TRANSCRIPT_PATH,
                     BUNDLED_VOICE_TRANSLATION_PATH,
                 ),
+            ),
+            load_audio_translations(
+                supplement_paths=(
+                    settings.mission_audio_transcript_path,
+                    BUNDLED_VOICE_TRANSLATION_PATH,
+                )
             ),
         )
         self.video = VideoTranscoder(self.database, self.reader, self.derived)
@@ -809,6 +817,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 asset_record,
                 palette_id,
                 palette_kind,
+                used_indices=set(sprite.pixels(frame)),
             )
             if player_color:
                 palette = (palette or grayscale_palette()).with_player_color(player_color)
@@ -901,6 +910,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return FileResponse(
             path,
             media_type="video/mp4",
+            headers={"Cache-Control": "private, max-age=86400"},
+        )
+
+    @app.get("/api/assets/{asset_id}/poster.png")
+    def asset_poster(asset_id: str) -> FileResponse:
+        path = services.video.poster_frame(asset_id)
+        return FileResponse(
+            path,
+            media_type="image/png",
             headers={"Cache-Control": "private, max-age=86400"},
         )
 
@@ -1202,6 +1220,7 @@ def _select_palette(
     asset: dict[str, object],
     palette_id: str | None,
     palette_kind: Literal["unit", "animation"] | None = None,
+    used_indices: Collection[int] | None = None,
 ):
     palettes = services.database.palette_assets(str(asset["source_id"]))
     if palette_id:
@@ -1248,15 +1267,43 @@ def _select_palette(
         else [f"unit{theater}.pal", "unittem.pal", f"iso{theater}.pal", "isotem.pal"]
     )
     priority = {name: index for index, name in enumerate(preferred)}
-    palette_asset = min(
-        palettes,
+    candidates = sorted(
+        (item for item in palettes if str(item["display_name"]).lower() in priority),
         key=lambda item: (
-            priority.get(str(item["display_name"]).lower(), 99),
-            item["display_name"],
+            priority[str(item["display_name"]).lower()],
+            str(item["display_name"]),
         ),
     )
+    if not candidates:
+        candidates = sorted(palettes, key=lambda item: str(item["display_name"]))
+    # Unit palettes mark indices 204-239 as magenta placeholders; terrain and
+    # interface art legitimately paints there. With no explicit intent, prefer
+    # the candidate whose placeholders the artwork leaves unused.
+    if palette_kind is None and used_indices and len(candidates) > 1:
+        candidates = _least_placeholder_palettes(services, candidates, used_indices)
+    palette_asset = candidates[0]
     _, palette_data = services.reader.read(palette_asset["id"])
     return parse_palette(palette_data)
+
+
+def _least_placeholder_palettes(
+    services: Services,
+    candidates: list[dict[str, object]],
+    used_indices: Collection[int],
+) -> list[dict[str, object]]:
+    best_hits = None
+    for candidate in candidates:
+        _, palette_data = services.reader.read(str(candidate["id"]))
+        placeholders = parse_palette(palette_data).placeholder_indices()
+        hits = sum(1 for index in used_indices if index in placeholders)
+        if best_hits is None or hits < best_hits:
+            best_hits = hits
+            best = [candidate]
+        elif hits == best_hits:
+            best.append(candidate)
+        if not best_hits:
+            break
+    return best
 
 
 def _alpha_composite_centered(layers: list[Image.Image]) -> Image.Image:

@@ -678,6 +678,7 @@ export const api = {
     ? staticAudioUrl(assetId)
     : `/api/assets/${assetId}/media`,
   videoUrl: (assetId: string) => `/api/assets/${assetId}/video.mp4`,
+  videoPosterUrl: (assetId: string) => `/api/assets/${assetId}/poster.png`,
   entityPreviewUrl: (
     sourceId: string,
     entityId: string,

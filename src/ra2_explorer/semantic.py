@@ -36,6 +36,7 @@ from ra2_explorer.localization import (
     localized_mixed_search_match,
     pinyin_search_aliases,
 )
+from ra2_explorer.reference_data import translated_text_for
 from ra2_explorer.storage import Database
 
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
@@ -750,13 +751,15 @@ class SemanticLibrary:
         database: Database,
         reader: AssetReader,
         voice_transcripts: dict[str, dict[str, str]] | None = None,
+        voice_translations: dict[str, str] | None = None,
     ):
         self.database = database
         self.reader = reader
         self.voice_transcripts = voice_transcripts or {}
+        self.voice_translations = voice_translations or {}
         self._voice_transcript_revision = hashlib.sha256(
             json.dumps(
-                self.voice_transcripts,
+                (self.voice_transcripts, self.voice_translations),
                 ensure_ascii=False,
                 sort_keys=True,
                 separators=(",", ":"),
@@ -1661,6 +1664,7 @@ class SemanticLibrary:
             csf_assets,
             warnings,
             self.voice_transcripts,
+            self.voice_translations,
         )
         audio_events = _build_audio_events(sounds, asset_index, voice_strings)
         country_definitions = _build_country_definitions(rules, strings)
@@ -2876,6 +2880,7 @@ def _merge_csf_inputs(
     assets: list[dict[str, Any]],
     warnings: list[str],
     voice_transcripts: dict[str, dict[str, str]],
+    voice_translations: dict[str, str] | None = None,
 ) -> tuple[dict[str, str], dict[str, VoiceText]]:
     strings: dict[str, str] = {}
     voice_strings: dict[str, VoiceText] = {}
@@ -2918,6 +2923,7 @@ def _merge_csf_inputs(
                             translated_text,
                         )
     _overlay_voice_transcripts(voice_strings, voice_transcripts)
+    _overlay_voice_translations(voice_strings, voice_translations or {})
     return strings, voice_strings
 
 
@@ -2956,6 +2962,34 @@ def _overlay_voice_transcripts(
             original_text,
             localized_text,
             localized_text_origin,
+            translated_text,
+        )
+
+
+def _overlay_voice_translations(
+    voice_strings: dict[str, VoiceText],
+    translations: dict[str, str],
+) -> None:
+    """Translate spoken lines the game ships but no transcript file lists.
+
+    ``load_audio_transcript`` can only backfill translations for file ids that
+    already have a transcript entry, so lines that only exist in the game CSF
+    would otherwise stay untranslated even when a translation is available.
+    """
+    if not translations:
+        return
+    for key, current in list(voice_strings.items()):
+        if current.translated_text or not current.original_text:
+            continue
+        translated_text = translated_text_for(current.original_text, translations)
+        if not translated_text:
+            continue
+        voice_strings[key] = VoiceText(
+            current.label,
+            translated_text if current.text == current.original_text else current.text,
+            current.original_text,
+            current.localized_text,
+            current.localized_text_origin,
             translated_text,
         )
 

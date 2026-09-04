@@ -180,7 +180,7 @@ def load_audio_transcript(
         if original_text and not translated_text:
             translated_text = translations_by_original.get(original_text.strip()) or (
                 translations_by_normalized_original.get(
-                    _audio_translation_lookup_key(original_text)
+                    audio_translation_lookup_key(original_text)
                 )
             )
             if translated_text:
@@ -190,6 +190,31 @@ def load_audio_transcript(
                 original_text, translated_text
             )
     return entries
+
+
+def load_audio_translations(
+    *, supplement_paths: tuple[Path, ...]
+) -> dict[str, str]:
+    """Collect the spoken-line translations, keyed by the normalized original.
+
+    ``load_audio_transcript`` can only backfill translations for file ids that
+    already appear in a transcript; this map covers the remaining lines the
+    game itself ships.
+    """
+    translations: dict[str, str] = {}
+    for supplement_path in supplement_paths:
+        for original, translated in _load_audio_translations_by_original(supplement_path).items():
+            translations.setdefault(audio_translation_lookup_key(original), translated)
+        translations.update(_load_audio_translations_by_normalized_original(supplement_path))
+    return translations
+
+
+def translated_text_for(original_text: str, translations: dict[str, str]) -> str | None:
+    """Look up a translation for a spoken line, aligning terminal punctuation."""
+    translated = translations.get(audio_translation_lookup_key(original_text))
+    if not translated:
+        return None
+    return _align_translation_punctuation(original_text, translated)
 
 
 def _load_audio_translations_by_original(path: Path) -> dict[str, str]:
@@ -235,16 +260,16 @@ def _load_audio_translations_by_normalized_original(path: Path) -> dict[str, str
     if not isinstance(raw_translations, dict):
         return {}
     return {
-        _audio_translation_lookup_key(original): translated.strip()
+        audio_translation_lookup_key(original): translated.strip()
         for original, translated in raw_translations.items()
         if isinstance(original, str)
-        and _audio_translation_lookup_key(original)
+        and audio_translation_lookup_key(original)
         and isinstance(translated, str)
         and translated.strip()
     }
 
 
-def _audio_translation_lookup_key(text: str) -> str:
+def audio_translation_lookup_key(text: str) -> str:
     return " ".join(re.findall(r"[\w]+", text.casefold().replace("_", " ")))
 
 
@@ -484,8 +509,10 @@ __all__ = [
     "BUNDLED_UNIT_VOICE_TRANSCRIPT_PATH",
     "BUNDLED_VOICE_TRANSLATION_PATH",
     "load_audio_transcript",
+    "load_audio_translations",
     "load_known_names",
     "reference_status",
     "sync_audio_transcript",
     "sync_known_names",
+    "translated_text_for",
 ]

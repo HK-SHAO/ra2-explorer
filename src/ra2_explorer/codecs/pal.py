@@ -9,6 +9,9 @@ from ra2_explorer.errors import InvalidFormatError
 
 PALETTE_COLORS = 256
 PALETTE_BYTES = PALETTE_COLORS * 3
+# RA2 unit palettes fill indices 204-239 with this marker instead of real art,
+# so art painted with those indices needs a terrain palette to render.
+PLACEHOLDER_MAGENTA = (252, 0, 252)
 PLAYER_COLOR_PRESETS = {
     "red": (214, 59, 52),
     "blue": (61, 111, 198),
@@ -43,6 +46,14 @@ class Palette:
                 for x in range(origin_x, origin_x + cell_size):
                     pixels[x, y] = color
         return image
+
+    def placeholder_indices(self) -> frozenset[int]:
+        """Indices filled with the magenta marker, which are never real art."""
+        return frozenset(
+            index
+            for index in range(1, PALETTE_COLORS)
+            if self.colors[index] == PLACEHOLDER_MAGENTA
+        )
 
     def remap(
         self,
@@ -114,6 +125,7 @@ def grayscale_palette() -> Palette:
 
 
 __all__ = [
+    "PLACEHOLDER_MAGENTA",
     "PLAYER_COLOR_PRESETS",
     "Palette",
     "grayscale_palette",

@@ -49,9 +49,11 @@ import {
 import {
   getAudioPlaybackState,
   pauseAudioAsset,
+  seekAudioAsset,
   subscribeAudioPlayback,
   toggleAudioAsset,
   useAudioPlayback,
+  useAudioProgress,
 } from "./audioPlayback";
 import {
   hasLoadedCardPreview,
@@ -737,7 +739,7 @@ function staticBuildInfo(currentVersion: string) {
 }
 const previewAngleOptions: Array<{ value: PreviewAngle; label: string }> = [
   { value: 0, label: "正面" },
-  { value: 1, label: "右前侧（推荐）" },
+  { value: 1, label: "右前侧" },
   { value: 2, label: "右侧" },
   { value: 3, label: "右后侧" },
   { value: 4, label: "背面" },
@@ -2959,9 +2961,10 @@ function AssetGridCard({ asset, selected, onSelect }: { asset: Asset; selected: 
   return (
     <button className={`asset-card ${selected ? "selected" : ""}`} onClick={() => onSelect(asset.id)}>
       <span className={`asset-card-preview format-${asset.format}`}>
-        {hasThumbnail ? <img loading="lazy" src={api.previewUrl(asset.id, 0, "", 3)} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
-          : isAudio ? <span className="audio-glyph" aria-hidden="true">{[4, 11, 7, 17, 12, 20, 9, 14, 5, 10].map((height, index) => <i key={index} style={{ height }} />)}</span>
-            : <Icon name={assetIcon(asset.format)} size={32} />}
+        {asset.format === "video" ? <img loading="lazy" src={api.videoPosterUrl(asset.id)} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
+          : hasThumbnail ? <img loading="lazy" src={api.previewUrl(asset.id, 0, "", 3)} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
+            : isAudio ? <span className="audio-glyph" aria-hidden="true">{[4, 11, 7, 17, 12, 20, 9, 14, 5, 10].map((height, index) => <i key={index} style={{ height }} />)}</span>
+              : <Icon name={assetIcon(asset.format)} size={32} />}
       </span>
       <span className="asset-card-copy"><strong title={assetDisplayName(asset)}>{assetDisplayName(asset)}</strong><small>{formatLabels[asset.format] || asset.format.toUpperCase()} · {formatBytes(asset.size)}</small></span>
     </button>
@@ -4522,6 +4525,30 @@ function CompactAudioPlayer({ assetId, label }: {
   </span>;
 }
 
+// Playhead and elapsed/total readout for the shared audio element. The bar
+// stays laid out even before playback so the row never jumps, but it only
+// becomes seekable once this asset owns playback and its duration is known.
+function AudioProgress({ assetId, durationSeconds }: {
+  assetId: string;
+  durationSeconds?: number;
+}) {
+  const progress = useAudioProgress();
+  const owned = progress.assetId === assetId && progress.duration > 0;
+  const currentTime = owned ? progress.currentTime : 0;
+  const duration = owned ? progress.duration : durationSeconds || 0;
+  const played = duration > 0 ? (currentTime / duration) * 100 : 0;
+  return <>
+    <input type="range" className="audio-progress" min={0} max={duration || 1}
+      step={Math.min(Math.max((duration || 1) / 100, 0.01), 1)}
+      value={currentTime} disabled={!owned}
+      onChange={(event) => seekAudioAsset(Number(event.target.value))}
+      style={{ "--audio-progress": `${played}%` } as CSSProperties}
+      title={owned ? "拖动以跳转" : "播放后可跳转"}
+      aria-label="播放进度" aria-valuetext={formatDuration(currentTime)} />
+    <span className="audio-progress-time">{formatDuration(currentTime)} <i>/</i> {duration > 0 ? formatDuration(duration) : "--:--"}</span>
+  </>;
+}
+
 function AudioDownloadAction({ assetId, label }: { assetId: string; label: string }) {
   return <a className="audio-download-action" href={api.contentUrl(assetId)} download={isStaticSnapshot ? `${label}.ogg` : true} title={`下载 ${label}`} aria-label={`下载 ${label}`}><Icon name="download" size={15} /></a>;
 }
@@ -5899,15 +5926,15 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
         <div className="detail-heading-line"><span className="format-pill">{formatLabels[asset.format] || asset.format.toUpperCase()}</span><h2 title={detailHeading}>{detailHeading}</h2></div>
         <div className="detail-actions">
           {onPopout && <button type="button" className="icon-button" onClick={onPopout} title="在独立窗口中打开" aria-label="在独立窗口中打开"><Icon name="popout" /></button>}
-          {isAudio
-            ? <div className="audio-header-player">
-              <CompactAudioPlayer assetId={asset.id} label={assetDisplayName(asset)} />
-              <span className="audio-header-meta" title={metadata?.audio_codec || ""}>{metadata?.duration_seconds !== undefined ? formatDuration(metadata.duration_seconds) : ""}</span>
-              <AudioDownloadAction assetId={asset.id} label={assetDisplayName(asset)} />
-            </div>
-            : <a className="icon-button" href={api.contentUrl(asset.id)} title="导出原始文件" aria-label="导出原始文件"><Icon name="download" /></a>}
+          {!isAudio && <a className="icon-button" href={api.contentUrl(asset.id)} title="导出原始文件" aria-label="导出原始文件"><Icon name="download" /></a>}
         </div>
       </div>
+
+      {isAudio && <div className="audio-detail-player">
+        <CompactAudioPlayer assetId={asset.id} label={assetDisplayName(asset)} />
+        <AudioProgress assetId={asset.id} durationSeconds={metadata?.duration_seconds} />
+        <AudioDownloadAction assetId={asset.id} label={assetDisplayName(asset)} />
+      </div>}
 
       {hasAudioRelationshipTabs && <div className="entity-detail-tabs asset-detail-tabs" role="tablist" aria-label="声音详细信息">
         <button type="button" role="tab" id="audio-associations-tab" aria-controls="audio-associations-panel" aria-selected={activeAudioDetailTab === "associations"} className={activeAudioDetailTab === "associations" ? "active" : ""} onClick={() => selectAudioDetailTab("associations")}>关联 <em>{audioRelationshipItems.length}</em></button>
@@ -5941,8 +5968,11 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
 
       {asset.format === "video" && <div className="video-preview">
         {videoRequested && !videoFailed
-          ? <video controls autoPlay preload="metadata" src={api.videoUrl(asset.id)} onLoadedData={() => setVideoFailed(false)} onError={() => setVideoFailed(true)}>浏览器不支持视频播放。</video>
-          : <button type="button" className="button primary" onClick={() => { setVideoFailed(false); setVideoRequested(true); }}><Icon name="play" />{videoFailed ? "重试转换" : "转换并播放"}</button>}
+          ? <video controls autoPlay preload="metadata" src={api.videoUrl(asset.id)} poster={api.videoPosterUrl(asset.id)} onLoadedData={() => setVideoFailed(false)} onError={() => setVideoFailed(true)}>浏览器不支持视频播放。</video>
+          : <>
+            <img className="video-poster" src={api.videoPosterUrl(asset.id)} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
+            <button type="button" className="video-convert" onClick={() => { setVideoFailed(false); setVideoRequested(true); }} title={videoFailed ? "重试转换" : "转换并播放"} aria-label={videoFailed ? "重试转换" : "转换并播放"}><Icon name="play" size={22} /></button>
+          </>}
         {videoFailed && <strong className="video-error">视频转换失败</strong>}
       </div>}
 

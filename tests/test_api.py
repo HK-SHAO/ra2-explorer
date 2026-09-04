@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -13,9 +14,12 @@ from ra2_explorer.api import (
     _composite_focus_bounds,
     _crop_transparent_preview,
     _default_entity_operation_samples,
+    _select_palette,
     create_app,
 )
+from ra2_explorer.codecs.pal import PLACEHOLDER_MAGENTA
 from ra2_explorer.config import Settings
+from ra2_explorer.reference_data import audio_translation_lookup_key
 from ra2_explorer.semantic import (
     GameEntity,
     MediaAssociation,
@@ -35,6 +39,7 @@ from ra2_explorer.semantic import (
     _entity_usage,
     _index_assets,
     _overlay_voice_transcripts,
+    _overlay_voice_translations,
     _resolve_components,
     _shp_unit_body_playbacks,
     _standalone_sound_group,
@@ -861,6 +866,96 @@ def test_verified_unit_intro_overrides_csf_unit_name_text() -> None:
     )
     assert voice_strings["csofu39"].text == voice_strings["csofu39"].translated_text
     assert voice_strings["csofu39"].localized_text_origin == "game"
+
+
+def test_translation_backfill_covers_lines_without_transcript_entries() -> None:
+    voice_strings = {
+        "cevau06": VoiceText(
+            "VOX:CEVAU06",
+            "The V3 is a powerful long-range artillery weapon.",
+            "The V3 is a powerful long-range artillery weapon.",
+            None,
+            "game",
+            None,
+        )
+    }
+
+    _overlay_voice_translations(
+        voice_strings,
+        {
+            audio_translation_lookup_key(
+                "The V3 is a powerful long-range artillery weapon."
+            ): "V3 是威力强大的远程火炮。"
+        },
+    )
+
+    entry = voice_strings["cevau06"]
+    assert entry.translated_text == "V3 是威力强大的远程火炮。"
+    assert entry.original_text == "The V3 is a powerful long-range artillery weapon."
+    assert entry.text == "V3 是威力强大的远程火炮。"
+    assert entry.localized_text_origin == "game"
+
+
+def test_translation_backfill_keeps_existing_and_nonverbal_entries() -> None:
+    voice_strings = {
+        "covered": VoiceText("VOX:COVERED", "Line", "Line", None, "game", "已有译文"),
+        "nonverbal": VoiceText("VOX:NONVERBAL", "<阵亡声>", None, None, None, "<阵亡声>"),
+    }
+
+    _overlay_voice_translations(
+        voice_strings,
+        {
+            audio_translation_lookup_key("Line"): "不应覆盖",
+            audio_translation_lookup_key("<阵亡声>"): "不应出现",
+        },
+    )
+
+    assert voice_strings["covered"].translated_text == "已有译文"
+    assert voice_strings["nonverbal"].translated_text == "<阵亡声>"
+
+
+def test_palette_selection_avoids_magenta_placeholders() -> None:
+    def palette_data_with(colors: dict[int, tuple[int, int, int]]) -> bytes:
+        raw = bytearray()
+        for index in range(256):
+            red, green, blue = colors.get(index, (index, index, index))
+            raw += bytes((min(63, red >> 2), min(63, green >> 2), min(63, blue >> 2)))
+        return bytes(raw)
+
+    # 单位调色板把 204-239 填成洋红占位，地形调色板则是真实颜色。
+    unit = palette_data_with({index: PLACEHOLDER_MAGENTA for index in range(204, 240)})
+    iso = palette_data_with({204: (68, 56, 52)})
+    palettes = [
+        {"id": "unit-ubn", "display_name": "UNITUBN.PAL"},
+        {"id": "unit-tem", "display_name": "unittem.pal"},
+        {"id": "iso-ubn", "display_name": "ISOUBN.PAL"},
+        {"id": "iso-tem", "display_name": "isotem.pal"},
+    ]
+    data = {
+        "unit-ubn": unit,
+        "unit-tem": unit,
+        "iso-ubn": iso,
+        "iso-tem": palette_data_with({}),
+    }
+    services = SimpleNamespace(
+        database=SimpleNamespace(palette_assets=lambda source_id: palettes),
+        reader=SimpleNamespace(read=lambda asset_id: (None, data[asset_id])),
+    )
+    asset = {
+        "id": "urban-object",
+        "source_id": "source",
+        "format": "shp",
+        "extension": "pak",
+        "virtual_path": "ra2md.mix/URBANN.MIX::00102:0ABB14BC-G.PAK",
+    }
+
+    # 缺省时沿用单位调色板；画面用到占位索引时改用地形调色板。
+    assert _select_palette(services, asset, None, None).colors[204] == PLACEHOLDER_MAGENTA
+    scored = _select_palette(services, asset, None, None, used_indices={204, 130})
+    assert scored.colors[204] == (68, 56, 52)
+    # 明确的调色板用途（如 art.ini 声明的单位动画）仍然优先单位调色板。
+    forced = _select_palette(services, asset, None, "unit", used_indices={204})
+    assert forced.colors[204] == PLACEHOLDER_MAGENTA
 
 
 def test_eva_media_groups_separate_missions_and_nonverbal_prompts() -> None:
