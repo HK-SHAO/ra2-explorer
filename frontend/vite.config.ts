@@ -33,7 +33,10 @@ export default defineConfig(({ mode }) => {
     name: "preload-pages-startup-assets",
     transformIndexHtml() {
       if (mode !== "pages" || !defaultAtlas) return [];
-      const snapshotUrl = (path: string) => `${normalizedBase}data/${path}`;
+      const snapshotUrl = (path: string) => {
+        const version = browserStateVersion ? `?v=${encodeURIComponent(browserStateVersion)}` : "";
+        return `${normalizedBase}data/${path}${version}`;
+      };
       const links: HtmlTagDescriptor[] = [
         {
           tag: "link",

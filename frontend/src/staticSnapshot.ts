@@ -45,12 +45,16 @@ function requireContent(manifest: StaticSnapshotManifest, content: "units" | "so
 
 const jsonCache = new Map<string, Promise<unknown>>();
 
+const dataVersion = (import.meta.env.VITE_RA2EXP_BROWSER_STATE_VERSION || "").trim();
+
 function snapshotUrl(path: string) {
   const base = import.meta.env.BASE_URL.endsWith("/")
     ? import.meta.env.BASE_URL
     : `${import.meta.env.BASE_URL}/`;
   const normalized = path.replace(/^\/+/, "");
-  return `${base}data/${previewAliases[normalized] ?? normalized}`;
+  const aliased = previewAliases[normalized] ?? normalized;
+  const version = dataVersion ? `?v=${encodeURIComponent(dataVersion)}` : "";
+  return `${base}data/${aliased}${version}`;
 }
 
 async function fetchJson<T>(url: string) {
@@ -365,9 +369,9 @@ async function filterMedia(params: URLSearchParams): Promise<MediaPage> {
   return {
     items: items.slice(offset, offset + limit),
     total: items.length,
-    kinds: ["voice", "sound", "unknown"].map((value) => ({
-      kind: value as MediaPage["kinds"][number]["kind"],
-      count: kindCounts.get(value) || 0,
+    kinds: catalog.kinds.map((item) => ({
+      kind: item.kind as MediaPage["kinds"][number]["kind"],
+      count: kindCounts.get(item.kind) || 0,
     })),
     groups: [...groupCounts.entries()].sort(([left], [right]) => left.localeCompare(right))
       .map(([value, count]) => ({ group: value, count })),
@@ -401,7 +405,15 @@ export async function staticSnapshotRequest<T>(path: string, init?: RequestInit)
   if (route === "/api/sources") return [currentManifest.source] as T;
   if (route === "/api/stats") {
     requireContent(currentManifest, "sounds");
-    return currentManifest.stats as T;
+    const stats: Stats = { ...currentManifest.stats };
+    const movies = await loadMovies();
+    if (movies.items.length) {
+      stats.formats = [
+        ...stats.formats.filter((item) => item.format !== "video"),
+        { format: "video", count: movies.items.length },
+      ];
+    }
+    return stats as T;
   }
   if (route === "/api/reference-data") return currentManifest.reference_status as T;
   if (route.includes("/api/semantic/") && route.endsWith("/diagnostics")) return currentManifest.diagnostics as T;
@@ -509,7 +521,10 @@ const emptyMovies: MovieManifest = { bvid: "", items: [], total_duration: 0 };
 let moviesPromise: Promise<MovieManifest> | null = null;
 
 function loadMovies(): Promise<MovieManifest> {
-  moviesPromise ||= loadJson<MovieManifest>("movies.json").catch(() => emptyMovies);
+  moviesPromise ||= loadJson<MovieManifest>("movies.json").catch(() => {
+    moviesPromise = null;
+    return emptyMovies;
+  });
   return moviesPromise;
 }
 
