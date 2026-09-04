@@ -4087,15 +4087,55 @@ function FrameTransport({ frame, count, playing, onPlayingChange, onFrameChange,
 
 type ImageFetchPriority = "high" | "low" | "auto";
 
-const decodedImageFrames = new Map<string, HTMLImageElement>();
+interface DecodedImageFrame {
+  image: HTMLImageElement;
+  bytes: number;
+}
+
+const decodedImageFrames = new Map<string, DecodedImageFrame>();
 const pendingImageFrames = new Map<string, { image: HTMLImageElement; promise: Promise<HTMLImageElement> }>();
-const decodedImageFrameLimit = 48;
+const decodedImageFrameLimit = 160;
+const decodedImageFrameByteLimit = 64 * 1024 * 1024;
+let decodedImageFrameBytes = 0;
+
+function cachedDecodedImageFrame(src: string) {
+  const decoded = decodedImageFrames.get(src);
+  if (!decoded) return null;
+  decodedImageFrames.delete(src);
+  decodedImageFrames.set(src, decoded);
+  return decoded.image;
+}
+
+function decodedImageFrameUrl(src: string) {
+  const decoded = decodedImageFrames.get(src)?.image;
+  return decoded ? decoded.currentSrc || decoded.src || src : "";
+}
+
+function cacheDecodedImageFrame(src: string, image: HTMLImageElement) {
+  const previous = decodedImageFrames.get(src);
+  if (previous) decodedImageFrameBytes -= previous.bytes;
+  const decoded = {
+    image,
+    bytes: Math.max(1, image.naturalWidth * image.naturalHeight * 4),
+  };
+  decodedImageFrames.delete(src);
+  decodedImageFrames.set(src, decoded);
+  decodedImageFrameBytes += decoded.bytes;
+  while (
+    decodedImageFrames.size > decodedImageFrameLimit
+    || (decodedImageFrameBytes > decodedImageFrameByteLimit && decodedImageFrames.size > 1)
+  ) {
+    const oldest = decodedImageFrames.keys().next().value;
+    if (oldest === undefined) break;
+    const evicted = decodedImageFrames.get(oldest);
+    decodedImageFrames.delete(oldest);
+    decodedImageFrameBytes -= evicted?.bytes || 0;
+  }
+}
 
 function preloadDecodedImageFrame(src: string, priority: ImageFetchPriority = "auto") {
-  const decoded = decodedImageFrames.get(src);
+  const decoded = cachedDecodedImageFrame(src);
   if (decoded) {
-    decodedImageFrames.delete(src);
-    decodedImageFrames.set(src, decoded);
     return Promise.resolve(decoded);
   }
   const pending = pendingImageFrames.get(src);
@@ -4112,12 +4152,7 @@ function preloadDecodedImageFrame(src: string, priority: ImageFetchPriority = "a
     const finish = (cache = true) => {
       pendingImageFrames.delete(src);
       if (cache) {
-        decodedImageFrames.set(src, image);
-        while (decodedImageFrames.size > decodedImageFrameLimit) {
-          const oldest = decodedImageFrames.keys().next().value;
-          if (oldest === undefined) break;
-          decodedImageFrames.delete(oldest);
-        }
+        cacheDecodedImageFrame(src, image);
       }
       resolve(image);
     };
@@ -4435,9 +4470,14 @@ function StablePreviewImage({ src, alt, style, className, draggable = false, onB
   onLoad?: (image: HTMLImageElement) => void;
   onError?: () => void;
 }) {
-  const [displayedSrc, setDisplayedSrc] = useState(src);
-  const [resolvedRequest, setResolvedRequest] = useState({ source: src, url: src });
-  const requestedUrl = resolvedRequest.source === src ? resolvedRequest.url : src;
+  const [displayedSrc, setDisplayedSrc] = useState(() => decodedImageFrameUrl(src));
+  const [resolvedRequest, setResolvedRequest] = useState(() => ({
+    source: src,
+    url: decodedImageFrameUrl(src) || src,
+  }));
+  const requestedUrl = resolvedRequest.source === src
+    ? resolvedRequest.url
+    : decodedImageFrameUrl(src) || src;
   const requestedSrc = useRef(requestedUrl);
   const onBeforeRevealRef = useRef(onBeforeReveal);
   const onLoadRef = useRef(onLoad);
@@ -4457,8 +4497,9 @@ function StablePreviewImage({ src, alt, style, className, draggable = false, onB
       onLoadRef.current?.(image);
       setDisplayedSrc(pendingSrc);
     };
-    if (typeof image.decode === "function") void image.decode().catch(() => undefined).then(reveal);
-    else reveal();
+    const revealAfterPaint = () => window.requestAnimationFrame(() => window.requestAnimationFrame(reveal));
+    if (typeof image.decode === "function") void image.decode().catch(() => undefined).then(revealAfterPaint);
+    else revealAfterPaint();
   }
 
   function handleImageError(failedSrc: string) {
@@ -4931,7 +4972,8 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   const [operationMetadata, setOperationMetadata] = useState<Record<string, AssetMetadata>>({});
   const [animationFrame, setAnimationFrame] = useState(0);
   const [animationPlaying, setAnimationPlaying] = useState(false);
-  const autoStartedAnimationRef = useRef<ActiveEntityAnimation | null>(null);
+  const autoStartedAnimationRef = useRef("");
+  const [preparedAnimationKey, setPreparedAnimationKey] = useState("");
   const [previewFailed, setPreviewFailed] = useState(false);
   const frameCount = Math.max(1, entity?.preview.frame_count || 1);
   const animationAssociations = useMemo(
@@ -5023,6 +5065,27 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   const activeAnimationFrameCount = activeAnimation
     ? Math.max(activeAnimationFrames.length, effectBodyFrames.length, 1)
     : activeAnimationFrames.length;
+  const activeAnimationRenderKey = activeAnimation?.sample.asset
+    ? [
+      activeAnimation.sample.asset.id,
+      activeAnimation.event,
+      activeAnimation.slot,
+      activeAnimation.source,
+      activeAnimation.ruleField || "",
+      activeAnimation.sample.name,
+      sourceId,
+      entity?.id || "",
+      sourceRevision,
+      playerColor,
+      renderFacing,
+      entity?.kind === "building" && activeAnimation.role === "operation" ? frame : "",
+      activeAnimationFrames.join(","),
+      effectBodyFrames.join(","),
+    ].join(":")
+    : "";
+  const animationPrepared = Boolean(
+    activeAnimationRenderKey && preparedAnimationKey === activeAnimationRenderKey,
+  );
   const activeAnimationLoops = activeAnimationIsBody
     || activeAnimation?.sample.animation?.loop_count === -1;
   const activeAnimationLoopStart = (() => {
@@ -5080,6 +5143,21 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
     }
     return [...new Set(urls)];
   }
+  function animationLookaheadFrames(sequenceFrame: number, count = 4) {
+    const frames: number[] = [];
+    let candidate = sequenceFrame;
+    while (frames.length < count && activeAnimationFrameCount > 1) {
+      if (candidate >= activeAnimationFrameCount - 1) {
+        if (!activeAnimationLoops) break;
+        candidate = activeAnimationLoopStart;
+      } else {
+        candidate += 1;
+      }
+      if (frames.includes(candidate)) break;
+      frames.push(candidate);
+    }
+    return frames;
+  }
   const associationLayout = detailTab === "animation" ? animationAssociationLayout : soundAssociationLayout;
   const setAssociationLayout = detailTab === "animation" ? setAnimationAssociationLayout : setSoundAssociationLayout;
   const detailScroll = useRememberedScroll<HTMLElement, HTMLDivElement>(
@@ -5097,6 +5175,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
     setActiveAnimation(null);
     setAnimationMetadata(null);
     setEffectBodyMetadata(null);
+    setPreparedAnimationKey("");
     setAnimationFrame(0);
     setAnimationPlaying(false);
     setPreviewFailed(false);
@@ -5169,7 +5248,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
     setAnimationMetadata(null);
     setAnimationFrame(0);
     setAnimationPlaying(false);
-    autoStartedAnimationRef.current = null;
+    autoStartedAnimationRef.current = "";
     if (!activeAnimation?.sample.asset) return;
     let cancelled = false;
     api.metadata(activeAnimation.sample.asset.id)
@@ -5194,38 +5273,40 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   }, [effectBodySample?.asset?.id]);
 
   useEffect(() => {
-    if (!activeAnimation || autoStartedAnimationRef.current === activeAnimation) return;
+    if (!activeAnimation || autoStartedAnimationRef.current === activeAnimationRenderKey) return;
     const sample = activeAnimation.sample;
     const asset = sample.asset;
     if (!asset) return;
     if (asset.format !== "shp") {
-      autoStartedAnimationRef.current = activeAnimation;
+      setPreparedAnimationKey(activeAnimationRenderKey);
+      autoStartedAnimationRef.current = activeAnimationRenderKey;
       setAnimationPlaying(activeAnimationFrameCount > 1);
       return;
     }
-    if (!animationMetadata && (sample.animation?.shadow || sample.animation?.frame_count === null)) return;
+    if (!animationMetadata) return;
     const frameUrlGroups = Array.from(
-      { length: activeAnimationFrameCount },
+      { length: Math.min(3, activeAnimationFrameCount) },
       (_, index) => animationPreviewUrls(index),
     );
     if (frameUrlGroups.length === 0) return;
     let cancelled = false;
-    const firstFrames = frameUrlGroups.slice(0, 2).map((urls) => Promise.all(
+    const firstFrames = frameUrlGroups.map((urls) => Promise.all(
       urls.map((url) => preloadDecodedImageFrame(url, "high")),
     ));
-    void firstFrames[0].then(() => {
-      if (cancelled) return;
-      autoStartedAnimationRef.current = activeAnimation;
+    const framesReady = (images: HTMLImageElement[][]) => images.every(
+      (group) => group.every((image) => image.naturalWidth > 0),
+    );
+    void firstFrames[0].then((images) => {
+      if (!cancelled && framesReady([images])) setPreparedAnimationKey(activeAnimationRenderKey);
+    });
+    void Promise.all(firstFrames).then((images) => {
+      if (cancelled || !framesReady(images)) return;
+      setPreparedAnimationKey(activeAnimationRenderKey);
+      autoStartedAnimationRef.current = activeAnimationRenderKey;
       setAnimationPlaying(activeAnimationFrameCount > 1);
     });
-    void Promise.all(firstFrames).then(() => {
-      if (cancelled) return;
-      for (const urls of frameUrlGroups.slice(2)) {
-        for (const url of urls) void preloadDecodedImageFrame(url, "low");
-      }
-    });
     return () => { cancelled = true; };
-  }, [activeAnimation, activeAnimationFrameCount, activeAnimationFrames, animationMetadata, effectBodyFrames, effectBodySample, entity, frame, renderFacing, playerColor, sourceId, sourceRevision]);
+  }, [activeAnimation, activeAnimationFrameCount, activeAnimationFrames, activeAnimationRenderKey, animationMetadata, effectBodyFrames, effectBodySample, entity, frame, renderFacing, playerColor, sourceId, sourceRevision]);
 
   useEffect(() => {
     if (!activeAnimation) return;
@@ -5258,6 +5339,9 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
       : animationFrame + 1;
     const advance = () => setAnimationFrame((current) => current === animationFrame ? nextFrame : current);
     if (activeAnimation?.sample.asset?.format === "shp") {
+      for (const upcomingFrame of animationLookaheadFrames(animationFrame).slice(1)) {
+        for (const url of animationPreviewUrls(upcomingFrame)) void preloadDecodedImageFrame(url, "low");
+      }
       return scheduleDecodedImageFrames(animationPreviewUrls(nextFrame), interval, advance);
     }
     const timer = window.setTimeout(advance, interval);
@@ -5375,6 +5459,12 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
       { palette: sample.palette || undefined },
     );
   };
+  const warmAnimationCard = (association: MediaAssociation, sample: MediaSample) => {
+    if (!sample.asset) return;
+    void api.metadata(sample.asset.id).catch(() => undefined);
+    const thumbnailUrl = animationCardPreviewUrl(association, sample);
+    if (thumbnailUrl) void preloadDecodedImageFrame(thumbnailUrl, "high");
+  };
   const effectAnchor = animationEffectAnchor(
     activeAnimation?.role || null,
     entity.art,
@@ -5405,26 +5495,26 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
       <div className="entity-detail-body">
         <div className="entity-preview-column">
           {entity.renderable ? <div className="preview-block entity-preview">
-            {activeAnimationReplacesBody && activeAnimationAsset?.format === "shp"
-              ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${activeAnimationAsset.id}:${activeAnimation?.event || "body"}`} frameFit={activeAnimationFrameFit} src={activeAnimationPreviewUrl} alt={`${activeAnimationTitle}预览`} building={entity.kind === "building"} />
-              : activeAnimationReplacesBody && activeAnimationAsset && ["vxl", "hva"].includes(activeAnimationAsset.format)
-                ? <VoxelPreview url={api.assetModelUrl(activeAnimationAsset.id, activeAnimationSourceFrame, playerColor)} label={animationEventLabel(activeAnimation?.event || activeAnimationAsset.display_name)} viewKey={`asset:${activeAnimationAsset.id}`} previewAngle={previewAngle} resetAngle={defaultPreviewAngle} onPreviewAngleChange={setPreviewAngle} />
-                : buildingOperationPreviewUrl
-                  ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${entity.id}:operation:${activeAnimationAsset?.id || "effect"}`} frameFit={buildingOperationFrameFit} src={buildingOperationPreviewUrl} alt={`${activeAnimationTitle}组合预览`} building />
-                  : !activeAnimationAsset && frameMode === "grid" && hasRawBodyAnimation
-                    ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} scrollKey={`${entity.id}:${renderFacing}:${playerColor}`} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing: renderFacing, playerColor, scale: 3 })} />
-                    : <div className="entity-composite-stage">
-                    {effectBodyPreviewUrl
-                      ? <ImageViewport className="shp entity-composite-body" fitKey={`${entity.id}:${effectBodyAssociation?.event || "body"}`} frameFit={effectBodyFrameFit} src={effectBodyPreviewUrl} alt={`${entity.display_name} 主体动作`} building={entity.kind === "building"} />
-                      : entity.voxel
-                        ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor, revision: sourceRevision })} label={entity.display_name} viewKey={`entity:${sourceId}:${entity.id}`} previewAngle={previewAngle} resetAngle={defaultPreviewAngle} onPreviewAngleChange={setPreviewAngle} />
-                        : previewFailed
-                          ? <div className="preview-stage shp"><div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div></div>
-                          : <ImageViewport className="shp entity-composite-body" fitKey={entity.id} frameFit={entityPresentationFrameFit} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
-                    {activeAnimationAsset?.format === "shp" && <span className={`entity-effect-overlay ${activeAnimation?.role === "operation" ? "attached" : ""} ${effectFrameVisible ? "visible" : "hidden"}`} style={{ "--effect-x": `${effectAnchor.x}%`, "--effect-y": `${effectAnchor.y}%` } as CSSProperties} aria-hidden="true">
-                      <StablePreviewImage src={activeAnimationPreviewUrl} alt="" />
-                    </span>}
-                    </div>}
+            {!activeAnimationAsset && frameMode === "grid" && hasRawBodyAnimation
+              ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} scrollKey={`${entity.id}:${renderFacing}:${playerColor}`} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing: renderFacing, playerColor, scale: 3 })} />
+              : <div className="entity-composite-stage">
+                {animationPrepared && activeAnimationReplacesBody && activeAnimationAsset?.format === "shp"
+                  ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${activeAnimationAsset.id}:${activeAnimation?.event || "body"}`} frameFit={activeAnimationFrameFit} src={activeAnimationPreviewUrl} alt={`${activeAnimationTitle}预览`} building={entity.kind === "building"} />
+                  : animationPrepared && activeAnimationReplacesBody && activeAnimationAsset && ["vxl", "hva"].includes(activeAnimationAsset.format)
+                    ? <VoxelPreview url={api.assetModelUrl(activeAnimationAsset.id, activeAnimationSourceFrame, playerColor)} label={animationEventLabel(activeAnimation?.event || activeAnimationAsset.display_name)} viewKey={`asset:${activeAnimationAsset.id}`} previewAngle={previewAngle} resetAngle={defaultPreviewAngle} onPreviewAngleChange={setPreviewAngle} />
+                    : animationPrepared && buildingOperationPreviewUrl
+                      ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${entity.id}:operation:${activeAnimationAsset?.id || "effect"}`} frameFit={buildingOperationFrameFit} src={buildingOperationPreviewUrl} alt={`${activeAnimationTitle}组合预览`} building />
+                      : animationPrepared && effectBodyPreviewUrl
+                        ? <ImageViewport className="shp entity-composite-body" fitKey={`${entity.id}:${effectBodyAssociation?.event || "body"}`} frameFit={effectBodyFrameFit} src={effectBodyPreviewUrl} alt={`${entity.display_name} 主体动作`} building={entity.kind === "building"} />
+                        : entity.voxel
+                          ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor, revision: sourceRevision })} label={entity.display_name} viewKey={`entity:${sourceId}:${entity.id}`} previewAngle={previewAngle} resetAngle={defaultPreviewAngle} onPreviewAngleChange={setPreviewAngle} />
+                          : previewFailed
+                            ? <div className="preview-stage shp"><div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div></div>
+                            : <ImageViewport className="shp entity-composite-body" fitKey={entity.id} frameFit={entityPresentationFrameFit} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
+                {animationPrepared && activeAnimationAsset?.format === "shp" && !activeAnimationReplacesBody && <span className={`entity-effect-overlay ${activeAnimation?.role === "operation" ? "attached" : ""} ${effectFrameVisible ? "visible" : "hidden"}`} style={{ "--effect-x": `${effectAnchor.x}%`, "--effect-y": `${effectAnchor.y}%` } as CSSProperties} aria-hidden="true">
+                  <StablePreviewImage src={activeAnimationPreviewUrl} alt="" />
+                </span>}
+              </div>}
             {(activeAnimationAsset || hasRawBodyAnimation) && <div className="entity-preview-controls">
               {activeAnimationAsset && activeAnimationFrameCount > 1
                 ? <div className="frame-controls"><FrameTransport frame={animationFrame} count={activeAnimationFrameCount} playing={animationPlaying} onPlayingChange={(next) => {
@@ -5471,7 +5561,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
                 <header id={`entity-${group}-animation-heading`}><strong>{animationGroupLabels[group]}</strong><em>{animationCounts[group]}</em></header>
                 <div className={`animation-association-list ${associationLayout === "grid" ? "animation-association-grid" : ""}`}>
                   {group === "body" && hasRawBodyAnimation && <button type="button" className={!activeAnimation ? "active" : ""} onClick={() => { setActiveAnimation(null); setFrameMode("sequence"); setPlaying(true); }}><span className="animation-thumbnail body-action"><Icon name="unit" size={24} /></span><span><strong>{rawBodyAnimationTitle}</strong><small>{rawBodyAnimationMeta}</small></span><Icon name="play" size={16} /></button>}
-                  {animationGroups[group].flatMap((association) => animationCardSamples(association, facing).map((sample, index) => <button type="button" disabled={!sample.asset} className={activeAnimation?.event === association.event && activeAnimation.slot === association.slot && activeAnimation.source === association.source && activeAnimation.ruleField === association.rule_field && activeAnimation.sample.name === sample.name ? "active" : ""} onClick={() => { if (!sample.asset) return; setPlaying(false); setActiveAnimation({ event: association.event, slot: association.slot, source: association.source, ruleField: association.rule_field, role: association.role, sample }); }} key={`${association.slot}-${association.source}-${association.rule_field}-${association.event}-${sample.name}-${index}`}>
+                  {animationGroups[group].flatMap((association) => animationCardSamples(association, facing).map((sample, index) => <button type="button" disabled={!sample.asset} className={activeAnimation?.event === association.event && activeAnimation.slot === association.slot && activeAnimation.source === association.source && activeAnimation.ruleField === association.rule_field && activeAnimation.sample.name === sample.name ? "active" : ""} onPointerEnter={() => warmAnimationCard(association, sample)} onFocus={() => warmAnimationCard(association, sample)} onClick={() => { if (!sample.asset) return; setPlaying(false); setActiveAnimation({ event: association.event, slot: association.slot, source: association.source, ruleField: association.rule_field, role: association.role, sample }); }} key={`${association.slot}-${association.source}-${association.rule_field}-${association.event}-${sample.name}-${index}`}>
                     <span className={`animation-thumbnail ${association.role === "body" || association.role === "construction" ? "body-action" : ""}`}>{animationCardPreviewUrl(association, sample) ? <DeferredPreviewImage src={animationCardPreviewUrl(association, sample)} /> : <Icon name="image" size={24} />}</span>
                     <span><strong>{animationAssociationTitle(association)}</strong><small title={animationAssociationAliasTitle(association)}>{animationAssociationMeta(association, sample)}</small></span><Icon name="play" size={16} />
                   </button>))}
