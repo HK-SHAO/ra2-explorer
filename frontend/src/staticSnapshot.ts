@@ -224,6 +224,7 @@ function mediaSearchValues(item: MediaItem) {
     ...item.texts,
     ...item.original_texts,
     ...item.localized_texts,
+    ...item.translated_texts,
     ...item.events,
     ...item.slots,
     ...(item.mission ? [item.mission.key, item.mission.game, item.mission.campaign, String(item.mission.number)] : []),
@@ -276,7 +277,25 @@ async function entityCatalog(language: GameLanguage) {
 }
 
 async function mediaCatalog(language: GameLanguage) {
-  return await loadJson<MediaPage>(`catalog/media.${language}.json`);
+  const catalog = await loadJson<MediaPage>(`catalog/media.${language}.json`);
+  return {
+    ...catalog,
+    countries: catalog.countries || [],
+    items: catalog.items.map((item) => ({
+      ...item,
+      groups: item.groups || [],
+      texts: item.texts || [],
+      original_texts: item.original_texts || [],
+      localized_texts: item.localized_texts || [],
+      localized_text_origins: item.localized_text_origins || [],
+      translated_texts: item.translated_texts || [],
+      events: item.events || [],
+      slots: item.slots || [],
+      entities: item.entities || [],
+      countries: item.countries || [],
+      sides: item.sides || [],
+    })),
+  };
 }
 
 async function filterEntities(params: URLSearchParams): Promise<EntityPage> {
