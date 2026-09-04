@@ -4,8 +4,8 @@
 
 | 发行物 | 入口 | 数据来源 | 适用范围 |
 | --- | --- | --- | --- |
-| GitHub Pages 精简版 | <https://hansimov.github.io/ra2-explorer/> | 固定单位/声音派生快照 | 无需安装的在线体验 |
-| Windows 本地 Web 应用 | [GitHub Releases](https://github.com/Hansimov/ra2-explorer/releases) | 用户自己的官方安装或 `.ra2pack` | 完整解析、地图、导出和离线使用 |
+| GitHub Pages 精简版 | <https://hkshao.github.io/ra2-explorer/> | 固定单位/声音派生快照 | 无需安装的在线体验 |
+| Windows 本地 Web 应用 | [GitHub Releases](https://github.com/HK-SHAO/ra2-explorer/releases) | 用户自己的官方安装或 `.ra2pack` | 完整解析、地图、导出和离线使用 |
 
 两者共用 React UI。本地版使用系统已有浏览器和一个只监听回环地址的 Python 服务，不附带 Electron、Chromium、WebView 或游戏程序。
 

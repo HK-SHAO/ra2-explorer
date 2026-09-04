@@ -16,7 +16,7 @@ from scripts.fetch_pages_snapshot import (
 
 def _lock(**overrides: object) -> dict[str, object]:
     value: dict[str, object] = {
-        "repository": "Hansimov/ra2-explorer",
+        "repository": "HK-SHAO/ra2-explorer",
         "tag": "pages-data-0.11.0",
         "asset": "RA2-Explorer-Pages-Data.zip",
         "bytes": 8,
@@ -26,7 +26,7 @@ def _lock(**overrides: object) -> dict[str, object]:
                 "bytes": 8,
                 "sha256": "a" * 64,
                 "url": (
-                    "https://github.com/Hansimov/ra2-explorer/releases/download/"
+                    "https://github.com/HK-SHAO/ra2-explorer/releases/download/"
                     "pages-data-0.11.0/RA2-Explorer-Pages-Data.zip.part01"
                 ),
             }
@@ -40,7 +40,7 @@ def test_part_url_uses_pinned_github_release_asset() -> None:
     lock = _lock()
     part = _validated_parts(lock)[0]
     assert _part_url(lock, part) == (
-        "https://github.com/Hansimov/ra2-explorer/releases/download/"
+        "https://github.com/HK-SHAO/ra2-explorer/releases/download/"
         "pages-data-0.11.0/RA2-Explorer-Pages-Data.zip.part01"
     )
 
@@ -75,7 +75,7 @@ def test_fetch_part_retries_transient_network_failure(
                 "bytes": len(payload),
                 "sha256": hashlib.sha256(payload).hexdigest(),
                 "url": (
-                    "https://github.com/Hansimov/ra2-explorer/releases/download/"
+                    "https://github.com/HK-SHAO/ra2-explorer/releases/download/"
                     "pages-data-0.11.0/RA2-Explorer-Pages-Data.zip.part01"
                 ),
             }

@@ -82,7 +82,7 @@ export default defineConfig(({ mode }) => {
   const [stableBehind = "", stableAhead = ""] = stableTag
     ? gitValue(["rev-list", "--left-right", "--count", `${stableTag}...HEAD`]).split(/\s+/)
     : [];
-  const repositoryUrl = (env.VITE_RA2EXP_REPOSITORY_URL || "https://github.com/Hansimov/ra2-explorer").replace(/\/$/, "");
+  const repositoryUrl = (env.VITE_RA2EXP_REPOSITORY_URL || "https://github.com/HK-SHAO/ra2-explorer").replace(/\/$/, "");
   const publicBase = env.RA2EXP_PUBLIC_BASE || "/";
   const normalizedBase = publicBase.endsWith("/") ? publicBase : `${publicBase}/`;
   const defaultAtlas = env.RA2EXP_DEFAULT_ATLAS?.replace(/^\/+/, "");

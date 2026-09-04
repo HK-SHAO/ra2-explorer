@@ -26,7 +26,7 @@ except ModuleNotFoundError:  # Imported as scripts.publish_pages_snapshot in tes
 GITHUB_API_ROOT = "https://api.github.com"
 GITHUB_UPLOAD_ROOT = "https://uploads.github.com"
 GITHUB_API_VERSION = "2022-11-28"
-DEFAULT_REPOSITORY = "Hansimov/ra2-explorer"
+DEFAULT_REPOSITORY = "HK-SHAO/ra2-explorer"
 DEFAULT_TARGET = "master"
 AUTH_HEADER = "Author" "ization"
 BEARER_PREFIX = "Bear" "er "

@@ -32,7 +32,7 @@ def test_pages_publish_metadata_keeps_snapshot_pinned(tmp_path: Path) -> None:
     loaded = _snapshot_manifest(archive)
     data = _data_manifest(archive, loaded)
     lock = _lock_manifest(
-        repository="Hansimov/ra2-explorer",
+        repository="HK-SHAO/ra2-explorer",
         tag="pages-data-0.11.0",
         data=data,
     )
@@ -43,7 +43,7 @@ def test_pages_publish_metadata_keeps_snapshot_pinned(tmp_path: Path) -> None:
     assert lock["units"] == 12
     assert lock["sounds"] == 34
     assert lock["parts"][0]["url"] == _asset_url(  # type: ignore[index]
-        "Hansimov/ra2-explorer",
+        "HK-SHAO/ra2-explorer",
         "pages-data-0.11.0",
         "RA2-Explorer-Pages-Data.zip.part01",
     )

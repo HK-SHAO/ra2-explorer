@@ -15,7 +15,7 @@ from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 GITHUB_HOST = "github.com"
-EXPECTED_REPOSITORY = "Hansimov/ra2-explorer"
+EXPECTED_REPOSITORY = "HK-SHAO/ra2-explorer"
 CHUNK_SIZE = 1024 * 1024
 PROGRESS_BYTES = 8 * 1024 * 1024
 MAX_PARALLEL_DOWNLOADS = 4

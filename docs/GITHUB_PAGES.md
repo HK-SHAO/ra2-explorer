@@ -2,7 +2,7 @@
 
 ## 当前结论
 
-RA2 Explorer 已具备纯静态 GitHub Pages 发行模式。在线版地址是 <https://hansimov.github.io/ra2-explorer/>，只提供最适合快速体验的“单位”和“声音”两棵分类树；地图、地形、规则文件浏览、原始导出和本机目录解析继续由完整本地版提供。
+RA2 Explorer 已具备纯静态 GitHub Pages 发行模式。在线版地址是 <https://hkshao.github.io/ra2-explorer/>，只提供最适合快速体验的“单位”和“声音”两棵分类树；地图、地形、规则文件浏览、原始导出和本机目录解析继续由完整本地版提供。
 
 精简版的导航和载入范围由快照清单限定，不继承本地版保存过的其他格式开关。只有快照中实际存在且数量大于零的声音格式会参与分类；缺少的数据接口不会用空的地图、图像、调色板或资源包占位。
 
@@ -33,7 +33,7 @@ GitHub 官方给出的 Pages 限制包括：发布站点最大 1 GB、每月 100
 
 ## 为什么大数据不进入主分支
 
-主分支只追踪前端、导出器、审计脚本和两个小型锁定清单。完整 ZIP 拆为不超过 8 MiB 的资产，存放在独立的 [GitHub 数据 Release](https://github.com/Hansimov/ra2-explorer/releases)；具体 tag 由 `packaging/pages-data.json` 固定。该清单同时记录每片大小与 SHA-256，以及合并后整包大小与 SHA-256；高频和动画资源按用途拆分存放在 npm，`packaging/pages-cdn.json` 记录每个固定版本、内容摘要和路径路由。Vite 直接读取 CDN 锁，不在多个环境文件中重复版本。
+主分支只追踪前端、导出器、审计脚本和两个小型锁定清单。完整 ZIP 拆为不超过 8 MiB 的资产，存放在独立的 [GitHub 数据 Release](https://github.com/HK-SHAO/ra2-explorer/releases)；具体 tag 由 `packaging/pages-data.json` 固定。该清单同时记录每片大小与 SHA-256，以及合并后整包大小与 SHA-256；高频和动画资源按用途拆分存放在 npm，`packaging/pages-cdn.json` 记录每个固定版本、内容摘要和路径路由。Vite 直接读取 CDN 锁，不在多个环境文件中重复版本。
 
 Pages workflow 从固定 GitHub 数据 Release 并行下载最多四个分片，逐片校验后按顺序合并，再依次验证整包字节数、SHA-256、ZIP 路径安全、文件类型白名单、原始游戏格式禁令、清单计数和隐私扫描；全部通过后才允许解包进站点 artifact。代码版本更新不会重新上传数据；只有解析结果、模型或声音实际变化时才创建新的数据 tag 并更新锁定清单。
 

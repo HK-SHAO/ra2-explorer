@@ -33,7 +33,7 @@ def _release(version: str = "v0.8.0") -> bytes:
                     "size": 1234,
                     "digest": f"sha256:{'a' * 64}",
                     "browser_download_url": (
-                        "https://github.com/Hansimov/ra2-explorer/releases/"
+                        "https://github.com/HK-SHAO/ra2-explorer/releases/"
                         f"download/{version}/{UPDATE_ASSET_NAME}"
                     ),
                 }
@@ -60,7 +60,7 @@ def test_update_check_returns_github_release_digest() -> None:
         "size": 1234,
         "digest": f"sha256:{'a' * 64}",
         "download_url": (
-            "https://github.com/Hansimov/ra2-explorer/releases/"
+            "https://github.com/HK-SHAO/ra2-explorer/releases/"
             f"download/v0.8.0/{UPDATE_ASSET_NAME}"
         ),
     }

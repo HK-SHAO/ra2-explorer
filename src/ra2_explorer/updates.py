@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 from ra2_explorer import __version__
 from ra2_explorer.errors import Ra2ExplorerError
 
-UPDATE_REPOSITORY = "Hansimov/ra2-explorer"
+UPDATE_REPOSITORY = "HK-SHAO/ra2-explorer"
 UPDATE_ASSET_NAME = "RA2-Explorer-Web-x64.zip"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{UPDATE_REPOSITORY}/releases/latest"
 MAX_RELEASE_RESPONSE_BYTES = 2 * 1024 * 1024

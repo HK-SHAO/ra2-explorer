@@ -8,7 +8,7 @@ RA2 Explorer for Windows
 资源包与个人设置保存在当前电脑的 .runtime 目录。更新程序时请保留这个目录。
 
 不要删除 _internal 目录，也不要直接在 ZIP 内运行。需要命令行操作时可使用 ra2exp.exe；
-完整源码、开发文档与问题反馈入口位于：https://github.com/Hansimov/ra2-explorer
+完整源码、开发文档与问题反馈入口位于：https://github.com/HK-SHAO/ra2-explorer
 
 本项目代码采用 MIT License，完整条款见同目录 LICENSE。游戏素材仍归其相应权利人所有。
 RA2 Explorer 与 Electronic Arts 或其许可方没有隶属关系。

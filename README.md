@@ -6,7 +6,7 @@ RA2 Explorer 是一个在浏览器中运行的《命令与征服：红色警戒 
 
 ## 下载与使用
 
-1. 从 [Releases](https://github.com/Hansimov/ra2-explorer/releases) 下载 `RA2-Explorer-Web-x64.zip`。
+1. 从 [Releases](https://github.com/HK-SHAO/ra2-explorer/releases) 下载 `RA2-Explorer-Web-x64.zip`。
 2. 完整解压 ZIP；不要直接在压缩包里运行，也不要删除 `_internal`。
 3. 双击 `RA2 Explorer.exe`。程序会在 `127.0.0.1:46120` 启动本地服务，并用已有的 Edge 或 Chrome 打开页面。
 4. 首次打开时，选择你合法安装的《红色警戒 2 / 尤里的复仇》目录。扫描可能持续数秒，原始目录始终只读。
@@ -17,7 +17,7 @@ RA2 Explorer 是一个在浏览器中运行的《命令与征服：红色警戒 
 
 ## 在线浏览
 
-[打开 GitHub Pages 精简版](https://hansimov.github.io/ra2-explorer/)。无需安装或导入游戏，打开即可浏览 559 个单位和 3,322 个声音，包括单位模型、帧动画、规则关联、中英文台词、语音和音效。
+[打开 GitHub Pages 精简版](https://hkshao.github.io/ra2-explorer/)。无需安装或导入游戏，打开即可浏览 559 个单位和 3,322 个声音，包括单位模型、帧动画、规则关联、中英文台词、语音和音效。
 
 在线版只包含预先生成并通过审计的派生 WebP、模型场景 JSON、Opus 声音和语义元数据，不包含游戏 EXE，也不包含 MIX、BAG、INI、CSF 等原始游戏文件。资源按当前页面和用户操作延迟加载；目录与卡片图集优先由 jsDelivr 分发，失败会自动回退到 GitHub Pages，不会在打开网页时下载整个资料库。地图、地形、原始文件导出和本机游戏目录解析仍由完整本地版提供。在线版的体积、流量和发布结构见 [GitHub Pages 说明](docs/GITHUB_PAGES.md)。
 
@@ -30,6 +30,8 @@ RA2 Explorer 是一个在浏览器中运行的《命令与征服：红色警戒 
 - 按规则归属筛选盟军、苏军、尤里和无阵营对象；卡片、详情与主体动作按游戏玩家色显示盟军蓝、苏军红和尤里紫，归属文字也使用对应颜色，中立或共用资产保持原色；
 - 游戏建造栏顺序、可叠加的可建造优先、独立详情窗口、可调布局、帧步进和浏览位置记忆；
 - 单位动画按主体、建造和运转状态在同一页分组；超级武器按未充能、启动、就绪和复位分别播放，分层建筑始终与主体合成显示；
+- 音频播放带进度条，可拖动跳转并显示已播与总时长；
+- 视频打开即显示封面画面，会自动避开片头黑屏，点画面上的圆形按钮即可转码播放；
 - 原始资产导出，以及按需生成的 PNG、WAV、模型 JSON 和视频预览。
 
 所有派生结果都进入应用目录下的 `.runtime\RA2MD-Ext`，不会改写游戏安装。普通浏览直接读取 MIX 区段，不再复制每个读过的原始成员。
@@ -81,5 +83,7 @@ ra2exp.exe package --game-dir "D:\Games\RA2" --output "D:\RA2 Explorer Local"
 ## 许可证
 
 RA2 Explorer 源代码采用 [MIT License](LICENSE)。该许可证只适用于本项目代码，不授予 Electronic Arts、Westwood 或其他权利人的游戏文件、名称、图像、音频及其他素材的权利。
+
+本项目从 [Hansimov/ra2-explorer](https://github.com/Hansimov/ra2-explorer) 分叉后独立维护，感谢原作者的工作。
 
 RA2 Explorer 与 Electronic Arts 或其许可方没有隶属关系。游戏内容的使用与再分发仍须遵守适用法律、平台条款和你实际取得的授权。

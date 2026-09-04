@@ -204,9 +204,9 @@ def prepare_package(
         "license": "SEE LICENSE IN NOTICE.txt",
         "repository": {
             "type": "git",
-            "url": "git+https://github.com/Hansimov/ra2-explorer.git",
+            "url": "git+https://github.com/HK-SHAO/ra2-explorer.git",
         },
-        "homepage": "https://hansimov.github.io/ra2-explorer/",
+        "homepage": "https://hkshao.github.io/ra2-explorer/",
         "files": ["data", "README.md", "NOTICE.txt"],
         "sideEffects": False,
         "publishConfig": {"access": "public", "registry": DEFAULT_REGISTRY},
