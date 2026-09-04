@@ -509,7 +509,6 @@ export interface MovieItem {
   start: number;
   duration: number;
   poster?: string;
-  audio_asset_ids?: string[];
 }
 
 export interface MovieManifest {
@@ -570,10 +569,7 @@ export function staticMoviePosterUrl(assetId: string) {
 
 export async function staticMovieEntry(assetId: string) {
   const movies = await loadMovies();
-  const item = movies.items.find(
-    (candidate) =>
-      candidate.asset_id === assetId || candidate.audio_asset_ids?.includes(assetId),
-  );
+  const item = movies.items.find((candidate) => candidate.asset_id === assetId);
   return item ? { bvid: movies.bvid, start: item.start, duration: item.duration, name: item.name } : null;
 }
 

@@ -880,8 +880,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .video-error { color: #d97570; font-size: .8125rem; }
 .bili-player { width: 100%; max-height: 22.5rem; aspect-ratio: 4 / 3; display: block; border: 0; background: #000; }
 .video-static-status { color: #898e97; font-size: .8125rem; }
-.movie-reference { display: inline-block; margin: .625rem 0 0; color: #b9bdc4; font-size: .75rem; text-decoration: none; }
-.movie-reference:hover { color: #e3c7ef; text-decoration: underline; }
 
 .asset-list::-webkit-scrollbar, .detail-panel::-webkit-scrollbar, .entity-detail-sections::-webkit-scrollbar, .library-tree::-webkit-scrollbar, .tag-filter::-webkit-scrollbar, .text-preview pre::-webkit-scrollbar, .search-results-scroll::-webkit-scrollbar, .entity-search-suggestions::-webkit-scrollbar, .catalog-search-history::-webkit-scrollbar { width: .6875rem; height: .4375rem; }
 .asset-list::-webkit-scrollbar-track, .detail-panel::-webkit-scrollbar-track, .entity-detail-sections::-webkit-scrollbar-track, .library-tree::-webkit-scrollbar-track, .tag-filter::-webkit-scrollbar-track, .text-preview pre::-webkit-scrollbar-track, .search-results-scroll::-webkit-scrollbar-track, .entity-search-suggestions::-webkit-scrollbar-track, .catalog-search-history::-webkit-scrollbar-track { background: #17191d; }
