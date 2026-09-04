@@ -2992,6 +2992,21 @@ function mediaSecondaryText(item: MediaItem, preference: VoiceTextPreference = "
     .join(" · ");
 }
 
+function mediaCardTextLines(item: MediaItem, preference: VoiceTextPreference = "translation") {
+  const original = uniqueAudioTexts(item.original_texts).join(" · ");
+  const preferred = preferredMediaTexts(item, preference).values.join(" · ");
+  const first = cleanAudioText(original
+    || preferred
+    || item.description
+    || assetDisplayName(item.asset));
+  const firstKey = first.replace(/\s+/g, " ").toLocaleLowerCase();
+  const second = cleanAudioText(preferred);
+  return {
+    first,
+    second: second.replace(/\s+/g, " ").toLocaleLowerCase() === firstKey ? "" : second,
+  };
+}
+
 function mediaEntityGroupLabels(entities: MediaItem["entities"]) {
   const nameCounts = new Map<string, number>();
   for (const entity of entities) {
@@ -3456,9 +3471,8 @@ function SearchResultsPanel({
     </div>}
     {visibleMedia.length > 0
       ? <div className="search-media-grid">{visibleMedia.map((item) => {
-        const primaryText = mediaPrimaryText(item, voiceTextPreference);
-        const secondaryText = mediaSecondaryText(item, voiceTextPreference);
-        return <button type="button" className="search-media-card" key={item.asset.id} onPointerEnter={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onFocus={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onClick={() => selectMedia(item)}><span className="search-media-play"><Icon name="play" size={15} /></span><span><strong>{primaryText}</strong>{secondaryText && <small>{secondaryText}</small>}</span><em>{mediaGroupLabels[item.groups[0]] || item.groups[0] || (item.kind === "voice" ? "游戏语音" : "游戏音效")}</em></button>;
+        const textLines = mediaCardTextLines(item, voiceTextPreference);
+        return <button type="button" className="search-media-card" key={item.asset.id} onPointerEnter={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onFocus={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onClick={() => selectMedia(item)}><span className="search-media-play"><Icon name="play" size={15} /></span><span className="media-card-texts"><strong title={textLines.first}>{textLines.first}</strong>{textLines.second && <small title={textLines.second}>{textLines.second}</small>}</span><em>{mediaGroupLabels[item.groups[0]] || item.groups[0] || (item.kind === "voice" ? "游戏语音" : "游戏音效")}</em></button>;
       })}</div>
       : <div className="search-result-empty">当前结果中没有匹配的声音</div>}
     {media.length < mediaTotal && <button className="load-more search-result-load-more" disabled={loading} onClick={() => void onLoadMoreMedia()}>{loading ? "正在载入…" : `载入更多声音（剩余 ${(mediaTotal - media.length).toLocaleString("zh-CN")}）`}</button>}
@@ -3592,18 +3606,17 @@ function MediaListPanel({ items, total, loading, search, groups, countries, sele
 
   function renderMediaItem(item: MediaItem) {
     const textCount = uniqueAudioTexts(item.texts).length;
-    const primaryText = mediaPrimaryText(item, voiceTextPreference);
-    const secondaryText = mediaSecondaryText(item, voiceTextPreference);
+    const textLines = mediaCardTextLines(item, voiceTextPreference);
     if (layout === "list") {
       return <button key={item.asset.id} data-catalog-item-id={item.asset.id} className={`asset-row media-row ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onPointerEnter={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onFocus={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onClick={() => onSelect(item.asset.id)}>
         <span className="file-icon format-audio"><Icon name={playingId === item.asset.id ? "pause" : "play"} /></span>
-        <span className="asset-main"><strong>{primaryText}</strong>{(secondaryText || textCount > 1) && <small>{secondaryText}{textCount > 1 ? `${secondaryText ? " · " : ""}${textCount} 条文本` : ""}</small>}</span>
+        <span className="asset-main media-card-texts"><strong title={textLines.first}>{textLines.first}</strong>{(textLines.second || textCount > 1) && <small title={textLines.second}>{textLines.second}{textCount > 1 ? `${textLines.second ? " · " : ""}${textCount} 条文本` : ""}</small>}</span>
         <span className="media-links">{item.entities.slice(0, 2).map((entity) => entity.display_name).join(" · ") || item.slots.slice(0, 2).map(mediaSlotLabel).join(" · ") || "未关联"}</span>
         <Icon name="chevron" size={15} />
       </button>;
     }
     return <button key={item.asset.id} data-catalog-item-id={item.asset.id} className={`asset-card media-card ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onPointerEnter={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onFocus={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onClick={() => onSelect(item.asset.id)}>
-      <span className="asset-card-copy"><strong title={primaryText}>{primaryText}</strong>{secondaryText && <small title={secondaryText}>{secondaryText}</small>}<em>{item.slots.slice(0, 2).map(mediaSlotLabel).join(" · ") || "未分类"}</em></span>
+      <span className="asset-card-copy media-card-texts"><strong title={textLines.first}>{textLines.first}</strong>{textLines.second && <small title={textLines.second}>{textLines.second}</small>}<em>{item.slots.slice(0, 2).map(mediaSlotLabel).join(" · ") || "未分类"}</em></span>
     </button>;
   }
 
