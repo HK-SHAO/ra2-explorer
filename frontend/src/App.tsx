@@ -6151,6 +6151,7 @@ function SettingsDialog({
             {!hosted && <button type="button" onClick={() => scrollToSection("settings-sources")}>游戏目录</button>}
             {!hosted && <button type="button" onClick={() => scrollToSection("settings-packs")}>资源包</button>}
             {!isStaticSnapshot && <button type="button" onClick={() => scrollToSection("settings-updates")}>应用更新</button>}
+            <button type="button" onClick={() => scrollToSection("settings-about")}>关于</button>
           </nav>
           <div className="settings-content">
             {isStaticSnapshot && <div className="settings-build-info" role="status">
@@ -6276,6 +6277,18 @@ function SettingsDialog({
                 {updateInfo.notes && <p>{updateInfo.notes}</p>}
               </div>}
             </section>}
+
+            <section className="settings-section" id="settings-about">
+              <header><h3>关于</h3></header>
+              <div className="about-list">
+                <a href="https://github.com/HK-SHAO/ra2-explorer" target="_blank" rel="noreferrer">
+                  <Icon name="spark" size={16} /><div><strong>本仓库 · HK-SHAO</strong><small>github.com/HK-SHAO/ra2-explorer</small></div>
+                </a>
+                <a href="https://github.com/Hansimov/ra2-explorer" target="_blank" rel="noreferrer">
+                  <Icon name="info" size={16} /><div><strong>原作者 · Hansimov</strong><small>github.com/Hansimov/ra2-explorer</small></div>
+                </a>
+              </div>
+            </section>
           </div>
         </div>
         <div className="dialog-actions settings-footer"><button type="button" className="button primary" disabled={busy} onClick={onClose}>完成</button></div>
@@ -6356,7 +6369,24 @@ function DetachedAssetDetail({ assetId }: { assetId: string }) {
   return <main className="detached-shell">{error ? <div className="detached-error">{error}</div> : <DetailPanel asset={asset} metadata={metadata} textAsset={textAsset} textQuery={textQuery} setTextQuery={setTextQuery} frame={frame} setFrame={setFrame} playing={playing} setPlaying={setPlaying} palettes={palettes} paletteId={paletteId} setPaletteId={setPaletteId} playerColors={colors} previewUrl={previewUrl} associations={associations} voiceTextPreference={voiceTextPreference} wide scrollKey={`detached-asset:${assetId}`} />}</main>;
 }
 
+function useRootFontSize() {
+  useEffect(() => {
+    const root = document.getElementById("root");
+    if (!root || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      document.documentElement.style.fontSize = width > 0 ? `${Math.min(16, width * 0.04)}px` : "";
+    });
+    observer.observe(root);
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.fontSize = "";
+    };
+  }, []);
+}
+
 function App() {
+  useRootFontSize();
   const params = new URLSearchParams(window.location.search);
   const detail = params.get("detail");
   if (detail === "entity" && params.get("source_id") && params.get("entity_id")) {
