@@ -1,2 +1,6 @@
 #!/bin/sh
-exec cmd.exe /d /s /c ".githooks\privacy-check.cmd"
+# 提交前隐私扫描；优先 uv，其次系统 Python。
+if command -v uv >/dev/null 2>&1; then
+    exec uv run python scripts/privacy_scan.py --mode tracked
+fi
+exec python3 scripts/privacy_scan.py --mode tracked

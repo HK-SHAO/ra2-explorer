@@ -18,10 +18,6 @@
 
 **离线网页包**：解压即用，也可发布到 B 站 Toy，过场影片通过 B 站视频引用播放。构建步骤见 [发行说明](docs/DISTRIBUTION.md)。
 
-## 构建与开发
-
-Python 侧使用 [uv](https://docs.astral.sh/uv/) 管理依赖，`uv.lock` 锁定版本。初始化、本地服务、测试与离线网页包（Toy 版）的完整命令见 [开发指南](docs/DEVELOPMENT.md)。
-
 ## 亮点
 
 - 全局搜索：简繁中文、拼音与模糊匹配，`Ctrl+K` 随时唤起；

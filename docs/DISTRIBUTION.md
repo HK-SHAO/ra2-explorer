@@ -4,8 +4,8 @@
 
 | 发行物 | 入口 | 数据来源 | 适用范围 |
 | --- | --- | --- | --- |
-| 静态网页包（toy.zip） | 自行发布，如 B 站 Toy | 固定单位/声音派生快照 | 无需安装的离线体验 |
-| Windows 本地 Web 应用 | [GitHub Releases](https://github.com/HK-SHAO/ra2-explorer/releases) | 用户自己的官方安装或 `.ra2pack` | 完整解析、地图、导出和离线使用 |
+| 静态网页包（toy.zip） | B 站 Toy | 固定单位/声音派生快照 | 无需安装的离线体验 |
+| 本地 Web 应用 | [GitHub Releases](https://github.com/HK-SHAO/ra2-explorer/releases) 或 `uv run ra2exp serve` | 用户自己的官方安装或 `.ra2pack` | 完整解析、地图、导出和离线使用 |
 
 两者共用 React UI。本地版使用系统已有浏览器和一个只监听回环地址的 Python 服务，不附带 Electron、Chromium、WebView 或游戏程序。
 

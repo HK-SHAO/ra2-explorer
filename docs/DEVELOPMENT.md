@@ -87,10 +87,11 @@ scripts\build_windows.cmd
 ```sh
 uv run ra2exp pages export SOURCE_ID --audio-bitrate 24k --workers 8 --overwrite
 uv run ra2exp movies build SOURCE_ID
-uv run python scripts/verify_pages_snapshot.py .outputs/toy/pages-data-final.zip
+cd frontend && npm run build:pages && cd ..
+uv run python scripts/build_toy_package.py --snapshot .outputs/toy/pages-data-final.zip
 ```
 
-`npm run build:pages` 构建静态前端到 `frontend\dist-pages`（相对路径 base），不会覆盖本地版 `frontend\dist`。把快照数据放进 `frontend\dist-pages\data` 后整体打包，即得到可离线浏览、可直接发布到 Toy 的单文件 ZIP。
+打包脚本会把快照解包进 `frontend\dist-pages\data`（相对路径 base），再压缩出 `toy.zip`。`--serve` 可在本机直接预览打包结果，默认 `http://127.0.0.1:8080/`；过场影片通过 B 站成片引用播放，需联网。
 
 ## 文档与提交
 
