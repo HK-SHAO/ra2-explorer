@@ -344,7 +344,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .detail-title .layout-toggle button { width: 1.75rem; height: 1.75rem; }
 .detail-heading-line { min-width: 0; display: flex; align-items: center; gap: .5625rem; overflow: hidden; }
 .audio-detail-title .detail-heading-line { flex: 1 1 auto; }
-.audio-detail-player { display: flex; flex-wrap: wrap; align-items: center; gap: .5625rem; margin-top: .625rem; padding: .4375rem .5625rem; border: 1px solid var(--line-soft); border-radius: .1875rem; background: #14161a; }
+.audio-detail-player { display: flex; flex-wrap: wrap; align-items: center; gap: .5625rem; margin-top: .625rem; }
 .audio-detail-player > .compact-audio-player, .audio-detail-player > .audio-download-action { flex: 0 0 auto; }
 /* Mirrors .frame-controls input: a slim native slider, here filled up to the playhead. */
 .audio-progress { flex: 1 1 10rem; min-width: 7.5rem; height: .75rem; margin: 0; appearance: none; background: transparent; cursor: pointer; }
