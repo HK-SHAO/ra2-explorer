@@ -955,14 +955,16 @@ body { font-size: 14px; }
   .settings-source-list article > button, .resource-pack-list article > a { grid-column: 2; justify-self: start; }
   .workspace, .workspace.detail-right, .workspace.detail-bottom { display: block; min-height: 0; }
   .source-panel { display: block; border-right: 0; }
-  .workspace.sidebar-collapsed .source-panel { display: flex; flex-wrap: wrap; align-items: center; }
-  .workspace.sidebar-collapsed .sidebar-brand { min-height: 48px; }
-  .workspace.sidebar-collapsed .library-tree { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; max-height: none; padding: 7px; }
+  .workspace.sidebar-collapsed .source-panel { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; }
+  .workspace.sidebar-collapsed .sidebar-brand { min-height: 0; padding: 6px 2px 5px 8px; border-bottom: 0; }
+  .workspace.sidebar-collapsed .source-heading { height: auto; padding: 6px 2px 5px 4px; }
+  .workspace.sidebar-collapsed .source-select-wrap { height: 34px; }
+  .workspace.sidebar-collapsed .library-tree { flex: 1 1 0; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; align-content: flex-start; gap: 2px; padding: 6px 4px 5px; overflow-y: auto; }
   .workspace.sidebar-collapsed .library-tree .tree-branch,
   .workspace.sidebar-collapsed .library-tree .tree-children,
   .workspace.sidebar-collapsed .library-tree .tree-child-group { display: contents; }
-  .workspace.sidebar-collapsed .library-tree button { width: auto; min-width: 42px; height: 38px; }
-  .workspace.sidebar-collapsed .sidebar-settings { margin: 0 7px 0 0; min-height: 38px; padding: 0 9px; }
+  .workspace.sidebar-collapsed .library-tree button { width: auto; min-width: 34px; height: 34px; }
+  .workspace.sidebar-collapsed .sidebar-settings { width: 38px; min-height: 34px; margin: 6px 8px 0 0; padding: 0; }
   .workspace.sidebar-collapsed .sidebar-settings span { display: none; }
   .sidebar-brand { min-height: 58px; }
   .sidebar-settings { margin-bottom: 9px; }
