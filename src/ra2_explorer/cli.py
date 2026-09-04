@@ -146,7 +146,7 @@ def build_parser() -> argparse.ArgumentParser:
     movies_build = movies_commands.add_parser("build", help="排序、统一规格并拼接为单支影片")
     movies_build.add_argument("source_id")
     movies_build.add_argument("--output-dir", type=Path)
-    movies_build.add_argument("--bvid", default="", help="成片上传 B 站后的 BV 号")
+    movies_build.add_argument("--bvid", default="BV1cxt66dEDM", help="成片上传 B 站后的 BV 号")
     movies_build.add_argument("--skip-encode", action="store_true", help="复用已有分片，只重建清单")
 
     cache = subcommands.add_parser("cache", help="统计或清理可再生成的本地缓存")

@@ -94,6 +94,7 @@ scripts\build_windows.cmd
 
 ```bat
 .venv\Scripts\ra2exp.exe pages export SOURCE_ID --audio-bitrate 24k --workers 8 --overwrite
+.venv\Scripts\ra2exp.exe movies build SOURCE_ID
 .venv\Scripts\python.exe scripts\verify_pages_snapshot.py .outputs\toy\pages-data.zip
 ```
 

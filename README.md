@@ -14,9 +14,22 @@
 | 数据 | 本机游戏目录（只读） | 预生成的派生快照 |
 | 适用 | 完整能力：地图、地形、导出、本地解析 | 快速浏览 559 个单位与 3,348 个声音 |
 
-**本地版**：解压 → 双击 `RA2 Explorer.exe` → 首次选择游戏目录。安装识别见 [游戏文件指南](docs/GAME_FILES.md)。
+**本地版**：解压 → 启动 `RA2 Explorer` → 首次选择游戏目录。安装识别见 [游戏文件指南](docs/GAME_FILES.md)。
 
 **离线网页包**：解压即用，也可发布到 B 站 Toy，过场影片通过 B 站视频引用播放。构建步骤见 [发行说明](docs/DISTRIBUTION.md)。
+
+## 构建与开发
+
+```bash
+# 本地版：静态前端 + 本机服务（跨平台，无 Windows 依赖）
+cd frontend && npm install && npm run build
+ra2exp serve                       # 开发热更新：npm run dev
+
+# 离线网页包（Toy 版）：三步产出 toy.zip
+ra2exp pages export SOURCE_ID      # 导出派生快照
+ra2exp movies build SOURCE_ID      # 合成过场影片，生成 BV 引用清单
+python scripts/build_toy_package.py
+```
 
 ## 亮点
 

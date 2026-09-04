@@ -69,7 +69,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--movies-manifest", type=Path, default=DEFAULT_MOVIES_MANIFEST,
                         help="过场影片 BV 引用清单；不存在时跳过")
-    parser.add_argument("--bvid", default="", help="成片的 B 站 BV 号，写入引用清单")
+    parser.add_argument("--bvid", default="BV1cxt66dEDM", help="成片的 B 站 BV 号，写入引用清单")
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
     try:
