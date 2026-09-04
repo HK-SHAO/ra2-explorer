@@ -23,6 +23,7 @@ import {
   AssetAssociationPage,
   AssetMetadata,
   AssetSort,
+  CountryFacet,
   DiscoveryResult,
   EntityDependency,
   EntityKind,
@@ -639,6 +640,15 @@ function formatDuration(value: number) {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
+function canUseCompactTextTag(value: string) {
+  if (value.includes("\n")) return false;
+  const widthHint = Array.from(value.trim()).reduce((total, character) => {
+    const point = character.codePointAt(0) || 0;
+    return total + (point >= 0x2e80 ? 2 : 1);
+  }, 0);
+  return widthHint <= 48;
+}
+
 function crcLabel(value: number | null) {
   return value === null ? "—" : value.toString(16).toUpperCase().padStart(8, "0");
 }
@@ -657,6 +667,7 @@ function assetIcon(format: string): IconName {
 type LayoutMode = "list" | "grid";
 type DetailPlacement = "right" | "bottom";
 type MediaHeaderAlignment = "left" | "center";
+type VoiceTextPreference = "translation" | "game";
 type EntitySort = "cameo" | "faction" | "name_asc" | "name_desc" | "cost_asc" | "cost_desc" | "strength_asc" | "strength_desc";
 type CatalogSearchTarget = "entities" | "media";
 type PreviewAngle = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
@@ -1012,6 +1023,7 @@ function includeFocusedMedia(
   focus: CatalogListFocus | null,
   kind: MediaKind,
   sort: MediaSort,
+  voiceTextPreference: VoiceTextPreference,
 ) {
   const target = focus?.target === "media" ? focus.media : undefined;
   if (
@@ -1022,9 +1034,9 @@ function includeFocusedMedia(
   const next = [...items, target];
   next.sort((left, right) => {
     const leftValue = sort === "description_asc"
-      ? mediaPrimaryText(left) : assetDisplayName(left.asset);
+      ? mediaPrimaryText(left, voiceTextPreference) : assetDisplayName(left.asset);
     const rightValue = sort === "description_asc"
-      ? mediaPrimaryText(right) : assetDisplayName(right.asset);
+      ? mediaPrimaryText(right, voiceTextPreference) : assetDisplayName(right.asset);
     const compared = leftValue.localeCompare(rightValue, "zh-CN", { numeric: true });
     return sort === "name_desc" ? -compared : compared;
   });
@@ -1250,6 +1262,12 @@ function storedGameLanguage(): GameLanguage {
     : "zh-CN";
 }
 
+function storedVoiceTextPreference(): VoiceTextPreference {
+  return window.localStorage.getItem("ra2exp-voice-text-preference-v1") === "game"
+    ? "game"
+    : "translation";
+}
+
 function storedPreviewAngle(): PreviewAngle {
   const value = window.localStorage.getItem("ra2exp-preview-angle-v1");
   if (value === null) return DEFAULT_PREVIEW_ANGLE;
@@ -1330,6 +1348,9 @@ function ExplorerApp() {
     window.localStorage.getItem("ra2exp-detail-placement") === "right" ? "right" : "bottom",
   );
   const [gameLanguage, setGameLanguage] = useState<GameLanguage>(storedGameLanguage);
+  const [voiceTextPreference, setVoiceTextPreference] = useState<VoiceTextPreference>(
+    storedVoiceTextPreference,
+  );
   const [previewAngle, setPreviewAngle] = useState<PreviewAngle>(storedPreviewAngle);
   const [entities, setEntities] = useState<EntitySummary[]>([]);
   const [entityTotal, setEntityTotal] = useState(0);
@@ -1374,6 +1395,7 @@ function ExplorerApp() {
   const mediaLoadedCountRef = useRef(0);
   const [mediaGroups, setMediaGroups] = useState<Array<{ group: string; count: number }>>([]);
   const [mediaEventTypes, setMediaEventTypes] = useState<Array<{ event_type: string; count: number }>>([]);
+  const [mediaCountries, setMediaCountries] = useState<CountryFacet[]>([]);
   const [mediaKindCounts, setMediaKindCounts] = useState<Array<{ kind: MediaKind; count: number }>>([]);
   const [searchEntityItems, setSearchEntityItems] = useState<EntitySummary[]>([]);
   const [searchEntityTotal, setSearchEntityTotal] = useState(0);
@@ -1489,7 +1511,7 @@ function ExplorerApp() {
     const mediaSuggestions: CatalogSearchSuggestion[] = searchMediaItems.map((media) => ({
       key: `media:${media.asset.id}`,
       target: "media" as const,
-      title: mediaPrimaryText(media),
+      title: mediaPrimaryText(media, voiceTextPreference),
       subtitle: `${assetDisplayName(media.asset)} · ${media.kind === "voice" ? "语音" : "音效"}`,
       meta: media.slots.slice(0, 2).map(mediaSlotLabel).join(" · ") || mediaGroupLabels[media.groups[0]] || "声音",
       score: mediaSuggestionScore(media, searchQuery)
@@ -1511,8 +1533,8 @@ function ExplorerApp() {
     }
     return result;
   }, [
-    searchEntityItems, searchMediaItems, searchQuery, gameLanguage, view, entityKind,
-    isMediaCategory, mediaKind, mediaGroup,
+    searchEntityItems, searchMediaItems, searchQuery, gameLanguage, voiceTextPreference, view,
+    entityKind, isMediaCategory, mediaKind, mediaGroup,
   ]);
   const compactAudioDetail = view === "assets" && isMediaCategory;
   const detailSize = detailPlacement === "bottom"
@@ -1552,6 +1574,11 @@ function ExplorerApp() {
   function updateGameLanguage(next: GameLanguage) {
     setGameLanguage(next);
     window.localStorage.setItem("ra2exp-game-language-v1", next);
+  }
+
+  function updateVoiceTextPreference(next: VoiceTextPreference) {
+    setVoiceTextPreference(next);
+    window.localStorage.setItem("ra2exp-voice-text-preference-v1", next);
   }
 
   function updatePreviewAngle(next: PreviewAngle) {
@@ -1788,7 +1815,11 @@ function ExplorerApp() {
   function selectEntityCard(id: string) {
     cancelCatalogListFocus();
     const entity = visibleEntities.find((item) => item.id === id);
-    if (entity) rememberEntityCard(id, entity.kind, entityUsage);
+    if (entity) {
+      rememberEntityCard(id, entity.kind, entityUsage);
+      const detailPreviewUrl = entityDetailPreviewUrl(entity, sourceId, previewAngle);
+      if (detailPreviewUrl) void preloadDecodedImageFrame(detailPreviewUrl, "high");
+    }
     setSelectedEntityId(id);
   }
 
@@ -2079,6 +2110,7 @@ function ExplorerApp() {
     setMediaGroups([]);
     setMediaKindCounts([]);
     setMediaEventTypes([]);
+    setMediaCountries([]);
     setSearchEntityItems([]);
     setSearchEntityTotal(0);
     setSearchMediaItems([]);
@@ -2171,6 +2203,7 @@ function ExplorerApp() {
             catalogListFocusRef.current,
             mediaKind,
             mediaSort,
+            voiceTextPreference,
           );
           setMediaItems(nextItems);
           mediaLoadedCountRef.current = page.items.length;
@@ -2178,6 +2211,7 @@ function ExplorerApp() {
           setMediaGroups(orderedMediaGroups(page.groups));
           setMediaKindCounts(page.kinds);
           setMediaEventTypes(page.event_types || []);
+          setMediaCountries(page.countries || []);
           const remembered = assetSelectionsRef.current.get(
             assetSelectionKey(sourceId, selectedCategoryId, mediaGroup),
           ) || "";
@@ -2200,7 +2234,7 @@ function ExplorerApp() {
     };
   }, [
     sourceId, sourceRevision, selectedCategoryId, mediaKind, mediaGroup, mediaEventType,
-    mediaSort, gameLanguage, view, isMediaCategory,
+    mediaSort, gameLanguage, voiceTextPreference, view, isMediaCategory,
   ]);
 
   useEffect(() => {
@@ -2343,13 +2377,26 @@ function ExplorerApp() {
       .map((index) => visibleEntities[index])
       .filter((entity, index, items): entity is EntitySummary => Boolean(entity)
         && items.findIndex((item) => item?.id === entity.id) === index);
+    const currentPreviewUrl = nearby[0]
+      ? entityDetailPreviewUrl(nearby[0], sourceId, previewAngle)
+      : "";
+    if (currentPreviewUrl) void preloadDecodedImageFrame(currentPreviewUrl, "high");
     const timer = window.setTimeout(() => {
       for (const entity of nearby) {
         void api.entity(sourceId, entity.id, gameLanguage, sourceRevision).catch(() => undefined);
       }
     }, 60);
-    return () => window.clearTimeout(timer);
-  }, [view, sourceId, sourceRevision, visibleEntities, selectedEntityId, gameLanguage]);
+    const neighborTimer = window.setTimeout(() => {
+      for (const entity of nearby.slice(1, 3)) {
+        const url = entityDetailPreviewUrl(entity, sourceId, previewAngle);
+        if (url) void preloadDecodedImageFrame(url, "low");
+      }
+    }, 1_200);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(neighborTimer);
+    };
+  }, [view, sourceId, sourceRevision, visibleEntities, selectedEntityId, gameLanguage, previewAngle]);
 
   useEffect(() => {
     if (view !== "assets" || !isMediaCategory || mediaItems.length === 0) return;
@@ -2571,6 +2618,7 @@ function ExplorerApp() {
       mediaLoadedCountRef.current += page.items.length;
       setMediaTotal(page.total);
       setMediaEventTypes(page.event_types || []);
+      setMediaCountries(page.countries || []);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "载入失败");
     } finally {
@@ -2701,6 +2749,7 @@ function ExplorerApp() {
             sourceId={sourceId}
             sourceRevision={sourceRevision}
             previewAngle={previewAngle}
+            voiceTextPreference={voiceTextPreference}
             originView={view}
             originEntityKind={entityKind}
             originMediaKind={mediaKind}
@@ -2713,6 +2762,7 @@ function ExplorerApp() {
             loading={mediaLoading}
             search={catalogSearch}
             groups={mediaGroups.filter((group) => group.group.endsWith(mediaKind === "voice" ? "_voice" : "_sound"))}
+            countries={mediaCountries}
             selectedGroup={mediaGroup}
             setSelectedGroup={selectMediaGroup}
             eventTypes={mediaEventTypes}
@@ -2724,6 +2774,7 @@ function ExplorerApp() {
               window.localStorage.setItem("ra2exp-media-grouped-v1", String(next));
             }}
             headerAlignment={mediaHeaderAlignment}
+            voiceTextPreference={voiceTextPreference}
             selectedId={selectedId}
             onSelect={selectMediaCard}
             playingId={playingMediaId}
@@ -2791,6 +2842,7 @@ function ExplorerApp() {
             playerColors={playerColors}
             previewUrl={previewUrl}
             associations={associations}
+            voiceTextPreference={voiceTextPreference}
             wide={detailPlacement === "bottom"}
             scrollKey={`asset:${sourceId}:${selectedId}:${detailPlacement}`}
             onPopout={() => window.open(staticPopoutUrl(new URLSearchParams({ detail: "asset", asset_id: selectedId })), `ra2exp-asset-${selectedId}`, "popup=yes,width=1100,height=780")}
@@ -2828,6 +2880,7 @@ function ExplorerApp() {
               loading={entityDetailLoading}
               playerColors={playerColors}
               defaultPreviewAngle={previewAngle}
+              voiceTextPreference={voiceTextPreference}
               wide={detailPlacement === "bottom"}
               scrollKey={`entity:${sourceId}:${selectedEntityId}:${detailPlacement}`}
               onPopout={() => window.open(staticPopoutUrl(new URLSearchParams({ detail: "entity", source_id: sourceId, entity_id: selectedEntityId })), `ra2exp-entity-${selectedEntityId}`, "popup=yes,width=1100,height=780")}
@@ -2845,6 +2898,8 @@ function ExplorerApp() {
         onDetailPlacementChange={updateDetailPlacement}
         gameLanguage={gameLanguage}
         onGameLanguageChange={updateGameLanguage}
+        voiceTextPreference={voiceTextPreference}
+        onVoiceTextPreferenceChange={updateVoiceTextPreference}
         previewAngle={previewAngle}
         onPreviewAngleChange={updatePreviewAngle}
         mediaHeaderAlignment={mediaHeaderAlignment}
@@ -2917,6 +2972,36 @@ function cleanAudioText(value: string) {
   return value.trim().replace(/^\*+\s*/, "").replace(/\s*\*+$/, "").trim();
 }
 
+function preferredAudioText(
+  localizedText: string | null | undefined,
+  translatedText: string | null | undefined,
+  preference: VoiceTextPreference,
+) {
+  const localized = cleanAudioText(localizedText || "");
+  const translated = cleanAudioText(translatedText || "");
+  if (preference === "game") {
+    if (localized) return { label: "中文", value: localized };
+    if (translated) return { label: "译文", value: translated };
+  } else {
+    if (translated) return { label: "译文", value: translated };
+    if (localized) return { label: "中文", value: localized };
+  }
+  return null;
+}
+
+function preferredMediaTexts(item: MediaItem, preference: VoiceTextPreference) {
+  const localized = uniqueAudioTexts(item.localized_texts || []);
+  const translated = uniqueAudioTexts(item.translated_texts || []);
+  if (preference === "game") {
+    return localized.length > 0
+      ? { label: "中文", values: localized }
+      : { label: "译文", values: translated };
+  }
+  return translated.length > 0
+    ? { label: "译文", values: translated }
+    : { label: "中文", values: localized };
+}
+
 function uniqueAudioTexts(values: Array<string | null | undefined>) {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -2931,19 +3016,35 @@ function uniqueAudioTexts(values: Array<string | null | undefined>) {
   return result;
 }
 
-function mediaPrimaryText(item: MediaItem) {
-  return cleanAudioText(item.localized_texts[0]
+function mediaPrimaryText(item: MediaItem, preference: VoiceTextPreference = "translation") {
+  const preferred = preferredMediaTexts(item, preference).values[0];
+  return cleanAudioText(preferred
     || item.description
     || item.original_texts[0]
     || assetDisplayName(item.asset));
 }
 
-function mediaSecondaryText(item: MediaItem) {
-  const primary = mediaPrimaryText(item);
+function mediaSecondaryText(item: MediaItem, preference: VoiceTextPreference = "translation") {
+  const primary = mediaPrimaryText(item, preference);
   const primaryKey = primary.replace(/\s+/g, " ").toLocaleLowerCase();
   return uniqueAudioTexts([...item.original_texts, assetDisplayName(item.asset)])
     .filter((text) => text.replace(/\s+/g, " ").toLocaleLowerCase() !== primaryKey)
     .join(" · ");
+}
+
+function mediaCardTextLines(item: MediaItem, preference: VoiceTextPreference = "translation") {
+  const original = uniqueAudioTexts(item.original_texts).join(" · ");
+  const preferred = preferredMediaTexts(item, preference).values.join(" · ");
+  const first = cleanAudioText(original
+    || preferred
+    || item.description
+    || assetDisplayName(item.asset));
+  const firstKey = first.replace(/\s+/g, " ").toLocaleLowerCase();
+  const second = cleanAudioText(preferred);
+  return {
+    first,
+    second: second.replace(/\s+/g, " ").toLocaleLowerCase() === firstKey ? "" : second,
+  };
 }
 
 function mediaEntityGroupLabels(entities: MediaItem["entities"]) {
@@ -3010,7 +3111,33 @@ function semanticSoundSectionIdentity(item: MediaItem, selectedGroup: string) {
   return null;
 }
 
-function mediaSectionIdentity(item: MediaItem, selectedGroup: string) {
+interface MediaSectionIdentity {
+  key: string;
+  label: string;
+  subtitle: string;
+  countryOrder?: number;
+}
+
+function mediaSectionIdentity(
+  item: MediaItem,
+  selectedGroup: string,
+  countryNames: ReadonlyMap<string, { label: string; order: number }>,
+): MediaSectionIdentity {
+  if (["multiplayer_voice", "taunt_voice"].includes(selectedGroup) && item.countries.length > 0) {
+    const countryIds = [...item.countries].sort((left, right) => (
+      (countryNames.get(left)?.order ?? Number.MAX_SAFE_INTEGER)
+      - (countryNames.get(right)?.order ?? Number.MAX_SAFE_INTEGER)
+      || left.localeCompare(right)
+    ));
+    return {
+      key: `country:${countryIds.join("|")}`,
+      label: countryIds.map((id) => countryNames.get(id)?.label || id).join(" · "),
+      subtitle: "",
+      countryOrder: Math.min(...countryIds.map(
+        (id) => countryNames.get(id)?.order ?? Number.MAX_SAFE_INTEGER,
+      )),
+    };
+  }
   const semanticSection = semanticSoundSectionIdentity(item, selectedGroup);
   if (semanticSection) return semanticSection;
   if (item.entities.length === 1) {
@@ -3241,6 +3368,7 @@ function SearchResultsPanel({
   sourceId,
   sourceRevision,
   previewAngle,
+  voiceTextPreference,
   originView,
   originEntityKind,
   originMediaKind,
@@ -3258,6 +3386,7 @@ function SearchResultsPanel({
   sourceId: string;
   sourceRevision: string;
   previewAngle: PreviewAngle;
+  voiceTextPreference: VoiceTextPreference;
   originView: "assets" | "entities";
   originEntityKind: EntityKind | "";
   originMediaKind: MediaKind;
@@ -3297,8 +3426,8 @@ function SearchResultsPanel({
     const rightScore = mediaSuggestionScore(right, query)
       - (originView === "assets" ? 0.6 : 0)
       - (originView === "assets" && right.kind === originMediaKind ? 0.25 : 0);
-    return leftScore - rightScore || mediaPrimaryText(left).localeCompare(mediaPrimaryText(right), "zh-CN", { numeric: true });
-  }), [media, originMediaKind, originView, query]);
+    return leftScore - rightScore || mediaPrimaryText(left, voiceTextPreference).localeCompare(mediaPrimaryText(right, voiceTextPreference), "zh-CN", { numeric: true });
+  }), [media, originMediaKind, originView, query, voiceTextPreference]);
   const entityKindFacets = entityKindOrder.map((kind) => ({
     kind,
     count: entities.filter((entity) => entity.kind === kind).length,
@@ -3347,8 +3476,8 @@ function SearchResultsPanel({
     onSelectSuggestion({
       key: `media:${item.asset.id}`,
       target: "media",
-      title: mediaPrimaryText(item),
-      subtitle: mediaSecondaryText(item),
+      title: mediaPrimaryText(item, voiceTextPreference),
+      subtitle: mediaSecondaryText(item, voiceTextPreference),
       meta: item.entities.map((entity) => entity.display_name).join(" · "),
       score: mediaSuggestionScore(item, query),
       media: item,
@@ -3381,7 +3510,10 @@ function SearchResultsPanel({
       {mediaGroupFacets.map((facet) => <button key={facet.group} className={mediaGroupFilter === facet.group ? "active" : ""} onClick={() => setMediaGroupFilter(mediaGroupFilter === facet.group ? "" : facet.group)}>{mediaGroupLabels[facet.group] || facet.group}<em>{facet.count}</em></button>)}
     </div>}
     {visibleMedia.length > 0
-      ? <div className="search-media-grid">{visibleMedia.map((item) => <button type="button" className="search-media-card" key={item.asset.id} onPointerEnter={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onFocus={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onClick={() => selectMedia(item)}><span className="search-media-play"><Icon name="play" size={15} /></span><span><strong>{mediaPrimaryText(item)}</strong>{mediaSecondaryText(item) && <small>{mediaSecondaryText(item)}</small>}</span><em>{mediaGroupLabels[item.groups[0]] || item.groups[0] || (item.kind === "voice" ? "游戏语音" : "游戏音效")}</em></button>)}</div>
+      ? <div className="search-media-grid">{visibleMedia.map((item) => {
+        const textLines = mediaCardTextLines(item, voiceTextPreference);
+        return <button type="button" className="search-media-card" key={item.asset.id} onPointerEnter={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onFocus={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onClick={() => selectMedia(item)}><span className="search-media-play"><Icon name="play" size={15} /></span><span className="media-card-texts"><strong title={textLines.first}>{textLines.first}</strong>{textLines.second && <small title={textLines.second}>{textLines.second}</small>}</span><em>{mediaGroupLabels[item.groups[0]] || item.groups[0] || (item.kind === "voice" ? "游戏语音" : "游戏音效")}</em></button>;
+      })}</div>
       : <div className="search-result-empty">当前结果中没有匹配的声音</div>}
     {media.length < mediaTotal && <button className="load-more search-result-load-more" disabled={loading} onClick={() => void onLoadMoreMedia()}>{loading ? "正在载入…" : `载入更多声音（剩余 ${(mediaTotal - media.length).toLocaleString("zh-CN")}）`}</button>}
   </section>;
@@ -3396,12 +3528,13 @@ function SearchResultsPanel({
   </section>;
 }
 
-function MediaListPanel({ items, total, loading, search, groups, selectedGroup, setSelectedGroup, eventTypes, selectedEventType, setSelectedEventType, grouped, setGrouped, headerAlignment, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore, scrollKey, scrollResetRevision, catalogFocus, onCatalogFocusComplete }: {
+function MediaListPanel({ items, total, loading, search, groups, countries, selectedGroup, setSelectedGroup, eventTypes, selectedEventType, setSelectedEventType, grouped, setGrouped, headerAlignment, voiceTextPreference, selectedId, onSelect, playingId, sort, setSort, layout, setLayout, onLoadMore, scrollKey, scrollResetRevision, catalogFocus, onCatalogFocusComplete }: {
   items: MediaItem[];
   total: number;
   loading: boolean;
   search: CatalogSearchBarProps;
   groups: Array<{ group: string; count: number }>;
+  countries: CountryFacet[];
   selectedGroup: string;
   setSelectedGroup: (value: string) => void;
   eventTypes: Array<{ event_type: string; count: number }>;
@@ -3410,6 +3543,7 @@ function MediaListPanel({ items, total, loading, search, groups, selectedGroup, 
   grouped: boolean;
   setGrouped: (value: boolean) => void;
   headerAlignment: MediaHeaderAlignment;
+  voiceTextPreference: VoiceTextPreference;
   selectedId: string;
   onSelect: (id: string) => void;
   playingId: string;
@@ -3426,15 +3560,29 @@ function MediaListPanel({ items, total, loading, search, groups, selectedGroup, 
   const listScroll = useRememberedScroll(scrollKey, items.length, scrollResetRevision);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
   const sections = useMemo(() => {
-    const groupedItems = new Map<string, { label: string; subtitle: string; items: MediaItem[] }>();
+    const countryNames = new Map<string, { label: string; order: number }>(
+      countries.map((country, order) => [
+        country.id,
+        { label: country.display_name, order },
+      ] as const),
+    );
+    const groupedItems = new Map<string, { label: string; subtitle: string; countryOrder: number; items: MediaItem[] }>();
     for (const item of items) {
-      const identity = mediaSectionIdentity(item, selectedGroup);
-      const section = groupedItems.get(identity.key) || { label: identity.label, subtitle: identity.subtitle, items: [] };
+      const identity = mediaSectionIdentity(item, selectedGroup, countryNames);
+      const section: { label: string; subtitle: string; countryOrder: number; items: MediaItem[] } = groupedItems.get(identity.key) || {
+        label: identity.label,
+        subtitle: identity.subtitle,
+        countryOrder: identity.countryOrder ?? Number.MAX_SAFE_INTEGER,
+        items: [],
+      };
       section.items.push(item);
       groupedItems.set(identity.key, section);
     }
-    return [...groupedItems.entries()].map(([key, section]) => ({ key, ...section }));
-  }, [items, selectedGroup]);
+    const result = [...groupedItems.entries()].map(([key, section]) => ({ key, ...section }));
+    return ["multiplayer_voice", "taunt_voice"].includes(selectedGroup)
+      ? result.sort((left, right) => left.countryOrder - right.countryOrder || left.label.localeCompare(right.label))
+      : result;
+  }, [countries, items, selectedGroup]);
   const allSectionsExpanded = sections.every((section) => !collapsedSections.has(section.key));
 
   useEffect(() => {
@@ -3498,16 +3646,17 @@ function MediaListPanel({ items, total, loading, search, groups, selectedGroup, 
 
   function renderMediaItem(item: MediaItem) {
     const textCount = uniqueAudioTexts(item.texts).length;
+    const textLines = mediaCardTextLines(item, voiceTextPreference);
     if (layout === "list") {
       return <button key={item.asset.id} data-catalog-item-id={item.asset.id} className={`asset-row media-row ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onPointerEnter={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onFocus={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onClick={() => onSelect(item.asset.id)}>
         <span className="file-icon format-audio"><Icon name={playingId === item.asset.id ? "pause" : "play"} /></span>
-        <span className="asset-main"><strong>{mediaPrimaryText(item)}</strong>{(mediaSecondaryText(item) || textCount > 1) && <small>{mediaSecondaryText(item)}{textCount > 1 ? `${mediaSecondaryText(item) ? " · " : ""}${textCount} 条文本` : ""}</small>}</span>
+        <span className="asset-main media-card-texts"><strong title={textLines.first}>{textLines.first}</strong>{(textLines.second || textCount > 1) && <small title={textLines.second}>{textLines.second}{textCount > 1 ? `${textLines.second ? " · " : ""}${textCount} 条文本` : ""}</small>}</span>
         <span className="media-links">{item.entities.slice(0, 2).map((entity) => entity.display_name).join(" · ") || item.slots.slice(0, 2).map(mediaSlotLabel).join(" · ") || "未关联"}</span>
         <Icon name="chevron" size={15} />
       </button>;
     }
     return <button key={item.asset.id} data-catalog-item-id={item.asset.id} className={`asset-card media-card ${selectedId === item.asset.id ? "selected" : ""} ${playingId === item.asset.id ? "playing" : ""}`} onPointerEnter={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onFocus={() => void preloadAudioResource(api.mediaUrl(item.asset.id), "foreground")} onClick={() => onSelect(item.asset.id)}>
-      <span className="asset-card-copy"><strong title={mediaPrimaryText(item)}>{mediaPrimaryText(item)}</strong>{mediaSecondaryText(item) && <small title={mediaSecondaryText(item)}>{mediaSecondaryText(item)}</small>}<em>{item.slots.slice(0, 2).map(mediaSlotLabel).join(" · ") || "未分类"}</em></span>
+      <span className="asset-card-copy media-card-texts"><strong title={textLines.first}>{textLines.first}</strong>{textLines.second && <small title={textLines.second}>{textLines.second}</small>}<em>{item.slots.slice(0, 2).map(mediaSlotLabel).join(" · ") || "未分类"}</em></span>
     </button>;
   }
 
@@ -3682,6 +3831,7 @@ function mediaSuggestionScore(item: MediaItem, query: string) {
       ...item.texts,
       ...item.original_texts,
       ...item.localized_texts,
+      ...(item.translated_texts || []),
       ...item.events,
       ...item.slots,
       ...(item.mission ? [missionLabel(item.mission)] : []),
@@ -3819,6 +3969,19 @@ function entityCardPreviewUrl(entity: EntitySummary, sourceId: string, previewAn
     compact,
     playerColor: entityCardPlayerColor(entity),
     revision: sourceRevision,
+  });
+}
+
+function entityDetailPreviewUrl(entity: EntitySummary, sourceId: string, previewAngle: PreviewAngle) {
+  if (!entity.renderable || entity.voxel || entity.body_format === "vxl") return "";
+  const facing = entity.facing_format
+    ? entityFacingForPreviewAngle(entity.facing_format, previewAngle)
+    : 0;
+  return api.entityPreviewUrl(sourceId, entity.id, {
+    frame: 0,
+    facing,
+    playerColor: entityCardPlayerColor(entity),
+    scale: 4,
   });
 }
 
@@ -3962,7 +4125,7 @@ function FrameGrid({ count, active, onSelect, urlFor, scrollKey }: { count: numb
   useLayoutEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, [scrollKey]);
-  return <div ref={scrollRef} className="frame-grid" aria-label="全部动画帧">{Array.from({ length: count }, (_, index) => <button type="button" key={index} className={active === index ? "active" : ""} onClick={() => onSelect(index)}><img loading="lazy" src={urlFor(index)} alt={`第 ${index + 1} 帧`} /><span>{index + 1}</span></button>)}</div>;
+  return <div ref={scrollRef} className="frame-grid" aria-label="全部动画帧">{Array.from({ length: count }, (_, index) => <button type="button" key={index} className={active === index ? "active" : ""} onClick={() => onSelect(index)}><DeferredPreviewImage src={urlFor(index)} alt={`第 ${index + 1} 帧`} /><span>{index + 1}</span></button>)}</div>;
 }
 
 function FrameTransport({ frame, count, playing, onPlayingChange, onFrameChange, label = "动画帧", playDisabled = false }: {
@@ -3990,15 +4153,55 @@ function FrameTransport({ frame, count, playing, onPlayingChange, onFrameChange,
 
 type ImageFetchPriority = "high" | "low" | "auto";
 
-const decodedImageFrames = new Map<string, HTMLImageElement>();
+interface DecodedImageFrame {
+  image: HTMLImageElement;
+  bytes: number;
+}
+
+const decodedImageFrames = new Map<string, DecodedImageFrame>();
 const pendingImageFrames = new Map<string, { image: HTMLImageElement; promise: Promise<HTMLImageElement> }>();
-const decodedImageFrameLimit = 48;
+const decodedImageFrameLimit = 160;
+const decodedImageFrameByteLimit = 64 * 1024 * 1024;
+let decodedImageFrameBytes = 0;
+
+function cachedDecodedImageFrame(src: string) {
+  const decoded = decodedImageFrames.get(src);
+  if (!decoded) return null;
+  decodedImageFrames.delete(src);
+  decodedImageFrames.set(src, decoded);
+  return decoded.image;
+}
+
+function decodedImageFrameUrl(src: string) {
+  const decoded = decodedImageFrames.get(src)?.image;
+  return decoded ? decoded.currentSrc || decoded.src || src : "";
+}
+
+function cacheDecodedImageFrame(src: string, image: HTMLImageElement) {
+  const previous = decodedImageFrames.get(src);
+  if (previous) decodedImageFrameBytes -= previous.bytes;
+  const decoded = {
+    image,
+    bytes: Math.max(1, image.naturalWidth * image.naturalHeight * 4),
+  };
+  decodedImageFrames.delete(src);
+  decodedImageFrames.set(src, decoded);
+  decodedImageFrameBytes += decoded.bytes;
+  while (
+    decodedImageFrames.size > decodedImageFrameLimit
+    || (decodedImageFrameBytes > decodedImageFrameByteLimit && decodedImageFrames.size > 1)
+  ) {
+    const oldest = decodedImageFrames.keys().next().value;
+    if (oldest === undefined) break;
+    const evicted = decodedImageFrames.get(oldest);
+    decodedImageFrames.delete(oldest);
+    decodedImageFrameBytes -= evicted?.bytes || 0;
+  }
+}
 
 function preloadDecodedImageFrame(src: string, priority: ImageFetchPriority = "auto") {
-  const decoded = decodedImageFrames.get(src);
+  const decoded = cachedDecodedImageFrame(src);
   if (decoded) {
-    decodedImageFrames.delete(src);
-    decodedImageFrames.set(src, decoded);
     return Promise.resolve(decoded);
   }
   const pending = pendingImageFrames.get(src);
@@ -4010,15 +4213,12 @@ function preloadDecodedImageFrame(src: string, priority: ImageFetchPriority = "a
   image.decoding = "async";
   image.fetchPriority = priority;
   const promise = new Promise<HTMLImageElement>((resolve) => {
+    const fallbackSrc = api.snapshotFallbackUrl(src);
+    let fallbackAttempted = false;
     const finish = (cache = true) => {
       pendingImageFrames.delete(src);
       if (cache) {
-        decodedImageFrames.set(src, image);
-        while (decodedImageFrames.size > decodedImageFrameLimit) {
-          const oldest = decodedImageFrames.keys().next().value;
-          if (oldest === undefined) break;
-          decodedImageFrames.delete(oldest);
-        }
+        cacheDecodedImageFrame(src, image);
       }
       resolve(image);
     };
@@ -4026,7 +4226,14 @@ function preloadDecodedImageFrame(src: string, priority: ImageFetchPriority = "a
       if (typeof image.decode === "function") void image.decode().catch(() => undefined).then(() => finish());
       else finish();
     };
-    image.onerror = () => finish(false);
+    image.onerror = () => {
+      if (!fallbackAttempted && fallbackSrc !== src) {
+        fallbackAttempted = true;
+        image.src = fallbackSrc;
+        return;
+      }
+      finish(false);
+    };
   });
   pendingImageFrames.set(src, { image, promise });
   image.src = src;
@@ -4068,8 +4275,8 @@ function DeferredPreviewImage({ src, alt = "" }: { src: string; alt?: string }) 
     if (!target || !src) return;
     let cancelled = false;
     const request = () => {
-      void preloadDecodedImageFrame(src, "low").then(() => {
-        if (!cancelled) setReadySrc(src);
+      void preloadDecodedImageFrame(src, "low").then((image) => {
+        if (!cancelled && image.naturalWidth) setReadySrc(image.currentSrc || image.src || src);
       });
     };
     if (!("IntersectionObserver" in window)) {
@@ -4329,68 +4536,128 @@ function StablePreviewImage({ src, alt, style, className, draggable = false, onB
   onLoad?: (image: HTMLImageElement) => void;
   onError?: () => void;
 }) {
-  const [displayedSrc, setDisplayedSrc] = useState(src);
-  const requestedSrc = useRef(src);
+  interface PreviewSlot {
+    src: string;
+    request: string;
+    generation: number;
+  }
+
+  const emptySlot = (): PreviewSlot => ({ src: "", request: "", generation: 0 });
+  const [slots, setSlots] = useState<[PreviewSlot, PreviewSlot]>(() => [emptySlot(), emptySlot()]);
+  const [activeSlot, setActiveSlot] = useState(-1);
+  const firstSlotRef = useRef<HTMLImageElement>(null);
+  const secondSlotRef = useRef<HTMLImageElement>(null);
+  const slotsRef = useRef(slots);
+  const activeSlotRef = useRef(activeSlot);
+  const requestedSrcRef = useRef(src);
+  const requestGenerationRef = useRef(0);
+  const scheduledRevealRef = useRef(0);
   const onBeforeRevealRef = useRef(onBeforeReveal);
   const onLoadRef = useRef(onLoad);
   const onErrorRef = useRef(onError);
-  requestedSrc.current = src;
+  slotsRef.current = slots;
+  activeSlotRef.current = activeSlot;
+  requestedSrcRef.current = src;
   onBeforeRevealRef.current = onBeforeReveal;
   onLoadRef.current = onLoad;
   onErrorRef.current = onError;
 
-  function revealPending(image: HTMLImageElement, pendingSrc: string) {
+  const slotImage = (index: number) => index === 0 ? firstSlotRef.current : secondSlotRef.current;
+
+  function revealSlot(index: number, image: HTMLImageElement, generation: number) {
+    const slot = slotsRef.current[index];
+    if (
+      generation !== requestGenerationRef.current
+      || slot.generation !== generation
+      || slot.request !== requestedSrcRef.current
+      || scheduledRevealRef.current === generation
+    ) return;
+    scheduledRevealRef.current = generation;
     const reveal = () => {
-      if (requestedSrc.current !== pendingSrc || !image.naturalWidth) {
-        if (requestedSrc.current === pendingSrc && !image.naturalWidth) onErrorRef.current?.();
+      const current = slotsRef.current[index];
+      if (
+        generation !== requestGenerationRef.current
+        || current.generation !== generation
+        || current.request !== requestedSrcRef.current
+        || !image.naturalWidth
+      ) {
+        if (generation === requestGenerationRef.current && !image.naturalWidth) onErrorRef.current?.();
         return;
       }
       onBeforeRevealRef.current?.(image);
-      onLoadRef.current?.(image);
-      setDisplayedSrc(pendingSrc);
+      window.requestAnimationFrame(() => {
+        const ready = slotsRef.current[index];
+        if (
+          generation !== requestGenerationRef.current
+          || ready.generation !== generation
+          || ready.request !== requestedSrcRef.current
+          || !image.naturalWidth
+        ) return;
+        activeSlotRef.current = index;
+        setActiveSlot(index);
+        onLoadRef.current?.(image);
+      });
     };
-    if (typeof image.decode === "function") void image.decode().catch(() => undefined).then(reveal);
-    else reveal();
+    if (typeof image.decode === "function") {
+      void image.decode().catch(() => undefined).then(() => window.requestAnimationFrame(reveal));
+    } else {
+      window.requestAnimationFrame(reveal);
+    }
   }
 
-  const pendingSrc = src && src !== displayedSrc ? src : "";
-  return <>
-    {displayedSrc && <img
-      key={displayedSrc}
-      src={displayedSrc}
-      data-requested-src={src}
-      data-frame-state="active"
-      alt={alt}
-      className={className}
-      draggable={draggable}
+  useEffect(() => {
+    const generation = requestGenerationRef.current + 1;
+    requestGenerationRef.current = generation;
+    scheduledRevealRef.current = 0;
+    requestedSrcRef.current = src;
+    if (!src) return;
+
+    const current = slotsRef.current[activeSlotRef.current];
+    if (current?.request === src) return;
+
+    let cancelled = false;
+    void preloadDecodedImageFrame(src, "high").then((decoded) => {
+      if (cancelled || generation !== requestGenerationRef.current || requestedSrcRef.current !== src) return;
+      if (!decoded.naturalWidth) {
+        onErrorRef.current?.();
+        return;
+      }
+      const targetIndex = activeSlotRef.current === 0 ? 1 : 0;
+      const resolvedSrc = decoded.currentSrc || decoded.src || decodedImageFrameUrl(src) || src;
+      const nextSlots = [...slotsRef.current] as [PreviewSlot, PreviewSlot];
+      nextSlots[targetIndex] = { src: resolvedSrc, request: src, generation };
+      slotsRef.current = nextSlots;
+      setSlots(nextSlots);
+      window.requestAnimationFrame(() => {
+        const target = slotImage(targetIndex);
+        if (target?.complete && target.naturalWidth) revealSlot(targetIndex, target, generation);
+      });
+    });
+    return () => { cancelled = true; };
+  }, [src]);
+
+  return <>{slots.map((slot, index) => {
+    const active = index === activeSlot;
+    return <img
+      ref={index === 0 ? firstSlotRef : secondSlotRef}
+      key={index}
+      src={slot.src || undefined}
+      data-requested-src={slot.src}
+      data-frame-request={slot.request}
+      data-frame-state={active ? "active" : "buffer"}
+      alt={active ? alt : ""}
+      aria-hidden={!active}
+      className={`${className || ""} stable-preview-frame ${active ? "stable-preview-active" : "stable-preview-buffer"}`.trim()}
+      draggable={active ? draggable : false}
       decoding="async"
       fetchPriority="high"
       style={style}
-      onLoad={(event) => {
-        if (requestedSrc.current === displayedSrc) onLoadRef.current?.(event.currentTarget);
-      }}
+      onLoad={(event) => revealSlot(index, event.currentTarget, slot.generation)}
       onError={() => {
-        if (requestedSrc.current === displayedSrc) onErrorRef.current?.();
+        if (slot.generation === requestGenerationRef.current) onErrorRef.current?.();
       }}
-    />}
-    {pendingSrc && <img
-      key={pendingSrc}
-      src={pendingSrc}
-      data-requested-src={src}
-      data-frame-state="pending"
-      alt=""
-      aria-hidden="true"
-      className={`${className || ""} stable-preview-pending`}
-      draggable={false}
-      decoding="async"
-      fetchPriority="high"
-      style={style}
-      onLoad={(event) => revealPending(event.currentTarget, pendingSrc)}
-      onError={() => {
-        if (requestedSrc.current === pendingSrc) onErrorRef.current?.();
-      }}
-    />}
-  </>;
+    />;
+  })}</>;
 }
 
 interface ImageFrameFit {
@@ -4612,7 +4879,7 @@ function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, b
 
   useEffect(() => {
     if (!fitContent) return;
-    const image = viewportRef.current?.querySelector<HTMLImageElement>(".image-viewport-canvas img");
+    const image = viewportRef.current?.querySelector<HTMLImageElement>(".image-viewport-canvas img[data-frame-state='active']");
     if (
       image?.complete
       && image.getAttribute("src") === image.dataset.requestedSrc
@@ -4701,11 +4968,15 @@ function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, b
   </div>;
 }
 
-function EntitySoundSample({ sample }: { sample: MediaSample }) {
-  const originalText = sample.original_text || sample.text;
-  const localizedText = sample.localized_text && sample.localized_text !== originalText
-    ? sample.localized_text
-    : null;
+function EntitySoundSample({ sample, voiceTextPreference }: { sample: MediaSample; voiceTextPreference: VoiceTextPreference }) {
+  const originalText = sample.original_text
+    || (!sample.localized_text && !sample.translated_text ? sample.text : null);
+  const preferredText = preferredAudioText(
+    sample.localized_text,
+    sample.translated_text,
+    voiceTextPreference,
+  );
+  const localizedText = preferredText?.value !== originalText ? preferredText : null;
   const internalName = audioDisplayName(sample.name);
   const missing = !sample.asset || !audioFormats.includes(sample.asset.format);
   return <div className={missing ? "media-sample media-sample-no-audio" : "media-sample"}>
@@ -4715,7 +4986,7 @@ function EntitySoundSample({ sample }: { sample: MediaSample }) {
       : null}
     <span className={`media-sample-texts ${localizedText ? "bilingual" : "single"}`}>
       {originalText && <span className="media-sample-copy" title={originalText}><b>原文</b>{originalText}</span>}
-      {localizedText && <span className="media-sample-copy" title={localizedText}><b>中文</b>{localizedText}</span>}
+      {localizedText && <span className="media-sample-copy" title={localizedText.value}><b>{localizedText.label}</b>{localizedText.value}</span>}
     </span>
     {sample.asset && audioFormats.includes(sample.asset.format) && <AudioDownloadAction assetId={sample.asset.id} label={internalName} />}
   </div>;
@@ -4767,13 +5038,14 @@ function mergeSoundAssociations(associations: MediaAssociation[]): DisplaySoundA
   return [...merged.values()];
 }
 
-function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, playerColors, defaultPreviewAngle, wide = false, onPopout, scrollKey = "" }: {
+function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, playerColors, defaultPreviewAngle, voiceTextPreference, wide = false, onPopout, scrollKey = "" }: {
   sourceId: string;
   sourceRevision?: string;
   entity: GameEntity | null;
   loading: boolean;
   playerColors: PlayerColor[];
   defaultPreviewAngle: PreviewAngle;
+  voiceTextPreference: VoiceTextPreference;
   wide?: boolean;
   onPopout?: () => void;
   scrollKey?: string;
@@ -4786,7 +5058,18 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   const renderFacing = entity?.preview.supports_facing
     ? entityFacingForPreviewAngle(entity.preview.facing_format, previewAngle)
     : 0;
-  const [playerColor, setPlayerColor] = useState("");
+  const defaultPlayerColor = entity ? entityCardPlayerColor(entity) : "";
+  const [playerColorSelection, setPlayerColorSelection] = useState<{
+    entityId: string;
+    color: string;
+  } | null>(null);
+  const playerColor = playerColorSelection && playerColorSelection.entityId === entity?.id
+    ? playerColorSelection.color
+    : defaultPlayerColor;
+  const selectablePlayerColors = defaultPlayerColor
+    && !playerColors.some((color) => color.id === defaultPlayerColor)
+    ? [{ id: defaultPlayerColor, rgb: [], hex: "" }, ...playerColors]
+    : playerColors;
   const [playing, setPlaying] = useState(false);
   const [frameMode, setFrameMode] = useState<"sequence" | "grid">("sequence");
   const [soundAssociationLayout, setSoundAssociationLayout] = useState<LayoutMode>("list");
@@ -4799,7 +5082,8 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   const [operationMetadata, setOperationMetadata] = useState<Record<string, AssetMetadata>>({});
   const [animationFrame, setAnimationFrame] = useState(0);
   const [animationPlaying, setAnimationPlaying] = useState(false);
-  const autoStartedAnimationRef = useRef<ActiveEntityAnimation | null>(null);
+  const autoStartedAnimationRef = useRef("");
+  const [preparedAnimationKey, setPreparedAnimationKey] = useState("");
   const [previewFailed, setPreviewFailed] = useState(false);
   const frameCount = Math.max(1, entity?.preview.frame_count || 1);
   const animationAssociations = useMemo(
@@ -4891,6 +5175,27 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   const activeAnimationFrameCount = activeAnimation
     ? Math.max(activeAnimationFrames.length, effectBodyFrames.length, 1)
     : activeAnimationFrames.length;
+  const activeAnimationRenderKey = activeAnimation?.sample.asset
+    ? [
+      activeAnimation.sample.asset.id,
+      activeAnimation.event,
+      activeAnimation.slot,
+      activeAnimation.source,
+      activeAnimation.ruleField || "",
+      activeAnimation.sample.name,
+      sourceId,
+      entity?.id || "",
+      sourceRevision,
+      playerColor,
+      renderFacing,
+      entity?.kind === "building" && activeAnimation.role === "operation" ? frame : "",
+      activeAnimationFrames.join(","),
+      effectBodyFrames.join(","),
+    ].join(":")
+    : "";
+  const animationPrepared = Boolean(
+    activeAnimationRenderKey && preparedAnimationKey === activeAnimationRenderKey,
+  );
   const activeAnimationLoops = activeAnimationIsBody
     || activeAnimation?.sample.animation?.loop_count === -1;
   const activeAnimationLoopStart = (() => {
@@ -4948,6 +5253,21 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
     }
     return [...new Set(urls)];
   }
+  function animationLookaheadFrames(sequenceFrame: number, count = 4) {
+    const frames: number[] = [];
+    let candidate = sequenceFrame;
+    while (frames.length < count && activeAnimationFrameCount > 1) {
+      if (candidate >= activeAnimationFrameCount - 1) {
+        if (!activeAnimationLoops) break;
+        candidate = activeAnimationLoopStart;
+      } else {
+        candidate += 1;
+      }
+      if (frames.includes(candidate)) break;
+      frames.push(candidate);
+    }
+    return frames;
+  }
   const associationLayout = detailTab === "animation" ? animationAssociationLayout : soundAssociationLayout;
   const setAssociationLayout = detailTab === "animation" ? setAnimationAssociationLayout : setSoundAssociationLayout;
   const detailScroll = useRememberedScroll<HTMLElement, HTMLDivElement>(
@@ -4959,12 +5279,13 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   useEffect(() => {
     setFrame(0);
     setPreviewAngle(defaultPreviewAngleRef.current);
-    setPlayerColor(entity ? entityCardPlayerColor(entity) : "");
+    setPlayerColorSelection(null);
     setPlaying(false);
     setFrameMode("sequence");
     setActiveAnimation(null);
     setAnimationMetadata(null);
     setEffectBodyMetadata(null);
+    setPreparedAnimationKey("");
     setAnimationFrame(0);
     setAnimationPlaying(false);
     setPreviewFailed(false);
@@ -5037,7 +5358,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
     setAnimationMetadata(null);
     setAnimationFrame(0);
     setAnimationPlaying(false);
-    autoStartedAnimationRef.current = null;
+    autoStartedAnimationRef.current = "";
     if (!activeAnimation?.sample.asset) return;
     let cancelled = false;
     api.metadata(activeAnimation.sample.asset.id)
@@ -5062,38 +5383,40 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   }, [effectBodySample?.asset?.id]);
 
   useEffect(() => {
-    if (!activeAnimation || autoStartedAnimationRef.current === activeAnimation) return;
+    if (!activeAnimation || autoStartedAnimationRef.current === activeAnimationRenderKey) return;
     const sample = activeAnimation.sample;
     const asset = sample.asset;
     if (!asset) return;
     if (asset.format !== "shp") {
-      autoStartedAnimationRef.current = activeAnimation;
+      setPreparedAnimationKey(activeAnimationRenderKey);
+      autoStartedAnimationRef.current = activeAnimationRenderKey;
       setAnimationPlaying(activeAnimationFrameCount > 1);
       return;
     }
-    if (!animationMetadata && (sample.animation?.shadow || sample.animation?.frame_count === null)) return;
+    if (!animationMetadata) return;
     const frameUrlGroups = Array.from(
-      { length: activeAnimationFrameCount },
+      { length: Math.min(3, activeAnimationFrameCount) },
       (_, index) => animationPreviewUrls(index),
     );
     if (frameUrlGroups.length === 0) return;
     let cancelled = false;
-    const firstFrames = frameUrlGroups.slice(0, 2).map((urls) => Promise.all(
+    const firstFrames = frameUrlGroups.map((urls) => Promise.all(
       urls.map((url) => preloadDecodedImageFrame(url, "high")),
     ));
-    void firstFrames[0].then(() => {
-      if (cancelled) return;
-      autoStartedAnimationRef.current = activeAnimation;
+    const framesReady = (images: HTMLImageElement[][]) => images.every(
+      (group) => group.every((image) => image.naturalWidth > 0),
+    );
+    void firstFrames[0].then((images) => {
+      if (!cancelled && framesReady([images])) setPreparedAnimationKey(activeAnimationRenderKey);
+    });
+    void Promise.all(firstFrames).then((images) => {
+      if (cancelled || !framesReady(images)) return;
+      setPreparedAnimationKey(activeAnimationRenderKey);
+      autoStartedAnimationRef.current = activeAnimationRenderKey;
       setAnimationPlaying(activeAnimationFrameCount > 1);
     });
-    void Promise.all(firstFrames).then(() => {
-      if (cancelled) return;
-      for (const urls of frameUrlGroups.slice(2)) {
-        for (const url of urls) void preloadDecodedImageFrame(url, "low");
-      }
-    });
     return () => { cancelled = true; };
-  }, [activeAnimation, activeAnimationFrameCount, activeAnimationFrames, animationMetadata, effectBodyFrames, effectBodySample, entity, frame, renderFacing, playerColor, sourceId, sourceRevision]);
+  }, [activeAnimation, activeAnimationFrameCount, activeAnimationFrames, activeAnimationRenderKey, animationMetadata, effectBodyFrames, effectBodySample, entity, frame, renderFacing, playerColor, sourceId, sourceRevision]);
 
   useEffect(() => {
     if (!activeAnimation) return;
@@ -5126,6 +5449,9 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
       : animationFrame + 1;
     const advance = () => setAnimationFrame((current) => current === animationFrame ? nextFrame : current);
     if (activeAnimation?.sample.asset?.format === "shp") {
+      for (const upcomingFrame of animationLookaheadFrames(animationFrame).slice(1)) {
+        for (const url of animationPreviewUrls(upcomingFrame)) void preloadDecodedImageFrame(url, "low");
+      }
       return scheduleDecodedImageFrames(animationPreviewUrls(nextFrame), interval, advance);
     }
     const timer = window.setTimeout(advance, interval);
@@ -5244,6 +5570,12 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
       { palette: sample.palette || undefined },
     );
   };
+  const warmAnimationCard = (association: MediaAssociation, sample: MediaSample) => {
+    if (!sample.asset) return;
+    void api.metadata(sample.asset.id).catch(() => undefined);
+    const thumbnailUrl = animationCardPreviewUrl(association, sample);
+    if (thumbnailUrl) void preloadDecodedImageFrame(thumbnailUrl, "high");
+  };
   const effectAnchor = animationEffectAnchor(
     activeAnimation?.role || null,
     entity.art,
@@ -5274,26 +5606,26 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
       <div className="entity-detail-body">
         <div className="entity-preview-column">
           {entity.renderable ? <div className="preview-block entity-preview">
-            {activeAnimationReplacesBody && activeAnimationAsset?.format === "shp"
-              ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${activeAnimationAsset.id}:${activeAnimation?.event || "body"}`} frameFit={activeAnimationFrameFit} src={activeAnimationPreviewUrl} alt={`${activeAnimationTitle}预览`} building={entity.kind === "building"} />
-              : activeAnimationReplacesBody && activeAnimationAsset && ["vxl", "hva"].includes(activeAnimationAsset.format)
-                ? <VoxelPreview url={api.assetModelUrl(activeAnimationAsset.id, activeAnimationSourceFrame, playerColor)} label={animationEventLabel(activeAnimation?.event || activeAnimationAsset.display_name)} viewKey={`asset:${activeAnimationAsset.id}`} previewAngle={previewAngle} resetAngle={defaultPreviewAngle} onPreviewAngleChange={setPreviewAngle} />
-                : buildingOperationPreviewUrl
-                  ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${entity.id}:operation:${activeAnimationAsset?.id || "effect"}`} frameFit={buildingOperationFrameFit} src={buildingOperationPreviewUrl} alt={`${activeAnimationTitle}组合预览`} building />
-                  : !activeAnimationAsset && frameMode === "grid" && hasRawBodyAnimation
-                    ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} scrollKey={`${entity.id}:${renderFacing}:${playerColor}`} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing: renderFacing, playerColor, scale: 3 })} />
-                    : <div className="entity-composite-stage">
-                    {effectBodyPreviewUrl
-                      ? <ImageViewport className="shp entity-composite-body" fitKey={`${entity.id}:${effectBodyAssociation?.event || "body"}`} frameFit={effectBodyFrameFit} src={effectBodyPreviewUrl} alt={`${entity.display_name} 主体动作`} building={entity.kind === "building"} />
-                      : entity.voxel
-                        ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor, revision: sourceRevision })} label={entity.display_name} viewKey={`entity:${sourceId}:${entity.id}`} previewAngle={previewAngle} resetAngle={defaultPreviewAngle} onPreviewAngleChange={setPreviewAngle} />
-                        : previewFailed
-                          ? <div className="preview-stage shp"><div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div></div>
-                          : <ImageViewport className="shp entity-composite-body" fitKey={entity.id} frameFit={entityPresentationFrameFit} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
-                    {activeAnimationAsset?.format === "shp" && <span className={`entity-effect-overlay ${activeAnimation?.role === "operation" ? "attached" : ""} ${effectFrameVisible ? "visible" : "hidden"}`} style={{ "--effect-x": `${effectAnchor.x}%`, "--effect-y": `${effectAnchor.y}%` } as CSSProperties} aria-hidden="true">
-                      <StablePreviewImage src={activeAnimationPreviewUrl} alt="" />
-                    </span>}
-                    </div>}
+            {!activeAnimationAsset && frameMode === "grid" && hasRawBodyAnimation
+              ? <FrameGrid count={frameCount} active={frame} onSelect={setFrame} scrollKey={`${entity.id}:${renderFacing}:${playerColor}`} urlFor={(index) => api.entityPreviewUrl(sourceId, entity.id, { frame: index, facing: renderFacing, playerColor, scale: 3 })} />
+              : <div className="entity-composite-stage">
+                {animationPrepared && activeAnimationReplacesBody && activeAnimationAsset?.format === "shp"
+                  ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${activeAnimationAsset.id}:${activeAnimation?.event || "body"}`} frameFit={activeAnimationFrameFit} src={activeAnimationPreviewUrl} alt={`${activeAnimationTitle}预览`} building={entity.kind === "building"} />
+                  : animationPrepared && activeAnimationReplacesBody && activeAnimationAsset && ["vxl", "hva"].includes(activeAnimationAsset.format)
+                    ? <VoxelPreview url={api.assetModelUrl(activeAnimationAsset.id, activeAnimationSourceFrame, playerColor)} label={animationEventLabel(activeAnimation?.event || activeAnimationAsset.display_name)} viewKey={`asset:${activeAnimationAsset.id}`} previewAngle={previewAngle} resetAngle={defaultPreviewAngle} onPreviewAngleChange={setPreviewAngle} />
+                    : animationPrepared && buildingOperationPreviewUrl
+                      ? <ImageViewport className="shp entity-body-action-stage" fitKey={`${entity.id}:operation:${activeAnimationAsset?.id || "effect"}`} frameFit={buildingOperationFrameFit} src={buildingOperationPreviewUrl} alt={`${activeAnimationTitle}组合预览`} building />
+                      : animationPrepared && effectBodyPreviewUrl
+                        ? <ImageViewport className="shp entity-composite-body" fitKey={`${entity.id}:${effectBodyAssociation?.event || "body"}`} frameFit={effectBodyFrameFit} src={effectBodyPreviewUrl} alt={`${entity.display_name} 主体动作`} building={entity.kind === "building"} />
+                        : entity.voxel
+                          ? <VoxelPreview url={api.entityModelUrl(sourceId, entity.id, { frame, playerColor, revision: sourceRevision })} label={entity.display_name} viewKey={`entity:${sourceId}:${entity.id}`} previewAngle={previewAngle} resetAngle={defaultPreviewAngle} onPreviewAngleChange={setPreviewAngle} />
+                          : previewFailed
+                            ? <div className="preview-stage shp"><div className="preview-error"><Icon name="info" size={24} /><strong>预览生成失败</strong></div></div>
+                            : <ImageViewport className="shp entity-composite-body" fitKey={entity.id} frameFit={entityPresentationFrameFit} src={previewUrl} onError={() => setPreviewFailed(true)} alt={`${entity.display_name} 组合预览`} building={entity.kind === "building"} />}
+                {animationPrepared && activeAnimationAsset?.format === "shp" && !activeAnimationReplacesBody && <span className={`entity-effect-overlay ${activeAnimation?.role === "operation" ? "attached" : ""} ${effectFrameVisible ? "visible" : "hidden"}`} style={{ "--effect-x": `${effectAnchor.x}%`, "--effect-y": `${effectAnchor.y}%` } as CSSProperties} aria-hidden="true">
+                  <StablePreviewImage src={activeAnimationPreviewUrl} alt="" />
+                </span>}
+              </div>}
             {(activeAnimationAsset || hasRawBodyAnimation) && <div className="entity-preview-controls">
               {activeAnimationAsset && activeAnimationFrameCount > 1
                 ? <div className="frame-controls"><FrameTransport frame={animationFrame} count={activeAnimationFrameCount} playing={animationPlaying} onPlayingChange={(next) => {
@@ -5312,7 +5644,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
             </div>}
             <div className="entity-render-options compact-render-options">
               {(entity.voxel || entity.preview.supports_facing) && <label><span>角度</span><select aria-label="单位预览角度" value={previewAngle} onChange={(event) => setPreviewAngle(normalizePreviewAngle(Number(event.target.value)))}>{previewAngleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
-              {entity.preview.supports_player_color && <label title="选择玩家颜色"><select aria-label="玩家颜色" value={playerColor} onChange={(event) => setPlayerColor(event.target.value)}><option value="">原始色</option>{playerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
+              {entity.preview.supports_player_color && <label title="选择玩家颜色"><select aria-label="玩家颜色" value={playerColor} onChange={(event) => setPlayerColorSelection({ entityId: entity.id, color: event.target.value })}><option value="">原始色</option>{selectablePlayerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
             </div>
           </div> : <div className="unsupported-preview"><Icon name="unit" size={34} /><strong>{entityBodyStatusLabel(entity)}</strong></div>}
         </div>
@@ -5329,7 +5661,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
             <div className={`media-association-list ${associationLayout === "grid" ? "media-association-grid" : ""}`}>
               {soundAssociations.map((association) => <article key={`${association.kind}-${association.event}`}>
                 <header><span className="media-association-slots">{association.slots.map((slot) => <strong key={slot}>{mediaSlotLabel(slot)}</strong>)}</span><code>{association.event}</code><em>{association.samples.length}</em></header>
-                <div>{association.samples.map((sample) => <EntitySoundSample sample={sample} key={`${association.event}-${sample.asset?.id || sample.name}`} />)}</div>
+                <div>{association.samples.map((sample) => <EntitySoundSample sample={sample} voiceTextPreference={voiceTextPreference} key={`${association.event}-${sample.asset?.id || sample.name}`} />)}</div>
               </article>)}
             </div>
           </section>}
@@ -5340,7 +5672,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
                 <header id={`entity-${group}-animation-heading`}><strong>{animationGroupLabels[group]}</strong><em>{animationCounts[group]}</em></header>
                 <div className={`animation-association-list ${associationLayout === "grid" ? "animation-association-grid" : ""}`}>
                   {group === "body" && hasRawBodyAnimation && <button type="button" className={!activeAnimation ? "active" : ""} onClick={() => { setActiveAnimation(null); setFrameMode("sequence"); setPlaying(true); }}><span className="animation-thumbnail body-action"><Icon name="unit" size={24} /></span><span><strong>{rawBodyAnimationTitle}</strong><small>{rawBodyAnimationMeta}</small></span><Icon name="play" size={16} /></button>}
-                  {animationGroups[group].flatMap((association) => animationCardSamples(association, facing).map((sample, index) => <button type="button" disabled={!sample.asset} className={activeAnimation?.event === association.event && activeAnimation.slot === association.slot && activeAnimation.source === association.source && activeAnimation.ruleField === association.rule_field && activeAnimation.sample.name === sample.name ? "active" : ""} onClick={() => { if (!sample.asset) return; setPlaying(false); setActiveAnimation({ event: association.event, slot: association.slot, source: association.source, ruleField: association.rule_field, role: association.role, sample }); }} key={`${association.slot}-${association.source}-${association.rule_field}-${association.event}-${sample.name}-${index}`}>
+                  {animationGroups[group].flatMap((association) => animationCardSamples(association, facing).map((sample, index) => <button type="button" disabled={!sample.asset} className={activeAnimation?.event === association.event && activeAnimation.slot === association.slot && activeAnimation.source === association.source && activeAnimation.ruleField === association.rule_field && activeAnimation.sample.name === sample.name ? "active" : ""} onPointerEnter={() => warmAnimationCard(association, sample)} onFocus={() => warmAnimationCard(association, sample)} onClick={() => { if (!sample.asset) return; setPlaying(false); setActiveAnimation({ event: association.event, slot: association.slot, source: association.source, ruleField: association.rule_field, role: association.role, sample }); }} key={`${association.slot}-${association.source}-${association.rule_field}-${association.event}-${sample.name}-${index}`}>
                     <span className={`animation-thumbnail ${association.role === "body" || association.role === "construction" ? "body-action" : ""}`}>{animationCardPreviewUrl(association, sample) ? <DeferredPreviewImage src={animationCardPreviewUrl(association, sample)} /> : <Icon name="image" size={24} />}</span>
                     <span><strong>{animationAssociationTitle(association)}</strong><small title={animationAssociationAliasTitle(association)}>{animationAssociationMeta(association, sample)}</small></span><Icon name="play" size={16} />
                   </button>))}
@@ -5405,7 +5737,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   );
 }
 
-function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, frame, setFrame, playing, setPlaying, palettes, paletteId, setPaletteId, playerColors, previewUrl, associations, wide = false, onPopout, scrollKey = "" }: {
+function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, frame, setFrame, playing, setPlaying, palettes, paletteId, setPaletteId, playerColors, previewUrl, associations, voiceTextPreference, wide = false, onPopout, scrollKey = "" }: {
   asset: Asset | null;
   metadata: AssetMetadata | null;
   textAsset: TextAsset | null;
@@ -5421,6 +5753,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   playerColors: PlayerColor[];
   previewUrl: string;
   associations: AssetAssociationPage | null;
+  voiceTextPreference: VoiceTextPreference;
   wide?: boolean;
   onPopout?: () => void;
   scrollKey?: string;
@@ -5459,6 +5792,10 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   const unitIntroEntity = isAudio
     ? audioRelationshipItems.find((item) => /^unit_(?:eva|sofia)_/i.test(item.event))?.entity ?? null
     : null;
+  const audioRelationshipEntityCount = new Set(
+    audioRelationshipItems.map((item) => item.entity?.id).filter(Boolean),
+  ).size;
+  const showAudioRelationshipEntity = !unitIntroEntity || audioRelationshipEntityCount > 1;
   const detailHeading = unitIntroEntity
     ? [unitIntroEntity.display_name, unitIntroEntity.internal_name]
       .filter((value, index, values) => Boolean(value) && values.indexOf(value) === index)
@@ -5486,8 +5823,8 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   const canChoosePalette = ["shp", "vxl", "hva", "tmp"].includes(asset.format) && palettes.length > 0;
   const originalTexts = uniqueAudioTexts([
     ...(associations?.original_texts || []),
-    ...(associations?.items || []).map((item) => item.original_text || (item.localized_text ? null : item.text)).filter((item): item is string => Boolean(item)),
-    ...(associations && associations.original_texts.length === 0 && associations.localized_texts.length === 0
+    ...(associations?.items || []).map((item) => item.original_text || (item.localized_text || item.translated_text ? null : item.text)).filter((item): item is string => Boolean(item)),
+    ...(associations && associations.original_texts.length === 0 && associations.localized_texts.length === 0 && (associations.translated_texts || []).length === 0
       ? associations.texts
       : []),
   ]);
@@ -5497,6 +5834,18 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
     ...(associations?.items || []).map((item) => item.localized_text).filter((item): item is string => Boolean(item)),
   ])
     .filter((item) => !originalTextKeys.has(item.trim().replace(/\s+/g, " ").toLocaleLowerCase()));
+  const translatedTexts = uniqueAudioTexts([
+    ...(associations?.translated_texts || []),
+    ...(associations?.items || []).map((item) => item.translated_text).filter((item): item is string => Boolean(item)),
+  ])
+    .filter((item) => !originalTextKeys.has(item.trim().replace(/\s+/g, " ").toLocaleLowerCase()));
+  const preferredTexts = voiceTextPreference === "game"
+    ? localizedTexts.length > 0
+      ? { label: "中文", values: localizedTexts }
+      : { label: "译文", values: translatedTexts }
+    : translatedTexts.length > 0
+      ? { label: "译文", values: translatedTexts }
+      : { label: "中文", values: localizedTexts };
   const metadataRows: Array<{ label: string; value: string; tone?: string; span?: 1 | 2 | 3 }> = isAudio
     ? []
     : [{ label: "文件大小", value: formatBytes(asset.size) }];
@@ -5541,7 +5890,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   ] : [];
   const audioTextRows = isAudio ? [
     ...(originalTexts.length > 0 ? [{ label: "原文", value: originalTexts.join("\n") }] : []),
-    ...(localizedTexts.length > 0 ? [{ label: "中文", value: localizedTexts.join("\n") }] : []),
+    ...(preferredTexts.values.length > 0 ? [{ label: preferredTexts.label, value: preferredTexts.values.join("\n") }] : []),
   ] : [];
   const audioDataCount = audioMetadataTags.length + audioTextRows.length;
   return (
@@ -5603,17 +5952,35 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
         {textAsset && <small>显示 {textAsset.returned_lines} / {textAsset.line_count} 行{textAsset.truncated ? " · 已截断" : ""}</small>}
       </div>}
 
-      {associations && (isAudio ? audioRelationshipItems : associations.items).length > 0 && (!isAudio || activeAudioDetailTab === "associations") && <div className="asset-associations" role={isAudio ? "tabpanel" : undefined} id={isAudio ? "audio-associations-panel" : undefined} aria-labelledby={isAudio ? "audio-associations-tab" : undefined}>
-        <h3>关联事件</h3>
-        <div>{(isAudio ? audioRelationshipItems : associations.items).map((item, index) => {
+      {associations && isAudio && audioRelationshipItems.length > 0 && activeAudioDetailTab === "associations" && <div className="asset-associations audio-associations" role="tabpanel" id="audio-associations-panel" aria-labelledby="audio-associations-tab">
+        <div className="audio-association-list">{audioRelationshipItems.map((item, index) => {
           const originalText = cleanAudioText(item.original_text || item.text || "");
-          const localizedText = cleanAudioText(item.localized_text || "");
+          const preferredText = preferredAudioText(item.localized_text, item.translated_text, voiceTextPreference);
+          return <section className="audio-association-entry" key={`${item.scope}-${item.event}-${item.slot}-${index}`}>
+            <ul className="sound-metadata-tags audio-association-tags" aria-label="关联信息">
+              <li><span>事件 ID</span><strong className="mono">{item.event}</strong></li>
+              <li><span>关联</span><strong>{mediaSlotLabel(item.slot)}</strong></li>
+              {showAudioRelationshipEntity && item.entity && <li><span>单位</span><strong>{item.entity.display_name}</strong></li>}
+            </ul>
+            {(originalText || (preferredText && preferredText.value !== originalText)) && <dl className="audio-association-texts">
+              {originalText && <div><dt>原文</dt><dd>{originalText}</dd></div>}
+              {preferredText && preferredText.value !== originalText && <div><dt>{preferredText.label}</dt><dd>{preferredText.value}</dd></div>}
+            </dl>}
+          </section>;
+        })}</div>
+      </div>}
+
+      {associations && !isAudio && associations.items.length > 0 && <div className="asset-associations">
+        <h3>关联事件</h3>
+        <div>{associations.items.map((item, index) => {
+          const originalText = cleanAudioText(item.original_text || item.text || "");
+          const preferredText = preferredAudioText(item.localized_text, item.translated_text, voiceTextPreference);
           return <article key={`${item.scope}-${item.event}-${item.slot}-${index}`}>
             <span>{mediaSlotLabel(item.slot)}</span>
             <strong>{item.entity?.display_name || item.event}</strong>
             {item.entity && <code>{item.event}</code>}
             {originalText && <p><b>原文</b>{originalText}</p>}
-            {localizedText && localizedText !== originalText && <p><b>中文</b>{localizedText}</p>}
+            {preferredText && preferredText.value !== originalText && <p><b>{preferredText.label}</b>{preferredText.value}</p>}
           </article>;
         })}</div>
       </div>}
@@ -5628,7 +5995,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
       {isAudio && activeAudioDetailTab === "data" && <div className={`metadata sound-metadata ${hasAudioRelationshipTabs ? "" : "sound-metadata-direct"}`} role={hasAudioRelationshipTabs ? "tabpanel" : undefined} id={hasAudioRelationshipTabs ? "audio-data-panel" : undefined} aria-labelledby={hasAudioRelationshipTabs ? "audio-data-tab" : undefined}>
         {hasAudioRelationshipTabs && <h3>资产信息</h3>}
         <ul className="sound-metadata-tags" aria-label="音频元信息">{audioMetadataTags.map((tag) => <li key={`${tag.label}-${tag.value}`} title={`${tag.label}：${tag.value}`}><span>{tag.label}</span><strong className={tag.mono ? "mono" : ""}>{tag.value}</strong></li>)}</ul>
-        {audioTextRows.length > 0 && <dl className="sound-transcript-list">{audioTextRows.map((row) => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl>}
+        {audioTextRows.length > 0 && <dl className="sound-transcript-list">{audioTextRows.map((row) => <div className={canUseCompactTextTag(row.value) ? "sound-transcript-tag" : "sound-transcript-block"} key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl>}
       </div>}
       {!isAudio && <div className="metadata">
         <h3>资产信息</h3>
@@ -5648,6 +6015,8 @@ function SettingsDialog({
   onDetailPlacementChange,
   gameLanguage,
   onGameLanguageChange,
+  voiceTextPreference,
+  onVoiceTextPreferenceChange,
   previewAngle,
   onPreviewAngleChange,
   mediaHeaderAlignment,
@@ -5678,6 +6047,8 @@ function SettingsDialog({
   onDetailPlacementChange: (placement: DetailPlacement) => void;
   gameLanguage: GameLanguage;
   onGameLanguageChange: (language: GameLanguage) => void;
+  voiceTextPreference: VoiceTextPreference;
+  onVoiceTextPreferenceChange: (preference: VoiceTextPreference) => void;
   previewAngle: PreviewAngle;
   onPreviewAngleChange: (angle: PreviewAngle) => void;
   mediaHeaderAlignment: MediaHeaderAlignment;
@@ -5762,6 +6133,13 @@ function SettingsDialog({
                   <div className="layout-choice" role="group" aria-label="游戏文本语言">
                     <button type="button" className={gameLanguage === "zh-CN" ? "active" : ""} onClick={() => onGameLanguageChange("zh-CN")}>简体中文</button>
                     <button type="button" className={gameLanguage === "zh-TW" ? "active" : ""} onClick={() => onGameLanguageChange("zh-TW")}>繁體中文</button>
+                  </div>
+                </div>
+                <div className="display-setting-row">
+                  <strong>语音文本</strong>
+                  <div className="layout-choice" role="group" aria-label="语音中文显示优先级">
+                    <button type="button" className={voiceTextPreference === "translation" ? "active" : ""} onClick={() => onVoiceTextPreferenceChange("translation")}>译文优先</button>
+                    <button type="button" className={voiceTextPreference === "game" ? "active" : ""} onClick={() => onVoiceTextPreferenceChange("game")}>游戏中文优先</button>
                   </div>
                 </div>
                 <div className="display-setting-row">
@@ -5863,6 +6241,7 @@ function SettingsDialog({
 
 function DetachedEntityDetail({ sourceId, entityId }: { sourceId: string; entityId: string }) {
   const [gameLanguage] = useState<GameLanguage>(storedGameLanguage);
+  const [voiceTextPreference] = useState<VoiceTextPreference>(storedVoiceTextPreference);
   const [previewAngle] = useState<PreviewAngle>(storedPreviewAngle);
   const [entity, setEntity] = useState<GameEntity | null>(null);
   const [colors, setColors] = useState<PlayerColor[]>([]);
@@ -5880,11 +6259,12 @@ function DetachedEntityDetail({ sourceId, entityId }: { sourceId: string; entity
       })
       .catch((reason: Error) => setError(reason.message));
   }, [sourceId, entityId, gameLanguage]);
-  return <main className="detached-shell">{error ? <div className="detached-error">{error}</div> : <EntityDetailPanel sourceId={sourceId} entity={entity} loading={!entity} playerColors={colors} defaultPreviewAngle={previewAngle} wide scrollKey={`detached-entity:${sourceId}:${entityId}`} />}</main>;
+  return <main className="detached-shell">{error ? <div className="detached-error">{error}</div> : <EntityDetailPanel sourceId={sourceId} entity={entity} loading={!entity} playerColors={colors} defaultPreviewAngle={previewAngle} voiceTextPreference={voiceTextPreference} wide scrollKey={`detached-entity:${sourceId}:${entityId}`} />}</main>;
 }
 
 function DetachedAssetDetail({ assetId }: { assetId: string }) {
   const [gameLanguage] = useState<GameLanguage>(storedGameLanguage);
+  const [voiceTextPreference] = useState<VoiceTextPreference>(storedVoiceTextPreference);
   const [asset, setAsset] = useState<Asset | null>(null);
   const [metadata, setMetadata] = useState<AssetMetadata | null>(null);
   const [associations, setAssociations] = useState<AssetAssociationPage | null>(null);
@@ -5928,7 +6308,7 @@ function DetachedAssetDetail({ assetId }: { assetId: string }) {
   const previewUrl = asset && imageFormats.includes(asset.format)
     ? api.previewUrl(asset.id, frame, paletteId, asset.format === "pcx" ? 1 : asset.format === "shp" ? 5 : 4)
     : "";
-  return <main className="detached-shell">{error ? <div className="detached-error">{error}</div> : <DetailPanel asset={asset} metadata={metadata} textAsset={textAsset} textQuery={textQuery} setTextQuery={setTextQuery} frame={frame} setFrame={setFrame} playing={playing} setPlaying={setPlaying} palettes={palettes} paletteId={paletteId} setPaletteId={setPaletteId} playerColors={colors} previewUrl={previewUrl} associations={associations} wide scrollKey={`detached-asset:${assetId}`} />}</main>;
+  return <main className="detached-shell">{error ? <div className="detached-error">{error}</div> : <DetailPanel asset={asset} metadata={metadata} textAsset={textAsset} textQuery={textQuery} setTextQuery={setTextQuery} frame={frame} setFrame={setFrame} playing={playing} setPlaying={setPlaying} palettes={palettes} paletteId={paletteId} setPaletteId={setPaletteId} playerColors={colors} previewUrl={previewUrl} associations={associations} voiceTextPreference={voiceTextPreference} wide scrollKey={`detached-asset:${assetId}`} />}</main>;
 }
 
 function App() {

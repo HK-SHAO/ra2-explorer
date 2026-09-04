@@ -7,6 +7,7 @@ import {
   staticEntityPreviewUrl,
   staticEntityThumbnailAtlasFallbackUrl,
   staticEntityThumbnailAtlasUrl,
+  staticSnapshotFallbackUrl,
   staticSnapshotRequest,
 } from "./staticSnapshot";
 
@@ -319,6 +320,8 @@ export interface MediaSample {
   text: string | null;
   original_text: string | null;
   localized_text: string | null;
+  localized_text_origin: "game" | "translation" | null;
+  translated_text: string | null;
   text_label: string | null;
   asset: EntityComponentAsset | null;
   animation: AnimationPlayback | null;
@@ -349,6 +352,8 @@ export interface AssetAssociation {
   text: string | null;
   original_text: string | null;
   localized_text: string | null;
+  localized_text_origin: "game" | "translation" | null;
+  translated_text: string | null;
 }
 
 export interface AssetAssociationPage {
@@ -357,6 +362,8 @@ export interface AssetAssociationPage {
   texts: string[];
   original_texts: string[];
   localized_texts: string[];
+  localized_text_origins: Array<"game" | "translation">;
+  translated_texts: string[];
 }
 
 export interface EntityPage {
@@ -364,9 +371,16 @@ export interface EntityPage {
   total: number;
   kinds: Array<{ kind: EntityKind; count: number }>;
   usages: Array<{ usage: EntityUsage; count: number }>;
-  countries: Array<{ id: string; display_name: string; side: string; count: number }>;
+  countries: CountryFacet[];
   sides: Array<{ id: string; count: number }>;
   warnings: string[];
+}
+
+export interface CountryFacet {
+  id: string;
+  display_name: string;
+  side: string;
+  count: number;
 }
 
 export type MediaKind = "voice" | "sound" | "music" | "unknown";
@@ -379,6 +393,8 @@ export interface MediaItem {
   texts: string[];
   original_texts: string[];
   localized_texts: string[];
+  localized_text_origins: Array<"game" | "translation">;
+  translated_texts: string[];
   events: string[];
   slots: string[];
   entities: Array<{
@@ -412,6 +428,7 @@ export interface MediaPage {
   kinds: Array<{ kind: MediaKind; count: number }>;
   groups: Array<{ group: string; count: number }>;
   event_types: Array<{ event_type: string; count: number }>;
+  countries: CountryFacet[];
 }
 
 export interface EntityListOptions {
@@ -690,6 +707,9 @@ export const api = {
   entityThumbnailAtlasFallbackUrl: (path: string, facing: number) => isStaticSnapshot
     ? staticEntityThumbnailAtlasFallbackUrl(path, facing)
     : "",
+  snapshotFallbackUrl: (url: string) => isStaticSnapshot
+    ? staticSnapshotFallbackUrl(url)
+    : url,
   entityModelUrl: (
     sourceId: string,
     entityId: string,
@@ -703,7 +723,7 @@ export const api = {
     return `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}/model.json?${params}`;
   },
   assetModelUrl: (assetId: string, frame = 0, playerColor = "", paletteId = "") => {
-    if (isStaticSnapshot) return staticAssetModelUrl(assetId, frame);
+    if (isStaticSnapshot) return staticAssetModelUrl(assetId, frame, playerColor);
     const params = new URLSearchParams({ frame: String(frame), v: "5" });
     if (playerColor) params.set("player_color", playerColor);
     if (paletteId) params.set("palette_id", paletteId);
@@ -717,7 +737,13 @@ export const api = {
     playerColor = "",
     options: { palette?: "unit" | "animation"; shadowFrame?: number } = {},
   ) => {
-    if (isStaticSnapshot) return staticAssetPreviewUrl(assetId, frame, options.palette, options.shadowFrame);
+    if (isStaticSnapshot) return staticAssetPreviewUrl(
+      assetId,
+      frame,
+      options.palette,
+      options.shadowFrame,
+      playerColor,
+    );
     const params = new URLSearchParams({ frame: String(frame), scale: String(scale) });
     if (paletteId) params.set("palette_id", paletteId);
     if (playerColor) params.set("player_color", playerColor);

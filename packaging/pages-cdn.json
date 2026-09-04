@@ -1,24 +1,166 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "provider": "npm+jsdelivr",
-  "package": "ra2-explorer-pages-data",
-  "version": "0.13.1",
   "registry": "https://registry.npmjs.org/",
-  "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-data@0.13.1/data",
-  "snapshot_id": "ra2md-slim-f1b4a39eb00b",
-  "files": 38,
-  "bytes": 15777433,
-  "sha256": "cc5dbc4f8af28ea49381fe8a571580d5ae63de2c8603a5da10f8fbdab2909f07",
+  "version": "0.16.0",
+  "snapshot_id": "ra2md-slim-38b9fe4eb9c1",
+  "routes": [
+    {
+      "prefix": "manifest.json",
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-core@0.16.0/data"
+    },
+    {
+      "prefix": "catalog/",
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-core@0.16.0/data"
+    },
+    {
+      "prefix": "previews/entity-atlases/",
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-core@0.16.0/data"
+    },
+    {
+      "prefix": "previews/entity-search-atlases/",
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-core@0.16.0/data"
+    },
+    {
+      "prefix": "assets/",
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-metadata@0.16.0/data"
+    },
+    {
+      "prefix": "entities/",
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-metadata@0.16.0/data"
+    },
+    {
+      "prefix": "previews/entities/",
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-entity-previews@0.16.0/data"
+    },
+    {
+      "prefix": "previews/assets/",
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-animation-previews@0.16.0/data"
+    }
+  ],
+  "packages": [
+    {
+      "schema_version": 1,
+      "provider": "npm+jsdelivr",
+      "package": "ra2-explorer-pages-core",
+      "version": "0.16.0",
+      "registry": "https://registry.npmjs.org/",
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-core@0.16.0/data",
+      "snapshot_id": "ra2md-slim-38b9fe4eb9c1",
+      "profile": "core",
+      "routes": [
+        "manifest.json",
+        "catalog/",
+        "previews/entity-atlases/",
+        "previews/entity-search-atlases/"
+      ],
+      "files": 38,
+      "bytes": 16502303,
+      "sha256": "60c8905c563956a56c6e53eaf7449570c79124fd32e7a303363b1c2c038f259e",
+      "included": [
+        "manifest",
+        "bilingual_catalogs",
+        "entity_card_atlases",
+        "entity_search_atlases"
+      ],
+      "contains_original_game_files": false,
+      "package_bytes": 9944595,
+      "package_unpacked_bytes": 16503774,
+      "integrity": "sha512-r4iwMRlpqHwYOQjCVEEQVqWLJjeStgMd/G2QtH/9rpKXNpOHlmawgA/pHUkbPhDe1GOGwIQL/23+KLtS5x+e4w==",
+      "shasum": "bf08d3ad34260350d2856ec78af3dfed396dc69a",
+      "published": true
+    },
+    {
+      "schema_version": 1,
+      "provider": "npm+jsdelivr",
+      "package": "ra2-explorer-pages-metadata",
+      "version": "0.16.0",
+      "registry": "https://registry.npmjs.org/",
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-metadata@0.16.0/data",
+      "snapshot_id": "ra2md-slim-38b9fe4eb9c1",
+      "profile": "metadata",
+      "routes": [
+        "assets/",
+        "entities/"
+      ],
+      "files": 5456,
+      "bytes": 34826796,
+      "sha256": "7e79563cff6356f2830279046b7bcc588494f820604a2034617739c9c787d893",
+      "included": [
+        "entity_details",
+        "generated_asset_metadata"
+      ],
+      "contains_original_game_files": false,
+      "package_bytes": 2735709,
+      "package_unpacked_bytes": 34828283,
+      "integrity": "sha512-Yr3/0DmW1s78Z53p3Zeu+KkULMpbQthrmah1c20IuOperiA5ZGgVnKEOAPkfkEsW4U5hwJz4PV6Y/f31fgr10g==",
+      "shasum": "b729f14f5d62610e0defb849bcc21aa991c4214c",
+      "published": true
+    },
+    {
+      "schema_version": 1,
+      "provider": "npm+jsdelivr",
+      "package": "ra2-explorer-pages-entity-previews",
+      "version": "0.16.0",
+      "registry": "https://registry.npmjs.org/",
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-entity-previews@0.16.0/data",
+      "snapshot_id": "ra2md-slim-38b9fe4eb9c1",
+      "profile": "entity-previews",
+      "routes": [
+        "previews/entities/"
+      ],
+      "files": 4569,
+      "bytes": 47113924,
+      "sha256": "43f4b493843c20ddcd51444e4835e4946fccac19f5768ae8b4132e585f1abd05",
+      "included": [
+        "rendered_entity_previews"
+      ],
+      "contains_original_game_files": false,
+      "package_bytes": 46020763,
+      "package_unpacked_bytes": 47115439,
+      "integrity": "sha512-dQqB9V3EOvc2+WKFNPksbvIIpB89YsYwPuM4YFbK1b4Mg9ZVrwLCTrO6Jmj1O9UslYO9qKUe2KAbScOp+9EXBA==",
+      "shasum": "4a9c871dfedc7a12ad242c7c715a32c6c31a09ca",
+      "published": true
+    },
+    {
+      "schema_version": 1,
+      "provider": "npm+jsdelivr",
+      "package": "ra2-explorer-pages-animation-previews",
+      "version": "0.16.0",
+      "registry": "https://registry.npmjs.org/",
+      "base_url": "https://cdn.jsdelivr.net/npm/ra2-explorer-pages-animation-previews@0.16.0/data",
+      "snapshot_id": "ra2md-slim-38b9fe4eb9c1",
+      "profile": "animation-previews",
+      "routes": [
+        "previews/assets/"
+      ],
+      "files": 19325,
+      "bytes": 34098532,
+      "sha256": "d1e2fa86c9c7170fe31eb9c796026da75d5ece2989803a7b399bb0b104954a3e",
+      "included": [
+        "rendered_animation_previews"
+      ],
+      "contains_original_game_files": false,
+      "package_bytes": 32474352,
+      "package_unpacked_bytes": 34100059,
+      "integrity": "sha512-f9z6cZh9wgMfb33FJcycVx/QJSxDruACwZr1pNX5mPfWa4dGwjMkAiV3O6uhskbb1oF0SszZX225slIz7q/iVg==",
+      "shasum": "028ef0568533e6d102c335c6dfbdd461ecb6d8f8",
+      "published": true
+    }
+  ],
+  "files": 29388,
+  "bytes": 132541555,
+  "package_bytes": 91175419,
   "included": [
     "manifest",
     "bilingual_catalogs",
     "entity_card_atlases",
-    "entity_search_atlases"
+    "entity_search_atlases",
+    "entity_details",
+    "generated_asset_metadata",
+    "rendered_entity_previews",
+    "rendered_animation_previews"
   ],
   "contains_original_game_files": false,
-  "package_bytes": 9735072,
-  "package_unpacked_bytes": 15778840,
-  "integrity": "sha512-KmY9PoPZ4m3jusqZVX53crmec3bSNXkKg0biyYqgSO3YSFAmvsHO3POP4G5jc0dV4pfLR53HwQmroUxKgGYikA==",
-  "shasum": "f426a536179a235bfa8692b20c90fab63e32b0cf",
   "published": true
 }

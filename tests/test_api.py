@@ -20,6 +20,8 @@ from ra2_explorer.semantic import (
     GameEntity,
     MediaAssociation,
     MediaSample,
+    SemanticCatalog,
+    SemanticLibrary,
     VoiceText,
     _art_animation_playback,
     _art_end_is_frame_count,
@@ -325,7 +327,8 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert media_items[0]["description"] == "准备测试。"
     assert media_items[0]["groups"] == ["selection_voice"]
     assert media_items[0]["original_texts"] == ["Ready for the test."]
-    assert media_items[0]["localized_texts"] == ["准备测试。"]
+    assert media_items[0]["localized_texts"] == []
+    assert media_items[0]["translated_texts"] == ["准备测试。"]
     assert "zhunbeiceshi" in media_items[0]["search_aliases"]["pinyin_compact"]
     assert {item["event_type"] for item in semantic_media.json()["event_types"]} >= {
         "select",
@@ -430,7 +433,8 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
     assert select_voice["event"] == "FixtureSelect"
     assert select_voice["samples"][0]["text"] == "准备测试。"
     assert select_voice["samples"][0]["original_text"] == "Ready for the test."
-    assert select_voice["samples"][0]["localized_text"] == "准备测试。"
+    assert select_voice["samples"][0]["localized_text"] is None
+    assert select_voice["samples"][0]["translated_text"] == "准备测试。"
     assert select_voice["samples"][0]["text_label"] == "VOX:fixture_event"
     assert select_voice["samples"][0]["asset"]["display_name"] == "fixture.wav"
     assert select_voice["samples"][0]["weight"] == 2
@@ -443,7 +447,8 @@ def test_fixture_library_is_browsable_and_previewable(tmp_path: Path) -> None:
         item["entity"]["id"] == "DemoVehicle"
         and item["text"] == "准备测试。"
         and item["original_text"] == "Ready for the test."
-        and item["localized_text"] == "准备测试。"
+        and item["localized_text"] is None
+        and item["translated_text"] == "准备测试。"
         for item in association_items
         if item["entity"]
     )
@@ -660,7 +665,7 @@ def test_art_animation_playback_stops_before_a_shared_damaged_state() -> None:
     assert _art_sibling_frame_count("IDLE_DAMAGED", sections["idle_damaged"], sections) is None
 
 
-def test_eva_events_read_russian_field_without_using_unit_names_as_transcripts() -> None:
+def test_eva_unit_intros_keep_distinct_recordings_under_the_semantic_advisor() -> None:
     boomer = GameEntity(
         id="BSUB",
         kind="vehicle",
@@ -693,12 +698,138 @@ def test_eva_events_read_russian_field_without_using_unit_names_as_transcripts()
         (boomer,),
     )
 
-    assert [event.slot for event in events] == ["eva_allied", "eva_soviet"]
+    assert [event.slot for event in events] == ["advisor_eva", "advisor_eva"]
     assert {event.samples[0].name for event in events} == {"CEVAU39", "CSOFU39"}
     for event in events:
         assert event.samples[0].text is None
         assert event.samples[0].original_text is None
         assert event.samples[0].localized_text is None
+
+
+def test_eva_unit_intros_collapse_identical_player_faction_variants() -> None:
+    events = _build_eva_events(
+        {
+            "unit_eva_ifv": {
+                "allied": "CEVAU22",
+                "russian": "CEVAU22",
+            },
+            "unit_sofia_boris": {
+                "allied": "CSOFU82",
+                "russian": "CSOFU82",
+            },
+        },
+        _AssetIndex({}, {}),
+        {},
+    )
+
+    assert [
+        (event.event, event.slot, event.samples[0].name)
+        for event in events
+    ] == [
+        ("unit_eva_ifv", "advisor_eva", "CEVAU22"),
+        ("unit_sofia_boris", "advisor_sofia", "CSOFU82"),
+    ]
+
+
+def test_eva_event_fallback_preserves_original_alongside_direct_translation() -> None:
+    events = _build_eva_events(
+        {
+            "mis_xa1_tanyaswimhint": {
+                "allied": "XA1TA01",
+                "text": "One short swim to Alcatraz.",
+            }
+        },
+        _AssetIndex({}, {}),
+        {
+            "xa1ta01": VoiceText(
+                "TRANSCRIPT:xa1ta01",
+                "只要游一小段到恶魔岛。",
+                None,
+                None,
+                translated_text="只要游一小段到恶魔岛。",
+            )
+        },
+    )
+
+    sample = events[0].samples[0]
+    assert sample.text == "只要游一小段到恶魔岛。"
+    assert sample.original_text == "One short swim to Alcatraz."
+    assert sample.translated_text == "只要游一小段到恶魔岛。"
+
+
+def test_asset_associations_hide_legacy_unit_intro_player_variants() -> None:
+    asset = {
+        "id": "ifv-intro",
+        "display_name": "CEVAU22.WAV",
+        "format": "wav",
+        "virtual_path": "audio.mix::CEVAU22.WAV",
+        "size": 1024,
+        "storage_kind": "mix",
+    }
+    entity = GameEntity(
+        id="FV",
+        kind="vehicle",
+        usage="buildable",
+        display_name="多功能步兵战斗车",
+        internal_name="IFV",
+        ui_name="Name:FV",
+        ui_name_resolved=True,
+        image="FV",
+        voxel=True,
+        countries=("Americans",),
+        sides=("GDI",),
+        affiliation={"kind": "side", "id": "GDI", "display_name": "盟军"},
+        rules={},
+        art={},
+        components=(),
+        dependencies=(),
+        media=(),
+    )
+    sample = MediaSample("CEVAU22", "IFV briefing", asset)
+    legacy_events = (
+        MediaAssociation("voice", "eva_allied", "unit_eva_ifv", "eva", (sample,)),
+        MediaAssociation("voice", "eva_soviet", "unit_eva_ifv", "eva", (sample,)),
+    )
+    catalog = SemanticCatalog(
+        source_id="source",
+        entities=(entity,),
+        inputs={},
+        warnings=(),
+        audio_events={},
+        eva_events=legacy_events,
+        countries=(),
+        media_items=_build_media_items([asset], (entity,), {}, legacy_events, {}),
+    )
+
+    class AssociationDatabase:
+        def get_source(self, source_id: str) -> dict[str, object]:
+            return {
+                "id": source_id,
+                "scanned_at": "2026-09-03T00:00:00Z",
+                "asset_count": 1,
+                "state": "ready",
+            }
+
+        def get_asset(self, asset_id: str) -> dict[str, object]:
+            assert asset_id == asset["id"]
+            return asset
+
+    library = SemanticLibrary(AssociationDatabase(), object())  # type: ignore[arg-type]
+    library._cache["source"] = (
+        (
+            "2026-09-03T00:00:00Z",
+            1,
+            "ready",
+            library._voice_transcript_revision,
+        ),
+        catalog,
+    )
+
+    result = library.asset_associations("source", "ifv-intro")
+
+    assert result["total"] == 1
+    assert result["items"][0]["slot"] == "advisor_eva"
+    assert result["items"][0]["entity"]["id"] == "FV"
 
 
 def test_verified_unit_intro_overrides_csf_unit_name_text() -> None:
@@ -717,14 +848,19 @@ def test_verified_unit_intro_overrides_csf_unit_name_text() -> None:
             "csofu39": {
                 "text": "Yuri's Boomer submarine combines stealth and ballistic missiles.",
                 "original_text": "Yuri's Boomer submarine combines stealth and ballistic missiles.",
-                "localized_text": "尤里的雷鸣攻击潜艇兼具隐蔽性与弹道导弹能力。",
+                "translated_text": "尤里的雷鸣攻击潜艇兼具隐蔽性与弹道导弹能力。",
             }
         },
     )
 
     assert voice_strings["csofu39"].original_text.startswith("Yuri's Boomer")
-    assert voice_strings["csofu39"].localized_text == "尤里的雷鸣攻击潜艇兼具隐蔽性与弹道导弹能力。"
-    assert voice_strings["csofu39"].text == voice_strings["csofu39"].localized_text
+    assert voice_strings["csofu39"].localized_text == "雷鸣攻击潜舰"
+    assert (
+        voice_strings["csofu39"].translated_text
+        == "尤里的雷鸣攻击潜艇兼具隐蔽性与弹道导弹能力。"
+    )
+    assert voice_strings["csofu39"].text == voice_strings["csofu39"].translated_text
+    assert voice_strings["csofu39"].localized_text_origin == "game"
 
 
 def test_eva_media_groups_separate_missions_and_nonverbal_prompts() -> None:
@@ -847,6 +983,10 @@ def test_unassociated_voice_keeps_catalog_transcript_in_asset_data(
     )
     source_dir = tmp_path / "voice-only-installation"
     source_dir.mkdir()
+    (source_dir / "rulesmd.ini").write_text(
+        "[Countries]\n0=Africans\n[Africans]\nName=Libya\nSide=Nod\n",
+        encoding="ascii",
+    )
     (source_dir / "tauli02.wav").write_bytes(_build_fixture_wav())
     client = TestClient(create_app(settings))
 
@@ -861,6 +1001,9 @@ def test_unassociated_voice_keeps_catalog_transcript_in_asset_data(
     assert item["slots"] == ["multiplayer_attack"]
     assert item["countries"] == ["Africans"]
     assert item["sides"] == ["Nod"]
+    assert media["countries"] == [
+        {"id": "Africans", "display_name": "Libya", "side": "Nod", "count": 1}
+    ]
     asset = item["asset"]
 
     associations = client.get(
@@ -874,7 +1017,9 @@ def test_unassociated_voice_keeps_catalog_transcript_in_asset_data(
         "total": 0,
         "texts": ["下达指令了：攻击！"],
         "original_texts": ["The order is given. Attack!"],
-        "localized_texts": ["下达指令了：攻击！"],
+        "localized_texts": [],
+        "localized_text_origins": [],
+        "translated_texts": ["下达指令了：攻击！"],
     }
 
 

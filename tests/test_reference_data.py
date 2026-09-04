@@ -6,6 +6,8 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from ra2_explorer.reference_data import (
     BUNDLED_UNIT_INTEL_TRANSCRIPT_PATH,
+    BUNDLED_UNIT_VOICE_TRANSCRIPT_PATH,
+    BUNDLED_VOICE_TRANSLATION_PATH,
     load_audio_transcript,
 )
 
@@ -59,7 +61,7 @@ def test_audio_transcript_merges_local_mission_supplement(tmp_path) -> None:
     assert entries["giselea"]["text"] == "Sir, yes sir!"
     assert entries["a01_p01"] == {
         "original_text": "Protect the Time Machine.",
-        "localized_text": "保护时间机器。",
+        "translated_text": "保护时间机器。",
         "speaker": "EVA",
         "text": "Protect the Time Machine.",
     }
@@ -109,8 +111,162 @@ def test_bundled_expansion_unit_intel_has_spoken_text_and_translation(tmp_path) 
 
     assert len(entries) == 110
     assert entries["csofu39"]["original_text"].startswith("Yuri's Boomer submarine")
-    assert "雷鸣攻击潜艇" in entries["csofu39"]["localized_text"]
-    assert entries["cevau94"]["localized_text"].startswith("战乱中")
+    assert "雷鸣攻击潜艇" in entries["csofu39"]["translated_text"]
+    assert "localized_text" not in entries["csofu39"]
+    assert entries["cevau94"]["translated_text"].startswith("战乱中")
+
+
+def test_bundled_unit_voice_translation_does_not_replace_original_text(tmp_path) -> None:
+    path = tmp_path / "audio-transcript.xlsx"
+    path.write_bytes(
+        _audio_transcript_workbook(
+            (("$ilasmod.wav", "Fuel mix optimal", "Cosmonaut", "Move", "", "Soviet"),)
+        )
+    )
+
+    entries = load_audio_transcript(
+        path,
+        supplement_paths=(BUNDLED_UNIT_VOICE_TRANSCRIPT_PATH,),
+    )
+
+    assert entries["ilasmod"]["original_text"] == "Fuel mix optimal"
+    assert entries["ilasmod"]["translated_text"] == "燃料混合比最佳"
+    assert "localized_text" not in entries["ilasmod"]
+
+
+def test_bundled_translation_terminal_punctuation_follows_original(tmp_path) -> None:
+    workbook_path = tmp_path / "audio-transcript.xlsx"
+    workbook_path.write_bytes(
+        _audio_transcript_workbook(
+            (
+                ("$plain.wav", "Hold position", "Unit", "Select", "", "Soviet"),
+                ("$question.wav", "Ready?", "Unit", "Select", "", "Soviet"),
+                ("$command.wav", "Move!", "Unit", "Move", "", "Soviet"),
+            )
+        )
+    )
+    supplement_path = tmp_path / "translations.json"
+    supplement_path.write_text(
+        json.dumps(
+            {
+                "entries": {
+                    "plain": {"translated_text": "坚守阵地。"},
+                    "question": {"translated_text": "准备好了。"},
+                    "command": {"translated_text": "行动。"},
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    entries = load_audio_transcript(workbook_path, supplement_paths=(supplement_path,))
+
+    assert entries["plain"]["translated_text"] == "坚守阵地"
+    assert entries["question"]["translated_text"] == "准备好了？"
+    assert entries["command"]["translated_text"] == "行动！"
+
+
+def test_translation_catalog_can_fill_repeated_original_without_overriding_direct_entry(
+    tmp_path,
+) -> None:
+    workbook_path = tmp_path / "audio-transcript.xlsx"
+    workbook_path.write_bytes(
+        _audio_transcript_workbook(
+            (
+                ("$allied.wav", "Unit ready.", "EVA", "Status", "", "Allied"),
+                ("$soviet.wav", "Unit ready.", "EVA", "Status", "", "Soviet"),
+            )
+        )
+    )
+    catalog_path = tmp_path / "translations.json"
+    catalog_path.write_text(
+        json.dumps(
+            {
+                "entries": {"allied": {"translated_text": "单位整装待命。"}},
+                "translations_by_original": {"Unit ready.": "单位准备就绪。"},
+                "translations_by_normalized_original": {
+                    "warning: nuclear silo detected": "警告：侦测到核弹发射井。"
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    entries = load_audio_transcript(workbook_path, supplement_paths=(catalog_path,))
+
+    assert entries["allied"]["translated_text"] == "单位整装待命。"
+    assert entries["soviet"]["translated_text"] == "单位准备就绪。"
+
+    normalized_path = tmp_path / "normalized.xlsx"
+    normalized_path.write_bytes(
+        _audio_transcript_workbook(
+            (("$yuri.wav", "Warning. Nuclear Silo detected", "EVA", "Status", "", "Yuri"),)
+        )
+    )
+    normalized_entries = load_audio_transcript(
+        normalized_path, supplement_paths=(catalog_path,)
+    )
+    assert normalized_entries["yuri"]["translated_text"] == "警告：侦测到核弹发射井"
+
+
+def test_bundled_voice_translation_catalog_is_well_formed() -> None:
+    payload = json.loads(BUNDLED_VOICE_TRANSLATION_PATH.read_text(encoding="utf-8"))
+
+    translations = payload["translations_by_original"]
+    assert translations
+    assert all(
+        original.strip() and translated.strip()
+        for original, translated in translations.items()
+    )
+    normalized_translations = payload["translations_by_normalized_original"]
+    assert normalized_translations
+    assert all(
+        original.strip() and translated.strip()
+        for original, translated in normalized_translations.items()
+    )
+
+
+def test_bundled_unit_voice_translation_catalog_is_well_formed() -> None:
+    payload = json.loads(BUNDLED_UNIT_VOICE_TRANSCRIPT_PATH.read_text(encoding="utf-8"))
+
+    assert len(payload["entries"]) == 1268
+    assert all(entry.get("translated_text") for entry in payload["entries"].values())
+    for entry in payload["entries"].values():
+        text = entry["translated_text"]
+        translation_kind = entry.get("translation_kind", "dialogue")
+        if translation_kind == "nonverbal":
+            assert text.startswith("<") and text.endswith(">")
+        elif translation_kind == "mixed":
+            assert "<" in text and ">" in text
+        else:
+            assert "<" not in text and ">" not in text
+    assert payload["entries"]["idogdiea"]["translated_text"] == "<呜咽声>"
+    assert payload["entries"]["idogsela"]["translated_text"] == "汪！"
+    assert payload["entries"]["ilasdia"]["translated_text"] == "无法呼吸！"
+    assert payload["entries"]["iborcre"]["translated_text"] == "你不是鲍里斯的对手。"
+    assert payload["entries"]["igiate"]["translated_text"] == "就地固守！"
+    assert payload["entries"]["irocseg"]["translated_text"] == "燃料箱已加满"
+    assert payload["entries"]["ibrusea"]["translated_text"] == "嗯？"
+    assert payload["entries"]["iflafea"]["translated_text"] == "穿不过这片弹幕。"
+    assert payload["entries"]["irommoe"]["translated_text"] == "这双靴子太紧了"
+    assert payload["entries"]["vchosea"]["translated_text"] == "武装直升机报到"
+    assert payload["entries"]["vintate"]["translated_text"] == "仪器已锁定目标。"
+    assert payload["entries"]["vmasmod"]["translated_text"] == "那些傻瓜在哪里？"
+    assert payload["entries"]["isl2see"] == {
+        "translated_text": "<叹气>",
+        "translation_kind": "nonverbal",
+    }
+    assert payload["entries"]["vbatseb"]["translated_text"] == "战斗要塞进入戒备"
+    assert payload["entries"]["vwassec"]["translated_text"] == "是，指挥官？"
+    assert payload["entries"]["ienafec"] == {
+        "translated_text": "<惊恐声>",
+        "translation_kind": "nonverbal",
+    }
+    assert payload["entries"]["dummy"] == {
+        "translated_text": "<静音占位>",
+        "translation_kind": "nonverbal",
+    }
 
 
 def test_audio_transcript_corrects_verified_rotated_harvest_groups(tmp_path) -> None:

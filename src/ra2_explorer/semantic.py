@@ -361,6 +361,8 @@ class VoiceText:
     text: str
     original_text: str | None
     localized_text: str | None
+    localized_text_origin: str | None = None
+    translated_text: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -404,6 +406,8 @@ class MediaSample:
     animation: AnimationPlayback | None = None
     weight: int = 1
     palette: str | None = None
+    localized_text_origin: str | None = None
+    translated_text: str | None = None
 
     def as_dict(self, language: GameLanguage = DEFAULT_GAME_LANGUAGE) -> dict[str, object]:
         return {
@@ -411,6 +415,8 @@ class MediaSample:
             "text": localize_game_text(self.text, language),
             "original_text": self.original_text,
             "localized_text": localize_game_text(self.localized_text, language),
+            "localized_text_origin": self.localized_text_origin,
+            "translated_text": localize_game_text(self.translated_text, language),
             "text_label": self.text_label,
             "asset": _asset_summary(self.asset),
             "animation": self.animation.as_dict() if self.animation else None,
@@ -615,6 +621,8 @@ def deserialize_semantic_catalog(payload: dict[str, object]) -> SemanticCatalog:
             animation=playback(values.get("animation")),
             weight=int(values.get("weight") or 1),
             palette=_optional_text(values.get("palette")),
+            localized_text_origin=_optional_text(values.get("localized_text_origin")),
+            translated_text=_optional_text(values.get("translated_text")),
         )
 
     def association(value: object) -> MediaAssociation:
@@ -950,6 +958,11 @@ class SemanticLibrary:
         )
         if event_type:
             items = [item for item in items if event_type in item["slots"]]  # type: ignore[operator]
+        country_counts = Counter(
+            str(country)
+            for item in items
+            for country in item["countries"]  # type: ignore[union-attr]
+        )
         if sort == "description_asc":
             items.sort(
                 key=lambda item: (
@@ -980,6 +993,15 @@ class SemanticLibrary:
             "event_types": [
                 {"event_type": slot, "count": count}
                 for slot, count in sorted(event_type_counts.items())
+            ],
+            "countries": [
+                {
+                    **country,
+                    "display_name": localize_game_text(country["display_name"], language),
+                    "count": country_counts.get(country["id"], 0),
+                }
+                for country in catalog.countries
+                if country_counts.get(country["id"], 0)
             ],
         }
 
@@ -1025,6 +1047,8 @@ class SemanticLibrary:
                             "text": None,
                             "original_text": None,
                             "localized_text": None,
+                            "localized_text_origin": None,
+                            "translated_text": None,
                         },
                         ("entity", entity.id, "component", component.role),
                     )
@@ -1048,6 +1072,10 @@ class SemanticLibrary:
                                 "localized_text": localize_game_text(
                                     presented.localized_text, language
                                 ),
+                                "localized_text_origin": presented.localized_text_origin,
+                                "translated_text": localize_game_text(
+                                    presented.translated_text, language
+                                ),
                             },
                             (
                                 "entity",
@@ -1060,6 +1088,8 @@ class SemanticLibrary:
 
         for association in catalog.eva_events:
             event_entity = _eva_event_entity(association.event, entities_by_id)
+            semantic_slot = _unit_intel_advisor_slot(association.event)
+            display_slot = semantic_slot or association.slot
             for sample in association.samples:
                 if sample.asset and sample.asset["id"] == asset_id:
                     presented = (
@@ -1069,7 +1099,7 @@ class SemanticLibrary:
                         {
                             "scope": "event",
                             "kind": association.kind,
-                            "slot": association.slot,
+                            "slot": display_slot,
                             "event": association.event,
                             "entity": (
                                 event_entity.summary(language) if event_entity is not None else None
@@ -1079,10 +1109,14 @@ class SemanticLibrary:
                             "localized_text": localize_game_text(
                                 presented.localized_text, language
                             ),
+                            "localized_text_origin": presented.localized_text_origin,
+                            "translated_text": localize_game_text(
+                                presented.translated_text, language
+                            ),
                         },
                         (
                             "event",
-                            association.slot,
+                            display_slot,
                             association.event.casefold(),
                             sample.name.casefold(),
                         ),
@@ -1106,6 +1140,10 @@ class SemanticLibrary:
                             "original_text": presented.original_text,
                             "localized_text": localize_game_text(
                                 presented.localized_text, language
+                            ),
+                            "localized_text_origin": presented.localized_text_origin,
+                            "translated_text": localize_game_text(
+                                presented.translated_text, language
                             ),
                         },
                         (media_kind, event.casefold(), sample.name.casefold()),
@@ -1143,6 +1181,14 @@ class SemanticLibrary:
             "localized_texts": [
                 localize_game_text(str(value), language)
                 for value in (media_item or {}).get("localized_texts", [])  # type: ignore[union-attr]
+            ],
+            "localized_text_origins": sorted(
+                str(value)
+                for value in (media_item or {}).get("localized_text_origins", [])  # type: ignore[union-attr]
+            ),
+            "translated_texts": [
+                localize_game_text(str(value), language)
+                for value in (media_item or {}).get("translated_texts", [])  # type: ignore[union-attr]
             ],
         }
 
@@ -1938,6 +1984,7 @@ def _sound_description_sample(sample: MediaSample) -> MediaSample:
         text=cleaned(sample.text),
         original_text=cleaned(sample.original_text),
         localized_text=cleaned(sample.localized_text),
+        translated_text=cleaned(sample.translated_text),
     )
 
 
@@ -2376,6 +2423,8 @@ def _build_media_items(
             "texts": set(),
             "original_texts": set(),
             "localized_texts": set(),
+            "localized_text_origins": set(),
+            "translated_texts": set(),
             "events": set(),
             "slots": set(),
             "entities": {},
@@ -2412,6 +2461,10 @@ def _build_media_items(
             state["original_texts"].add(sample.original_text.strip())
         if sample.localized_text:
             state["localized_texts"].add(sample.localized_text.strip())
+            if sample.localized_text_origin:
+                state["localized_text_origins"].add(sample.localized_text_origin)
+        if sample.translated_text:
+            state["translated_texts"].add(sample.translated_text.strip())
         if event:
             state["events"].add(event)
         if isinstance(slot, str) and slot:
@@ -2479,9 +2532,9 @@ def _build_media_items(
                     f"mission:{mission['key']}",
                     _mission_event_slot(asset_stem, (association.event,)),
                 )
-            elif event_name.startswith(("unit_eva_", "unit_sofia_")):
+            elif (advisor_slot := _unit_intel_advisor_slot(event_name)) is not None:
                 kind, group = "voice", "unit_intel_voice"
-                slot = "advisor_eva" if event_name.startswith("unit_eva_") else "advisor_sofia"
+                slot = advisor_slot
             elif event_name.startswith(("wwd_", "wwd-")):
                 kind, group = "voice", "world_domination_voice"
                 slot = association.slot
@@ -2541,6 +2594,8 @@ def _build_media_items(
                         None,
                         value.original_text,
                         value.localized_text,
+                        localized_text_origin=value.localized_text_origin,
+                        translated_text=value.translated_text,
                     )
                 )
                 if cleaned.text:
@@ -2549,6 +2604,10 @@ def _build_media_items(
                     state["original_texts"].add(cleaned.original_text)
                 if cleaned.localized_text:
                     state["localized_texts"].add(cleaned.localized_text)
+                    if cleaned.localized_text_origin:
+                        state["localized_text_origins"].add(cleaned.localized_text_origin)
+                if cleaned.translated_text:
+                    state["translated_texts"].add(cleaned.translated_text)
                 continue
             state["voice"] = True
             state["texts"].add(value.text.strip())
@@ -2556,6 +2615,10 @@ def _build_media_items(
                 state["original_texts"].add(value.original_text.strip())
             if value.localized_text:
                 state["localized_texts"].add(value.localized_text.strip())
+                if value.localized_text_origin:
+                    state["localized_text_origins"].add(value.localized_text_origin)
+            if value.translated_text:
+                state["translated_texts"].add(value.translated_text.strip())
             stem = key.casefold()
             if not any(group.endswith("_voice") for group in state["groups"]):
                 state["groups"].add(
@@ -2711,6 +2774,7 @@ def _build_media_items(
         texts = sorted(state["texts"], key=str.casefold)
         original_texts = sorted(state["original_texts"], key=str.casefold)
         localized_texts = sorted(state["localized_texts"], key=str.casefold)
+        translated_texts = sorted(state["translated_texts"], key=str.casefold)
         entity_refs = sorted(
             state["entities"].values(),
             key=lambda item: (item["display_name"].casefold(), item["id"].casefold()),
@@ -2734,6 +2798,8 @@ def _build_media_items(
                 "texts": texts,
                 "original_texts": original_texts,
                 "localized_texts": localized_texts,
+                "localized_text_origins": sorted(state["localized_text_origins"]),
+                "translated_texts": translated_texts,
                 "events": events,
                 "slots": sorted(state["slots"]),
                 "entities": entity_refs,
@@ -2834,15 +2900,22 @@ def _merge_csf_inputs(
                         current = voice_strings.get(alias)
                         original_text = current.original_text if current else None
                         localized_text = current.localized_text if current else None
+                        localized_text_origin = (
+                            current.localized_text_origin if current else None
+                        )
+                        translated_text = current.translated_text if current else None
                         if is_localized:
                             localized_text = value.text
-                        else:
+                            localized_text_origin = "game"
+                        elif parsed.language == 0:
                             original_text = value.text
                         voice_strings[alias] = VoiceText(
                             label.name,
-                            localized_text or original_text or value.text,
+                            translated_text or localized_text or original_text or value.text,
                             original_text,
                             localized_text,
+                            localized_text_origin,
+                            translated_text,
                         )
     _overlay_voice_transcripts(voice_strings, voice_transcripts)
     return strings, voice_strings
@@ -2854,18 +2927,36 @@ def _overlay_voice_transcripts(
 ) -> None:
     """Apply verified spoken lines after CSF labels, which can contain only a unit name."""
     for key, transcript in voice_transcripts.items():
-        if not transcript.get("text"):
-            continue
         current = voice_strings.get(key)
-        original_text = transcript.get("original_text") or transcript["text"]
-        localized_text = transcript.get("localized_text") or (
-            current.localized_text if current else None
+        original_text = (
+            transcript.get("original_text")
+            or transcript.get("text")
+            or (current.original_text if current else None)
         )
+        incoming_localized_text = transcript.get("localized_text")
+        incoming_origin = transcript.get("localized_text_origin")
+        translated_text = transcript.get("translated_text") or (
+            current.translated_text if current else None
+        )
+        if incoming_localized_text and incoming_origin != "game":
+            translated_text = translated_text or incoming_localized_text
+            incoming_localized_text = None
+        localized_text = incoming_localized_text or (current.localized_text if current else None)
+        if original_text is None and localized_text is None and translated_text is None:
+            continue
+        localized_text_origin = "game" if localized_text else None
+        display_text = translated_text or localized_text or original_text or (
+            current.text if current else None
+        )
+        if display_text is None:
+            continue
         voice_strings[key] = VoiceText(
             current.label if current else f"TRANSCRIPT:{key}",
-            localized_text or original_text,
+            display_text,
             original_text,
             localized_text,
+            localized_text_origin,
+            translated_text,
         )
 
 
@@ -2958,8 +3049,10 @@ def _build_eva_events(
     entities: tuple[GameEntity, ...] = (),
 ) -> tuple[MediaAssociation, ...]:
     associations = []
+    seen_unit_intel_samples: set[tuple[str, str, str]] = set()
     for event, values in sections.items():
         fallback_voice_text = _eva_event_voice_text(event, values)
+        advisor_slot = _unit_intel_advisor_slot(event)
         for faction, fields in (
             ("allied", ("allied",)),
             ("soviet", ("soviet", "russian")),
@@ -2972,16 +3065,38 @@ def _build_eva_events(
             )
             for sample_name in sample_names:
                 sample = _audio_sample(sample_name, assets, voice_strings)
-                if sample.text is None and fallback_voice_text is not None:
+                if fallback_voice_text is not None:
                     sample = replace(
                         sample,
-                        text=fallback_voice_text.text,
-                        original_text=fallback_voice_text.original_text,
-                        localized_text=fallback_voice_text.localized_text,
-                        text_label=fallback_voice_text.label,
+                        text=sample.text or fallback_voice_text.text,
+                        original_text=(
+                            sample.original_text or fallback_voice_text.original_text
+                        ),
+                        localized_text=(
+                            sample.localized_text or fallback_voice_text.localized_text
+                        ),
+                        text_label=sample.text_label or fallback_voice_text.label,
+                        localized_text_origin=(
+                            sample.localized_text_origin
+                            or fallback_voice_text.localized_text_origin
+                        ),
+                        translated_text=(
+                            sample.translated_text or fallback_voice_text.translated_text
+                        ),
                     )
+                slot = advisor_slot or f"eva_{faction}"
+                if advisor_slot is not None:
+                    sample_identity = (
+                        str(sample.asset["id"])
+                        if sample.asset is not None
+                        else sample.name.rsplit(".", 1)[0].casefold()
+                    )
+                    identity = (event.casefold(), advisor_slot, sample_identity)
+                    if identity in seen_unit_intel_samples:
+                        continue
+                    seen_unit_intel_samples.add(identity)
                 associations.append(
-                    MediaAssociation("voice", f"eva_{faction}", event, "eva", (sample,))
+                    MediaAssociation("voice", slot, event, "eva", (sample,))
                 )
     return tuple(associations)
 
@@ -2993,6 +3108,15 @@ def _eva_event_voice_text(
     configured = values.get("text")
     if configured:
         return VoiceText(f"EVA:{event}", configured, configured, None)
+    return None
+
+
+def _unit_intel_advisor_slot(event: str) -> str | None:
+    folded = event.casefold()
+    if folded.startswith("unit_eva_"):
+        return "advisor_eva"
+    if folded.startswith("unit_sofia_"):
+        return "advisor_sofia"
     return None
 
 
@@ -3353,6 +3477,8 @@ def _audio_sample(
         voice_text.original_text if voice_text else None,
         voice_text.localized_text if voice_text else None,
         voice_text.label if voice_text else None,
+        localized_text_origin=voice_text.localized_text_origin if voice_text else None,
+        translated_text=voice_text.translated_text if voice_text else None,
     )
 
 
@@ -3974,6 +4100,7 @@ def _media_search_text(item: dict[str, object]) -> str:
             *(str(value) for value in item["texts"]),  # type: ignore[union-attr]
             *(str(value) for value in item["original_texts"]),  # type: ignore[union-attr]
             *(str(value) for value in item["localized_texts"]),  # type: ignore[union-attr]
+            *(str(value) for value in item["translated_texts"]),  # type: ignore[union-attr]
             *(str(value) for value in item["events"]),  # type: ignore[union-attr]
             *(str(value) for value in item["slots"]),  # type: ignore[union-attr]
             *(str(value) for value in item["countries"]),  # type: ignore[union-attr]
@@ -3995,6 +4122,7 @@ def _media_pinyin_search_values(item: dict[str, object]) -> tuple[str, ...]:
             item.get("description"),
             *item["texts"],  # type: ignore[union-attr]
             *item["localized_texts"],  # type: ignore[union-attr]
+            *item["translated_texts"],  # type: ignore[union-attr]
             *(
                 entity["display_name"]
                 for entity in entities  # type: ignore[union-attr]
@@ -4033,6 +4161,10 @@ def _localized_media_item(item: dict[str, object], language: GameLanguage) -> di
         "localized_texts": [
             localize_game_text(str(value), language)
             for value in item["localized_texts"]  # type: ignore[union-attr]
+        ],
+        "translated_texts": [
+            localize_game_text(str(value), language)
+            for value in item["translated_texts"]  # type: ignore[union-attr]
         ],
         "entities": [
             _localized_media_entity(entity, language)
