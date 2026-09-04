@@ -99,7 +99,7 @@ def test_video_poster_walks_deeper_past_black_frames(tmp_path: Path, monkeypatch
 
     # Every seek lands on a black frame, so it falls through to the unseeked
     # first frame instead of giving up.
-    assert len(calls) == len(POSTER_SEEK_SECONDS) + 1
+    assert len(calls) == len(POSTER_SEEK_SECONDS)
     assert all("-ss" in call for call in calls[:-1])
     assert "-ss" not in calls[-1]
     assert poster.is_file()

@@ -16,7 +16,7 @@ from ra2_explorer.storage import Database
 # Posters skip the opening seconds because these movies fade in from black,
 # then walk deeper until something readable shows up. The last attempt has no
 # seek at all, so even a clip shorter than every seek still gets a poster.
-POSTER_SEEK_SECONDS: tuple[float, ...] = (1, 2, 4, 6, 8)
+POSTER_SEEK_SECONDS: tuple[float | None, ...] = (1, 2, 4, 6, 8, None)
 # A frame where fewer than this share of pixels are brighter than the luma
 # floor counts as black and is not worth showing.
 POSTER_DARK_LUMA = 16
@@ -125,44 +125,11 @@ class VideoTranscoder:
         output: Path,
         temporary: Path,
     ) -> None:
-        """Seek progressively deeper until the poster is not a black frame."""
-        attempts: list[float | None] = [*POSTER_SEEK_SECONDS, None]
-        detail = "FFmpeg 未生成输出"
-        for seconds in attempts:
-            command = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y"]
-            if seconds is not None:
-                command += ["-ss", f"{seconds:g}"]
-            command += ["-i", str(source_path), "-frames:v", "1", str(temporary)]
-            ok, attempt_detail = self._extract_frame(command)
-            if ok and (seconds is None or not _frame_is_dark(temporary)):
-                self.derived.commit_file(output, temporary)
-                temporary.unlink(missing_ok=True)
-                return
-            temporary.unlink(missing_ok=True)
-            detail = attempt_detail or detail
-        raise Ra2ExplorerError(f"视频封面生成失败：{detail or '未找到可用的画面帧'}")
-
-    def _extract_frame(self, command: list[str]) -> tuple[bool, str]:
-        """Extract a single frame without publishing it."""
-        try:
-            result = subprocess.run(
-                command,
-                check=False,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                timeout=120,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except subprocess.TimeoutExpired:
-            return False, "单帧抽取超过 120 秒已停止"
-        detail = result.stderr.decode("utf-8", errors="replace").strip()[-600:]
-        if result.returncode != 0:
-            return False, detail or f"FFmpeg 退出码 {result.returncode}"
-        if not Path(command[-1]).is_file():
-            # Seeking past the end of a very short clip yields no frame.
-            return False, detail or "FFmpeg 未生成输出"
-        return True, ""
+        ok, detail = extract_poster_frame(ffmpeg, source_path, temporary)
+        if not ok:
+            raise Ra2ExplorerError(f"视频封面生成失败：{detail or '未找到可用的画面帧'}")
+        self.derived.commit_file(output, temporary)
+        temporary.unlink(missing_ok=True)
 
     def _run_ffmpeg(self, command: list[str], output: Path, failure: str) -> None:
         temporary = Path(command[-1])
@@ -203,4 +170,48 @@ def _frame_is_dark(path: Path) -> bool:
     return sum(histogram[POSTER_DARK_LUMA:]) / total < POSTER_DARK_MAX_RATIO
 
 
-__all__ = ["VideoTranscoder"]
+def _extract_frame(command: list[str]) -> tuple[bool, str]:
+    """Extract a single frame without publishing it."""
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=120,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired:
+        return False, "单帧抽取超过 120 秒已停止"
+    detail = result.stderr.decode("utf-8", errors="replace").strip()[-600:]
+    if result.returncode != 0:
+        return False, detail or f"FFmpeg 退出码 {result.returncode}"
+    if not Path(command[-1]).is_file():
+        # Seeking past the end of a very short clip yields no frame.
+        return False, detail or "FFmpeg 未生成输出"
+    return True, ""
+
+
+def extract_poster_frame(ffmpeg: str, source_path: Path, temporary: Path) -> tuple[bool, str]:
+    """Extract one good poster frame into temporary.
+
+    Seeks progressively deeper, skipping black frames such as fade-ins. The
+    last attempt has no seek at all, so even a clip shorter than every seek
+    still yields a frame.
+    """
+    detail = "FFmpeg 未生成输出"
+    for seconds in POSTER_SEEK_SECONDS:
+        command = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y"]
+        if seconds is not None:
+            command += ["-ss", f"{seconds:g}"]
+        command += ["-i", str(source_path), "-frames:v", "1", str(temporary)]
+        ok, attempt_detail = _extract_frame(command)
+        if ok and (seconds is None or not _frame_is_dark(temporary)):
+            return True, ""
+        temporary.unlink(missing_ok=True)
+        detail = attempt_detail or detail
+    return False, detail
+
+
+__all__ = ["VideoTranscoder", "extract_poster_frame"]

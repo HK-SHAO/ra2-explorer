@@ -19,6 +19,7 @@ from PIL import Image
 
 from ra2_explorer.api import Services
 from ra2_explorer.errors import Ra2ExplorerError
+from ra2_explorer.video import extract_poster_frame
 
 CANVAS = (640, 480)
 FPS = 15
@@ -74,25 +75,18 @@ def _unique_videos(services: Services, source_id: str) -> list[dict[str, object]
 
 
 def _extract_poster(ffmpeg: str, part: Path, output: Path) -> None:
-    """抽一帧压缩为低分辨率 WebP 预览图；优先取 1 秒处，失败回退首帧。"""
-    for seek in ("1", "0"):
-        temporary = output.with_suffix(f".tmp-{seek}.png")
-        try:
-            subprocess.run(
-                [ffmpeg, "-y", "-loglevel", "error", "-nostdin",
-                 "-ss", seek, "-i", str(part), "-frames:v", "1", str(temporary)],
-                check=False, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, timeout=120,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            if temporary.is_file():
-                with Image.open(temporary) as image:
-                    image.save(output, format="WEBP", quality=75, method=4)
-                return
-        except (OSError, ValueError):
-            pass
-        finally:
-            temporary.unlink(missing_ok=True)
+    """抽一帧存为 WebP 预览图；抽帧含暗帧检测与首帧回退。"""
+    temporary = output.with_suffix(".tmp.png")
+    try:
+        ok, _ = extract_poster_frame(ffmpeg, part, temporary)
+        if not ok:
+            return
+        with Image.open(temporary) as image:
+            image.save(output, format="WEBP", quality=75, method=4)
+    except OSError:
+        pass
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _probe_duration(path: Path) -> float:
