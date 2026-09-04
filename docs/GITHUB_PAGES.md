@@ -43,7 +43,7 @@ Pages workflow 从固定 GitHub 数据 Release 并行下载最多四个分片，
 .venv\Scripts\ra2exp.exe pages export SOURCE_ID --audio-bitrate 24k --workers 4 --overwrite
 ```
 
-该命令会原子替换快照目录并自动生成 `.runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip`。渲染算法升级时必须递增 render revision，使图集和预览路径改变而不复用旧版 WebP；资产信息或关联结构变化时递增 asset bundle revision，只重建 JSON 而继续复用声音、模型和预览。压缩过程每 2,000 个文件输出一次进度，避免长时间没有反馈。中断构建保留在同目录的暂存结果，下一次运行会先复用完整文件。
+该命令会原子替换快照目录并自动生成 `.runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip`。渲染算法升级时必须递增 render revision，使图集和预览路径改变而不复用旧版 WebP；资产信息、语音译文或关联结构变化时递增 asset bundle revision，只重建 JSON 而继续复用声音、模型和预览。压缩过程每 2,000 个文件输出一次进度，避免长时间没有反馈。中断构建保留在同目录的暂存结果，下一次运行会先复用完整文件。
 
 审计最终 ZIP：
 
@@ -58,7 +58,7 @@ Pages workflow 从固定 GitHub 数据 Release 并行下载最多四个分片，
 .venv\Scripts\python.exe scripts\publish_pages_cdn.py ".runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip" --version X.Y.Z --overwrite --publish
 ```
 
-第一条发布命令从 `.secrets\local.env` 或进程环境读取 `GITHUB_TOKEN_RA2_EXPLORER`，先审计 ZIP，再把它拆为 8 MiB 分片上传；中断后重跑会校验并跳过已完成分片。第二条命令只提取清单、目录、卡片图集和搜索小图图集，`NPM_TOKEN` 同样只从本机凭据文件或进程环境读取。两个发布器都不会把令牌写入命令输出、包内容或锁定清单。npm 版本和数据 tag 不覆盖旧内容，每次数据变化必须使用新版本并同步提交两个锁。
+第一条发布命令从 `.secrets\local.env` 或进程环境读取 `GITHUB_TOKEN_RA2_EXPLORER`，先审计 ZIP，再把它拆为 8 MiB 分片上传；中断后重跑会校验并跳过已完成分片。审计同时拒绝任何存在原文却缺少正式译文的单位语音，避免旧语义 JSON 进入 Pages。第二条命令只提取清单、目录、卡片图集和搜索小图图集，`NPM_TOKEN` 同样只从本机凭据文件或进程环境读取。两个发布器都不会把令牌写入命令输出、包内容或锁定清单。npm 版本和数据 tag 不覆盖旧内容，每次数据变化必须使用新版本并同步提交两个锁。
 
 前端静态构建和本机预览：
 
