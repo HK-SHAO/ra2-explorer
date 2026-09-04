@@ -121,9 +121,12 @@ def _write_webp(data: bytes, output: Path) -> None:
         _save_webp(image, output)
 
 
+WEBP_QUALITY = 85
+
+
 def _save_webp(image: Image.Image, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
-    image.save(output, format="WEBP", lossless=True, method=4)
+    image.save(output, format="WEBP", quality=WEBP_QUALITY, method=4)
 
 
 def _run_parallel(
