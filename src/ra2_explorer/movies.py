@@ -74,25 +74,25 @@ def _unique_videos(services: Services, source_id: str) -> list[dict[str, object]
 
 
 def _extract_poster(ffmpeg: str, part: Path, output: Path) -> None:
-    """从分片 1 秒处抽一帧，压缩为低分辨率 WebP 预览图。"""
-    temporary = output.with_suffix(".tmp.png")
-    try:
-        subprocess.run(
-            [ffmpeg, "-y", "-loglevel", "error", "-nostdin",
-             "-ss", "1", "-i", str(part), "-frames:v", "1", str(temporary)],
-            check=False, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL, timeout=120,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        if not temporary.is_file():
-            return
-        with Image.open(temporary) as image:
-            image.thumbnail((320, 240))
-            image.save(output, format="WEBP", quality=75, method=4)
-    except (OSError, ValueError):
-        return
-    finally:
-        temporary.unlink(missing_ok=True)
+    """抽一帧压缩为低分辨率 WebP 预览图；优先取 1 秒处，失败回退首帧。"""
+    for seek in ("1", "0"):
+        temporary = output.with_suffix(f".tmp-{seek}.png")
+        try:
+            subprocess.run(
+                [ffmpeg, "-y", "-loglevel", "error", "-nostdin",
+                 "-ss", seek, "-i", str(part), "-frames:v", "1", str(temporary)],
+                check=False, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, timeout=120,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if temporary.is_file():
+                with Image.open(temporary) as image:
+                    image.save(output, format="WEBP", quality=75, method=4)
+                return
+        except (OSError, ValueError):
+            pass
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def _probe_duration(path: Path) -> float:
