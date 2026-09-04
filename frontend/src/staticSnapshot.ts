@@ -508,6 +508,7 @@ export interface MovieItem {
   group: string;
   start: number;
   duration: number;
+  poster?: string;
   audio_asset_ids?: string[];
 }
 
@@ -561,6 +562,10 @@ export async function staticMoviePage(sourceId: string, formats: string[], query
     .filter((item) => !needle || item.name.toLocaleLowerCase().includes(needle))
     .map((item) => movieAsset(item, sourceId));
   return { items, total: items.length };
+}
+
+export function staticMoviePosterUrl(assetId: string) {
+  return snapshotUrl(`movies/${encodeURIComponent(assetId)}.webp`);
 }
 
 export async function staticMovieEntry(assetId: string) {

@@ -15,6 +15,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from PIL import Image
+
 from ra2_explorer.api import Services
 from ra2_explorer.errors import Ra2ExplorerError
 
@@ -69,6 +71,28 @@ def _unique_videos(services: Services, source_id: str) -> list[dict[str, object]
         GROUP_ORDER.index(item["group"]), item["group_key"], str(item["display_name"])
     ))
     return ordered
+
+
+def _extract_poster(ffmpeg: str, part: Path, output: Path) -> None:
+    """从分片 1 秒处抽一帧，压缩为低分辨率 WebP 预览图。"""
+    temporary = output.with_suffix(".tmp.png")
+    try:
+        subprocess.run(
+            [ffmpeg, "-y", "-loglevel", "error", "-nostdin",
+             "-ss", "1", "-i", str(part), "-frames:v", "1", str(temporary)],
+            check=False, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, timeout=120,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if not temporary.is_file():
+            return
+        with Image.open(temporary) as image:
+            image.thumbnail((320, 240))
+            image.save(output, format="WEBP", quality=75, method=4)
+    except (OSError, ValueError):
+        return
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _probe_duration(path: Path) -> float:
@@ -151,11 +175,17 @@ def build_movie_compilation(
 
     items: list[dict[str, object]] = []
     part_names: list[str] = []
+    posters_dir = output_dir / "posters"
+    posters_dir.mkdir(parents=True, exist_ok=True)
     start = 0.0
     for item in ordered:
         part = parts_dir / str(item["part"])
         if not part.is_file():
             continue
+        poster = posters_dir / f"{item['id']}.webp"
+        if not poster.is_file():
+            _extract_poster(ffmpeg, part, poster)
+        item["poster"] = f"movies/{item['id']}.webp" if poster.is_file() else None
         duration = _probe_duration(part)
         part_names.append(f"parts/{item['part']}")
         movie_stem = str(item["display_name"]).rsplit(".", 1)[0].casefold()
@@ -171,6 +201,7 @@ def build_movie_compilation(
             "group": item["group"],
             "start": round(start, 2),
             "duration": round(duration, 2),
+            "poster": item["poster"],
             "audio_asset_ids": audio_asset_ids,
         })
         start += duration

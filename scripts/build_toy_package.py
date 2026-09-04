@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PACKAGE_ROOT = ROOT / "frontend" / "dist-pages"
 DEFAULT_OUTPUT = ROOT / ".outputs" / "toy.zip"
 DEFAULT_MOVIES_MANIFEST = ROOT / ".outputs" / "ra2-movies" / "movies.json"
+DEFAULT_POSTERS_DIR = ROOT / ".outputs" / "ra2-movies" / "posters"
 
 
 def stage_snapshot(archive: Path) -> None:
@@ -49,6 +50,19 @@ def stage_movies_manifest(manifest: Path, bvid: str) -> None:
         payload["bvid"] = bvid
     target = PACKAGE_ROOT / "data" / "movies.json"
     target.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def stage_posters(posters_dir: Path) -> int:
+    """把影片预览图拷进包内数据目录。"""
+    if not posters_dir.is_dir():
+        return 0
+    target = PACKAGE_ROOT / "data" / "movies"
+    target.mkdir(parents=True, exist_ok=True)
+    count = 0
+    for poster in sorted(posters_dir.glob("*.webp")):
+        (target / poster.name).write_bytes(poster.read_bytes())
+        count += 1
+    return count
 
 
 def build_package(output: Path, *, overwrite: bool) -> dict[str, object]:
@@ -95,6 +109,8 @@ def main() -> int:
     parser.add_argument("--movies-manifest", type=Path, default=DEFAULT_MOVIES_MANIFEST,
                         help="过场影片 BV 引用清单；不存在时跳过")
     parser.add_argument("--bvid", default="BV1cxt66dEDM", help="成片的 B 站 BV 号，写入引用清单")
+    parser.add_argument("--posters-dir", type=Path, default=DEFAULT_POSTERS_DIR,
+                        help="影片预览图目录；不存在时跳过")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--serve", nargs="?", const=8080, type=int, metavar="PORT",
                         help="打包完成后在本机启动静态预览")
@@ -110,6 +126,7 @@ def main() -> int:
             raise RuntimeError("包内 data 目录缺少 manifest.json：请用 --snapshot 提供快照 ZIP")
         if args.movies_manifest.is_file():
             stage_movies_manifest(args.movies_manifest, args.bvid.strip())
+        staged_posters = stage_posters(args.posters_dir)
         result = build_package(args.output, overwrite=args.overwrite)
     except (OSError, RuntimeError) as error:
         print(f"toy package build failed: {error}", file=sys.stderr)
@@ -117,6 +134,7 @@ def main() -> int:
     print(
         f"toy.zip 就绪：{result['path']}\n"
         f"  {result['files']:,} 个文件，{int(result['bytes']) / 1e6:.1f} MB"
+        + (f"（含 {staged_posters} 张影片预览图）" if staged_posters else "")
     )
     if args.serve:
         serve(args.serve)

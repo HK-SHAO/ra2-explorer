@@ -2960,7 +2960,10 @@ function AssetGridCard({ asset, selected, onSelect }: { asset: Asset; selected: 
   return (
     <button className={`asset-card ${selected ? "selected" : ""}`} onClick={() => onSelect(asset.id)}>
       <span className={`asset-card-preview format-${asset.format}`}>
-        {asset.format === "video" ? isStaticSnapshot ? <Icon name={assetIcon(asset.format)} size={32} /> : <img loading="lazy" src={api.videoPosterUrl(asset.id)} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
+        {asset.format === "video" ? isStaticSnapshot ? <>
+          <Icon name="play" size={32} />
+          <img loading="lazy" src={api.moviePosterUrl(asset.id)} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
+        </> : <img loading="lazy" src={api.videoPosterUrl(asset.id)} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
           : hasThumbnail ? <img loading="lazy" src={api.previewUrl(asset.id, 0, "", 3)} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
             : isAudio ? <span className="audio-glyph" aria-hidden="true">{[4, 11, 7, 17, 12, 20, 9, 14, 5, 10].map((height, index) => <i key={index} style={{ height }} />)}</span>
               : <Icon name={assetIcon(asset.format)} size={32} />}
@@ -4543,7 +4546,7 @@ function StaticMoviePlayer({ assetId }: { assetId: string }) {
   if (!entry.bvid) return <span className="video-static-status">成片视频整理中，敬请期待</span>;
   return <iframe
     className="bili-player"
-    src={`https://player.bilibili.com/player.html?bvid=${entry.bvid}&t=${Math.floor(entry.start)}&autoplay=0&danmaku=0&high_quality=1`}
+    src={`https://player.bilibili.com/player.html?bvid=${entry.bvid}&t=${Math.floor(entry.start)}&autoplay=1&danmaku=0&high_quality=1`}
     scrolling="no"
     frameBorder={0}
     allow="fullscreen"

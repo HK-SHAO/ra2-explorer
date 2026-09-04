@@ -6,10 +6,16 @@ import {
   staticEntityModelUrl,
   staticEntityPreviewUrl,
   staticEntityThumbnailAtlasUrl,
+  staticMoviePosterUrl,
   staticSnapshotRequest,
 } from "./staticSnapshot";
 
-export { isStaticSnapshot, staticMovieEntry, staticPopoutUrl } from "./staticSnapshot";
+export {
+  isStaticSnapshot,
+  staticMovieEntry,
+  staticMoviePosterUrl,
+  staticPopoutUrl,
+} from "./staticSnapshot";
 
 export type SourceState = "new" | "scanning" | "ready" | "ready_with_errors" | "failed";
 
@@ -676,6 +682,9 @@ export const api = {
     ? staticAudioUrl(assetId)
     : `/api/assets/${assetId}/media`,
   videoUrl: (assetId: string) => `/api/assets/${assetId}/video.mp4`,
+  moviePosterUrl: (assetId: string) => isStaticSnapshot
+    ? staticMoviePosterUrl(assetId)
+    : "",
   videoPosterUrl: (assetId: string) => `/api/assets/${assetId}/poster.png`,
   entityPreviewUrl: (
     sourceId: string,
