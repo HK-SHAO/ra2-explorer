@@ -554,7 +554,7 @@ def test_pages_exports_one_thumbnail_atlas_request_per_entity_kind(
                 / "previews"
                 / "entities"
                 / entity_id
-                / "thumbnail"
+                / "frame"
                 / str(facing)
                 / "0.webp"
             )
@@ -618,7 +618,7 @@ def test_pages_exports_one_shared_search_thumbnail_atlas_per_angle(
                 / "previews"
                 / "entities"
                 / entity_id
-                / "thumbnail"
+                / "frame"
                 / str(facing)
                 / "0.webp"
             )

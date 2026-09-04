@@ -863,7 +863,7 @@ def _export_entity_thumbnail_atlases(
                     / "previews"
                     / "entities"
                     / entity_id
-                    / "thumbnail"
+                    / "frame"
                     / str(source_facing)
                     / "0.webp"
                 )
@@ -949,7 +949,7 @@ def _export_entity_search_thumbnail_atlases(
                 / "previews"
                 / "entities"
                 / entity_id
-                / "thumbnail"
+                / "frame"
                 / str(source_facing)
                 / "0.webp"
             )
