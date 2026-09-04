@@ -5724,6 +5724,10 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
   const unitIntroEntity = isAudio
     ? audioRelationshipItems.find((item) => /^unit_(?:eva|sofia)_/i.test(item.event))?.entity ?? null
     : null;
+  const audioRelationshipEntityCount = new Set(
+    audioRelationshipItems.map((item) => item.entity?.id).filter(Boolean),
+  ).size;
+  const showAudioRelationshipEntity = !unitIntroEntity || audioRelationshipEntityCount > 1;
   const detailHeading = unitIntroEntity
     ? [unitIntroEntity.display_name, unitIntroEntity.internal_name]
       .filter((value, index, values) => Boolean(value) && values.indexOf(value) === index)
@@ -5880,9 +5884,27 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
         {textAsset && <small>显示 {textAsset.returned_lines} / {textAsset.line_count} 行{textAsset.truncated ? " · 已截断" : ""}</small>}
       </div>}
 
-      {associations && (isAudio ? audioRelationshipItems : associations.items).length > 0 && (!isAudio || activeAudioDetailTab === "associations") && <div className="asset-associations" role={isAudio ? "tabpanel" : undefined} id={isAudio ? "audio-associations-panel" : undefined} aria-labelledby={isAudio ? "audio-associations-tab" : undefined}>
+      {associations && isAudio && audioRelationshipItems.length > 0 && activeAudioDetailTab === "associations" && <div className="asset-associations audio-associations" role="tabpanel" id="audio-associations-panel" aria-labelledby="audio-associations-tab">
+        <div className="audio-association-list">{audioRelationshipItems.map((item, index) => {
+          const originalText = cleanAudioText(item.original_text || item.text || "");
+          const preferredText = preferredAudioText(item.localized_text, item.translated_text, voiceTextPreference);
+          return <section className="audio-association-entry" key={`${item.scope}-${item.event}-${item.slot}-${index}`}>
+            <ul className="sound-metadata-tags audio-association-tags" aria-label="关联信息">
+              <li><span>事件 ID</span><strong className="mono">{item.event}</strong></li>
+              <li><span>关联</span><strong>{mediaSlotLabel(item.slot)}</strong></li>
+              {showAudioRelationshipEntity && item.entity && <li><span>单位</span><strong>{item.entity.display_name}</strong></li>}
+            </ul>
+            {(originalText || (preferredText && preferredText.value !== originalText)) && <dl className="audio-association-texts">
+              {originalText && <div><dt>原文</dt><dd>{originalText}</dd></div>}
+              {preferredText && preferredText.value !== originalText && <div><dt>{preferredText.label}</dt><dd>{preferredText.value}</dd></div>}
+            </dl>}
+          </section>;
+        })}</div>
+      </div>}
+
+      {associations && !isAudio && associations.items.length > 0 && <div className="asset-associations">
         <h3>关联事件</h3>
-        <div>{(isAudio ? audioRelationshipItems : associations.items).map((item, index) => {
+        <div>{associations.items.map((item, index) => {
           const originalText = cleanAudioText(item.original_text || item.text || "");
           const preferredText = preferredAudioText(item.localized_text, item.translated_text, voiceTextPreference);
           return <article key={`${item.scope}-${item.event}-${item.slot}-${index}`}>

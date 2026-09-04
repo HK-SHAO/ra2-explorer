@@ -824,7 +824,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .asset-associations article code { color: #8f949d; font-family: "Cascadia Mono", Consolas, monospace; }
 .asset-associations article p { margin: 6px 0 0; color: #e2e3e5; font-size: 13px; line-height: 1.45; }
 .asset-associations article p b { margin-right: 7px; color: #8e749b; font-size: 11px; font-weight: 500; }
-.detail-panel-wide .asset-associations > div { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.detail-panel-wide .asset-associations:not(.audio-associations) > div { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.audio-associations { margin-top: 10px; }
+.audio-associations > .audio-association-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+.audio-association-entry { min-width: 0; padding: 10px 0 12px; }
+.audio-association-entry + .audio-association-entry { border-top: 1px solid var(--line-soft); }
+.audio-association-tags { margin-bottom: 7px; }
+.audio-association-texts { width: 100%; margin: 0; display: grid; gap: 2px; }
+.audio-association-texts > div { width: 100%; min-width: 0; padding: 5px 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: start; gap: 10px; }
+.audio-association-texts dt { color: #94749f; font-size: 12px; line-height: 1.5; }
+.audio-association-texts dd { min-width: 0; margin: 0; color: #d8d9dc; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .video-preview { min-height: 230px; margin-top: 19px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--line); background: #0d0f12; }
 .video-preview video { width: 100%; max-height: 360px; display: block; }
 .video-error { color: #d97570; font-size: 13px; }
