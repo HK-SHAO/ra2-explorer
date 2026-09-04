@@ -32,9 +32,17 @@
 
 具体 Release 可能因 Python、依赖或压缩器小幅变化。普通本地用户不会下载或复制数百 MiB 的 MIX；首次导入直接关联本机安装。
 
+预建本机索引（仍不复制游戏数据）：
+
+```bat
+ra2exp.exe package --game-dir "D:\Games\RA2" --output "D:\RA2 Explorer Local"
+```
+
+`linked` 构建记录本机绝对路径，只适合当前电脑。可再生缓存用 `ra2exp.exe cache stats` 查看、`ra2exp.exe cache prune` 清理。
+
 ## 静态网页包
 
-由 `ra2exp pages export` 导出派生快照、`ra2exp movies build` 合成过场影片、`npm run build:pages` 构建静态前端，三者合并后压缩为单文件 ZIP：包根含 `index.html`，全部资源为相对路径，可直接离线浏览或发布到 B 站 Toy。浏览器按页面、预取队列和用户操作请求静态文件。`.ra2pack`、游戏文件和本地发行输出均位于被 Git 忽略的目录。
+由 `ra2exp pages export` 导出派生快照、`ra2exp movies build` 合成过场影片、`npm run build:pages` 构建静态前端，`scripts/build_toy_package.py` 合并压缩为单文件 ZIP：包根含 `index.html`，全部资源为相对路径，可直接离线浏览或发布到 B 站 Toy。语音以 16k Opus 收录，整包约 134.5 MB。`.ra2pack`、游戏文件和本地发行输出均位于被 Git 忽略的目录。
 
 ## 自动发布
 
