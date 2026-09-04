@@ -964,11 +964,11 @@ body { font-size: .875rem; }
   .workspace.sidebar-collapsed .sidebar-brand { min-height: 0; padding: .375rem .125rem .3125rem .5rem; border-bottom: 0; }
   .workspace.sidebar-collapsed .source-heading { height: auto; padding: .375rem .125rem .3125rem .25rem; }
   .workspace.sidebar-collapsed .source-select-wrap { height: 2.125rem; }
-  .workspace.sidebar-collapsed .library-tree { flex: 1 1 0; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; align-content: flex-start; gap: .125rem; padding: .375rem .25rem .3125rem; overflow-y: auto; }
+  .workspace.sidebar-collapsed .library-tree { flex: 1 1 0; min-width: 0; display: flex; flex-wrap: nowrap; align-items: center; gap: .125rem; padding: .375rem .25rem .3125rem; overflow-x: auto; overflow-y: hidden; }
   .workspace.sidebar-collapsed .library-tree .tree-branch,
   .workspace.sidebar-collapsed .library-tree .tree-children,
   .workspace.sidebar-collapsed .library-tree .tree-child-group { display: contents; }
-  .workspace.sidebar-collapsed .library-tree button { width: auto; min-width: 2.125rem; height: 2.125rem; }
+  .workspace.sidebar-collapsed .library-tree button { width: auto; min-width: 2.125rem; height: 2.125rem; flex: 0 0 auto; }
   .workspace.sidebar-collapsed .sidebar-settings { width: 2.375rem; min-height: 2.125rem; margin: .375rem .5rem 0 0; padding: 0; }
   .workspace.sidebar-collapsed .sidebar-settings span { display: none; }
   .sidebar-brand { min-height: 3.625rem; }
@@ -978,11 +978,13 @@ body { font-size: .875rem; }
   .library-tree { max-height: min(19.375rem, 40dvh); }
   .asset-panel { height: 30rem; }
   .asset-toolbar { height: auto; min-height: 3.625rem; padding: .5rem .75rem; }
+  .asset-toolbar > .layout-toggle { align-self: flex-start; }
   .entity-search-cluster { flex-wrap: wrap; row-gap: .5rem; }
   .entity-search-options { flex: 1 1 100%; justify-content: space-between; }
   .entity-search-input { flex: 1 1 0; min-width: 0; }
   .media-filter-actions { flex-wrap: wrap; row-gap: .5rem; }
   .sort-control { flex: 1 1 11rem; }
+  .sort-control > span { white-space: nowrap; }
   .sort-control select { width: 100%; }
   .result-count { display: none; }
   .asset-row { padding-left: .75rem; }
