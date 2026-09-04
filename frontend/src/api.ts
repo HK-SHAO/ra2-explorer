@@ -7,6 +7,7 @@ import {
   staticEntityPreviewUrl,
   staticEntityThumbnailAtlasFallbackUrl,
   staticEntityThumbnailAtlasUrl,
+  staticSnapshotFallbackUrl,
   staticSnapshotRequest,
 } from "./staticSnapshot";
 
@@ -706,6 +707,9 @@ export const api = {
   entityThumbnailAtlasFallbackUrl: (path: string, facing: number) => isStaticSnapshot
     ? staticEntityThumbnailAtlasFallbackUrl(path, facing)
     : "",
+  snapshotFallbackUrl: (url: string) => isStaticSnapshot
+    ? staticSnapshotFallbackUrl(url)
+    : url,
   entityModelUrl: (
     sourceId: string,
     entityId: string,

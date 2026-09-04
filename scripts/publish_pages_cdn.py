@@ -60,7 +60,14 @@ def _safe_member_path(raw_path: str) -> str:
 
 def _is_cdn_member(path: str) -> bool:
     return path == "manifest.json" or path in REQUIRED_CATALOGS or path.startswith(
-        ("previews/entity-atlases/", "previews/entity-search-atlases/")
+        (
+            "assets/",
+            "entities/",
+            "previews/assets/",
+            "previews/entities/",
+            "previews/entity-atlases/",
+            "previews/entity-search-atlases/",
+        )
     )
 
 
@@ -84,8 +91,8 @@ def _content_digest(files: list[tuple[str, bytes]]) -> str:
 def _package_notice() -> str:
     return (
         "RA2 Explorer Pages data package\n\n"
-        "This package contains generated bilingual indexes and compact card and search-preview "
-        "atlases.\n"
+        "This package contains generated bilingual indexes, compact unit previews, and rendered "
+        "animation frames.\n"
         "It does not contain original MIX archives, VXL/SHP source files, "
         "executables, or WAV files.\n"
         "These generated data assets are distributed by the project maintainer under separate\n"
@@ -101,7 +108,8 @@ def _package_readme(package_name: str, version: str, snapshot_id: str) -> str:
         "Applications should pin the exact package version rather than use a moving tag.\n\n"
         f"- Version: `{version}`\n"
         f"- Snapshot: `{snapshot_id}`\n"
-        "- Included: manifest, bilingual unit/sound catalogs, and unit card-preview atlases\n"
+        "- Included: manifest, bilingual unit/sound catalogs, unit details, generated metadata, "
+        "card-preview atlases, and rendered animation frames\n"
         "- Excluded: original game archives and source assets\n"
     )
 
@@ -199,8 +207,11 @@ def prepare_package(
         "included": [
             "manifest",
             "bilingual_catalogs",
+            "entity_details",
+            "generated_asset_metadata",
             "entity_card_atlases",
             "entity_search_atlases",
+            "rendered_animation_previews",
         ],
         "contains_original_game_files": False,
     }

@@ -68,6 +68,10 @@ function isExternalSnapshotPath(path: string) {
   const normalized = path.replace(/^\/+/, "");
   return normalized === "manifest.json"
     || normalized.startsWith("catalog/")
+    || normalized.startsWith("assets/")
+    || normalized.startsWith("entities/")
+    || normalized.startsWith("previews/assets/")
+    || normalized.startsWith("previews/entities/")
     || normalized.startsWith("previews/entity-atlases/")
     || normalized.startsWith("previews/entity-search-atlases/");
 }
@@ -77,6 +81,12 @@ function snapshotUrl(path: string) {
   return externalSnapshotBase && isExternalSnapshotPath(normalized)
     ? `${externalSnapshotBase}/${normalized}`
     : localSnapshotUrl(normalized);
+}
+
+export function staticSnapshotFallbackUrl(url: string) {
+  const externalPrefix = externalSnapshotBase ? `${externalSnapshotBase}/` : "";
+  if (!externalPrefix || !url.startsWith(externalPrefix)) return url;
+  return localSnapshotUrl(url.slice(externalPrefix.length));
 }
 
 async function fetchJson<T>(url: string) {

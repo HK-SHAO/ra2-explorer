@@ -4059,7 +4059,7 @@ function FrameGrid({ count, active, onSelect, urlFor, scrollKey }: { count: numb
   useLayoutEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, [scrollKey]);
-  return <div ref={scrollRef} className="frame-grid" aria-label="全部动画帧">{Array.from({ length: count }, (_, index) => <button type="button" key={index} className={active === index ? "active" : ""} onClick={() => onSelect(index)}><img loading="lazy" src={urlFor(index)} alt={`第 ${index + 1} 帧`} /><span>{index + 1}</span></button>)}</div>;
+  return <div ref={scrollRef} className="frame-grid" aria-label="全部动画帧">{Array.from({ length: count }, (_, index) => <button type="button" key={index} className={active === index ? "active" : ""} onClick={() => onSelect(index)}><DeferredPreviewImage src={urlFor(index)} alt={`第 ${index + 1} 帧`} /><span>{index + 1}</span></button>)}</div>;
 }
 
 function FrameTransport({ frame, count, playing, onPlayingChange, onFrameChange, label = "动画帧", playDisabled = false }: {
@@ -4107,6 +4107,8 @@ function preloadDecodedImageFrame(src: string, priority: ImageFetchPriority = "a
   image.decoding = "async";
   image.fetchPriority = priority;
   const promise = new Promise<HTMLImageElement>((resolve) => {
+    const fallbackSrc = api.snapshotFallbackUrl(src);
+    let fallbackAttempted = false;
     const finish = (cache = true) => {
       pendingImageFrames.delete(src);
       if (cache) {
@@ -4123,7 +4125,14 @@ function preloadDecodedImageFrame(src: string, priority: ImageFetchPriority = "a
       if (typeof image.decode === "function") void image.decode().catch(() => undefined).then(() => finish());
       else finish();
     };
-    image.onerror = () => finish(false);
+    image.onerror = () => {
+      if (!fallbackAttempted && fallbackSrc !== src) {
+        fallbackAttempted = true;
+        image.src = fallbackSrc;
+        return;
+      }
+      finish(false);
+    };
   });
   pendingImageFrames.set(src, { image, promise });
   image.src = src;
@@ -4165,8 +4174,8 @@ function DeferredPreviewImage({ src, alt = "" }: { src: string; alt?: string }) 
     if (!target || !src) return;
     let cancelled = false;
     const request = () => {
-      void preloadDecodedImageFrame(src, "low").then(() => {
-        if (!cancelled) setReadySrc(src);
+      void preloadDecodedImageFrame(src, "low").then((image) => {
+        if (!cancelled && image.naturalWidth) setReadySrc(image.currentSrc || image.src || src);
       });
     };
     if (!("IntersectionObserver" in window)) {
@@ -4427,11 +4436,13 @@ function StablePreviewImage({ src, alt, style, className, draggable = false, onB
   onError?: () => void;
 }) {
   const [displayedSrc, setDisplayedSrc] = useState(src);
-  const requestedSrc = useRef(src);
+  const [resolvedRequest, setResolvedRequest] = useState({ source: src, url: src });
+  const requestedUrl = resolvedRequest.source === src ? resolvedRequest.url : src;
+  const requestedSrc = useRef(requestedUrl);
   const onBeforeRevealRef = useRef(onBeforeReveal);
   const onLoadRef = useRef(onLoad);
   const onErrorRef = useRef(onError);
-  requestedSrc.current = src;
+  requestedSrc.current = requestedUrl;
   onBeforeRevealRef.current = onBeforeReveal;
   onLoadRef.current = onLoad;
   onErrorRef.current = onError;
@@ -4450,12 +4461,21 @@ function StablePreviewImage({ src, alt, style, className, draggable = false, onB
     else reveal();
   }
 
-  const pendingSrc = src && src !== displayedSrc ? src : "";
+  function handleImageError(failedSrc: string) {
+    const fallbackSrc = api.snapshotFallbackUrl(failedSrc);
+    if (fallbackSrc !== failedSrc) {
+      setResolvedRequest({ source: src, url: fallbackSrc });
+      return;
+    }
+    onErrorRef.current?.();
+  }
+
+  const pendingSrc = requestedUrl && requestedUrl !== displayedSrc ? requestedUrl : "";
   return <>
     {displayedSrc && <img
       key={displayedSrc}
       src={displayedSrc}
-      data-requested-src={src}
+      data-requested-src={requestedUrl}
       data-frame-state="active"
       alt={alt}
       className={className}
@@ -4467,13 +4487,13 @@ function StablePreviewImage({ src, alt, style, className, draggable = false, onB
         if (requestedSrc.current === displayedSrc) onLoadRef.current?.(event.currentTarget);
       }}
       onError={() => {
-        if (requestedSrc.current === displayedSrc) onErrorRef.current?.();
+        if (requestedSrc.current === displayedSrc) handleImageError(displayedSrc);
       }}
     />}
     {pendingSrc && <img
       key={pendingSrc}
       src={pendingSrc}
-      data-requested-src={src}
+      data-requested-src={requestedUrl}
       data-frame-state="pending"
       alt=""
       aria-hidden="true"
@@ -4484,7 +4504,7 @@ function StablePreviewImage({ src, alt, style, className, draggable = false, onB
       style={style}
       onLoad={(event) => revealPending(event.currentTarget, pendingSrc)}
       onError={() => {
-        if (requestedSrc.current === pendingSrc) onErrorRef.current?.();
+        if (requestedSrc.current === pendingSrc) handleImageError(pendingSrc);
       }}
     />}
   </>;
