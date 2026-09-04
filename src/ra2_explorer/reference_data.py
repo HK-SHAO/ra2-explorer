@@ -27,6 +27,9 @@ AUDIO_TRANSCRIPT_SOURCE_URL = (
 )
 BUNDLED_UNIT_INTEL_TRANSCRIPT_PATH = Path(__file__).with_name("data") / "unit-intel-transcript.json"
 BUNDLED_UNIT_VOICE_TRANSCRIPT_PATH = Path(__file__).with_name("data") / "unit-voice-transcript.json"
+BUNDLED_VOICE_TRANSLATION_PATH = (
+    Path(__file__).with_name("data") / "voice-translation-supplement.json"
+)
 
 _TERMINAL_PUNCTUATION_PATTERN = re.compile(r"(?:\.{2,}|…+|[.!?,;:。！？；：，]+)$")
 
@@ -135,6 +138,8 @@ def load_audio_transcript(
     path: Path, *, supplement_paths: tuple[Path, ...] = ()
 ) -> dict[str, dict[str, str]]:
     entries: dict[str, dict[str, str]] = {}
+    translations_by_original: dict[str, str] = {}
+    translations_by_normalized_original: dict[str, str] = {}
     if path.is_file():
         try:
             with path.open("rb") as stream:
@@ -142,6 +147,10 @@ def load_audio_transcript(
         except (OSError, BadZipFile, KeyError, ValueError, ElementTree.ParseError):
             pass
     for supplement_path in supplement_paths:
+        translations_by_original.update(_load_audio_translations_by_original(supplement_path))
+        translations_by_normalized_original.update(
+            _load_audio_translations_by_normalized_original(supplement_path)
+        )
         for file_id, supplement in _load_audio_transcript_supplement(supplement_path).items():
             current = entries.get(file_id, {})
             merged = {**current, **supplement}
@@ -158,11 +167,75 @@ def load_audio_transcript(
     for entry in entries.values():
         original_text = entry.get("original_text") or entry.get("text")
         translated_text = entry.get("translated_text")
+        if original_text and not translated_text:
+            translated_text = translations_by_original.get(original_text.strip()) or (
+                translations_by_normalized_original.get(
+                    _audio_translation_lookup_key(original_text)
+                )
+            )
+            if translated_text:
+                entry["translated_text"] = translated_text
         if original_text and translated_text:
             entry["translated_text"] = _align_translation_punctuation(
                 original_text, translated_text
             )
     return entries
+
+
+def _load_audio_translations_by_original(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    try:
+        content = path.read_bytes()
+        if len(content) > 2_000_000:
+            return {}
+        payload = json.loads(content.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    raw_translations = (
+        payload.get("translations_by_original") if isinstance(payload, dict) else None
+    )
+    if not isinstance(raw_translations, dict):
+        return {}
+    return {
+        original.strip(): translated.strip()
+        for original, translated in raw_translations.items()
+        if isinstance(original, str)
+        and original.strip()
+        and isinstance(translated, str)
+        and translated.strip()
+    }
+
+
+def _load_audio_translations_by_normalized_original(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    try:
+        content = path.read_bytes()
+        if len(content) > 2_000_000:
+            return {}
+        payload = json.loads(content.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    raw_translations = (
+        payload.get("translations_by_normalized_original")
+        if isinstance(payload, dict)
+        else None
+    )
+    if not isinstance(raw_translations, dict):
+        return {}
+    return {
+        _audio_translation_lookup_key(original): translated.strip()
+        for original, translated in raw_translations.items()
+        if isinstance(original, str)
+        and _audio_translation_lookup_key(original)
+        and isinstance(translated, str)
+        and translated.strip()
+    }
+
+
+def _audio_translation_lookup_key(text: str) -> str:
+    return " ".join(re.findall(r"[\w]+", text.casefold().replace("_", " ")))
 
 
 def _load_audio_transcript_supplement(path: Path) -> dict[str, dict[str, str]]:
@@ -399,6 +472,7 @@ __all__ = [
     "AUDIO_TRANSCRIPT_URL",
     "BUNDLED_UNIT_INTEL_TRANSCRIPT_PATH",
     "BUNDLED_UNIT_VOICE_TRANSCRIPT_PATH",
+    "BUNDLED_VOICE_TRANSLATION_PATH",
     "load_audio_transcript",
     "load_known_names",
     "reference_status",

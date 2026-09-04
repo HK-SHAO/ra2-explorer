@@ -7,6 +7,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from ra2_explorer.reference_data import (
     BUNDLED_UNIT_INTEL_TRANSCRIPT_PATH,
     BUNDLED_UNIT_VOICE_TRANSCRIPT_PATH,
+    BUNDLED_VOICE_TRANSLATION_PATH,
     load_audio_transcript,
 )
 
@@ -164,6 +165,66 @@ def test_bundled_translation_terminal_punctuation_follows_original(tmp_path) -> 
     assert entries["plain"]["translated_text"] == "坚守阵地"
     assert entries["question"]["translated_text"] == "准备好了？"
     assert entries["command"]["translated_text"] == "行动！"
+
+
+def test_translation_catalog_can_fill_repeated_original_without_overriding_direct_entry(
+    tmp_path,
+) -> None:
+    workbook_path = tmp_path / "audio-transcript.xlsx"
+    workbook_path.write_bytes(
+        _audio_transcript_workbook(
+            (
+                ("$allied.wav", "Unit ready.", "EVA", "Status", "", "Allied"),
+                ("$soviet.wav", "Unit ready.", "EVA", "Status", "", "Soviet"),
+            )
+        )
+    )
+    catalog_path = tmp_path / "translations.json"
+    catalog_path.write_text(
+        json.dumps(
+            {
+                "entries": {"allied": {"translated_text": "单位整装待命。"}},
+                "translations_by_original": {"Unit ready.": "单位准备就绪。"},
+                "translations_by_normalized_original": {
+                    "warning: nuclear silo detected": "警告：侦测到核弹发射井。"
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    entries = load_audio_transcript(workbook_path, supplement_paths=(catalog_path,))
+
+    assert entries["allied"]["translated_text"] == "单位整装待命。"
+    assert entries["soviet"]["translated_text"] == "单位准备就绪。"
+
+    normalized_path = tmp_path / "normalized.xlsx"
+    normalized_path.write_bytes(
+        _audio_transcript_workbook(
+            (("$yuri.wav", "Warning. Nuclear Silo detected", "EVA", "Status", "", "Yuri"),)
+        )
+    )
+    normalized_entries = load_audio_transcript(
+        normalized_path, supplement_paths=(catalog_path,)
+    )
+    assert normalized_entries["yuri"]["translated_text"] == "警告：侦测到核弹发射井"
+
+
+def test_bundled_voice_translation_catalog_is_well_formed() -> None:
+    payload = json.loads(BUNDLED_VOICE_TRANSLATION_PATH.read_text(encoding="utf-8"))
+
+    translations = payload["translations_by_original"]
+    assert translations
+    assert all(
+        original.strip() and translated.strip()
+        for original, translated in translations.items()
+    )
+    normalized_translations = payload["translations_by_normalized_original"]
+    assert normalized_translations
+    assert all(
+        original.strip() and translated.strip()
+        for original, translated in normalized_translations.items()
+    )
 
 
 def test_bundled_unit_voice_translation_catalog_is_well_formed() -> None:
