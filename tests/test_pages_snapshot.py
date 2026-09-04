@@ -211,7 +211,7 @@ def test_pages_shp_animation_frames_apply_each_entity_player_color(
             scale: int,
             shadow_frame: int | None,
         ) -> Image.Image:
-            assert scale == 5
+            assert scale == 4
             assert shadow_frame is None
             rendered_colors.append(palette.color)
             return Image.new("RGBA", (1, 1), (255, 255, 255, 255))

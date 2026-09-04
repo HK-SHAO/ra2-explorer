@@ -514,20 +514,6 @@ def _entity_tasks(
         preview = entity.get("preview") or {}
         player_color = _entity_player_color(entity)
         facings = range(8) if preview.get("supports_facing") else range(1)
-        thumbnail_facings = range(1) if preview.get("format") == "vxl" else facings
-        for facing in thumbnail_facings:
-            thumbnail_output = (
-                root / "previews" / "entities" / safe_id / "thumbnail" / str(facing) / "0.webp"
-            )
-            images[thumbnail_output] = _EntityPreviewTask(
-                entity_id=entity_id,
-                frame=0,
-                facing=facing,
-                scale=2,
-                thumbnail=True,
-                player_color=player_color,
-                output=thumbnail_output,
-            )
         frame_count = max(1, int(preview.get("frame_count") or 1))
         has_body_sequences = any(
             association.get("kind") == "animation"
@@ -1072,7 +1058,7 @@ def _animation_tasks(
                     / palette
                     / f"{frame}-shadow-{shadow_frame if shadow_frame is not None else 'none'}.webp"
                 )
-                params: dict[str, object] = {"frame": frame, "scale": 5}
+                params: dict[str, object] = {"frame": frame, "scale": 4}
                 if shadow_frame is not None:
                     params["shadow_frame"] = shadow_frame
                 if palette_kind:
@@ -1173,7 +1159,7 @@ def _export_shp_animation_previews(
                 image = sprite.render(
                     frame,
                     selected_palette,
-                    scale=5,
+                    scale=4,
                     shadow_frame=shadow_frame,
                 )
                 _save_webp(image, output)
