@@ -36,13 +36,14 @@ from ra2_explorer.localization import (
     localized_mixed_search_match,
     pinyin_search_aliases,
 )
-from ra2_explorer.reference_data import translated_text_for
+from ra2_explorer.reference_data import load_unit_name_translations, translated_text_for
 from ra2_explorer.storage import Database
 
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
 ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
 UNAFFILIATED_SIDE = "unaffiliated"
-SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v24",)
+SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v25",)
+UNIT_NAME_TRANSLATIONS = load_unit_name_translations()
 _PLANNING_SIDE_IDS = ("GDI", "Nod", "ThirdSide")
 _TYPE_SECTIONS = {
     "vehicle": "VehicleTypes",
@@ -1693,6 +1694,8 @@ class SemanticLibrary:
                 internal_name = rule_values.get("name") or entity_id
                 localized_name = strings.get(ui_name.casefold()) if ui_name else None
                 display_name = localized_name or internal_name
+                if not _contains_cjk(display_name):
+                    display_name = UNIT_NAME_TRANSLATIONS.get(entity_id.casefold(), display_name)
                 voxel = _yes(art_values.get("voxel"))
                 components, resolved_voxel = _resolve_components(
                     asset_index,
@@ -1807,6 +1810,8 @@ def _build_country_definitions(
             or values.get("name")
             or country_id
         )
+        if not _contains_cjk(display_name):
+            display_name = UNIT_NAME_TRANSLATIONS.get(country_id.casefold(), display_name)
         countries.append(
             {
                 "id": country_id,

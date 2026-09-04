@@ -32,6 +32,7 @@ from ra2_explorer.semantic import (
     _art_sibling_frame_count,
     _AssetIndex,
     _build_eva_events,
+    _build_country_definitions,
     _build_media_items,
     _edition_ini_inputs,
     _effective_entity_countries,
@@ -1783,3 +1784,24 @@ def test_expansion_rules_replace_the_base_edition() -> None:
         "rules.ini",
         "rulesmd.ini",
     ) == [base]
+
+
+def test_country_display_names_fall_back_to_chinese_mapping() -> None:
+    rules = {
+        "countries": {"0": "Germans", "1": "YuriCountry"},
+        "germans": {"name": "Germany"},
+        "yuricountry": {"name": "Yuri"},
+    }
+
+    countries = _build_country_definitions(rules, {})
+
+    assert [item["display_name"] for item in countries] == ["德国", "尤里"]
+
+
+def test_country_display_names_keep_chinese_game_text() -> None:
+    rules = {"countries": {"0": "Germans"}, "germans": {"uiname": "GUI:Germans", "name": "Germany"}}
+    strings = {"gui:germans": "德国"}
+
+    countries = _build_country_definitions(rules, strings)
+
+    assert countries[0]["display_name"] == "德国"

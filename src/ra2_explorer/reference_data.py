@@ -27,6 +27,7 @@ AUDIO_TRANSCRIPT_SOURCE_URL = (
 )
 BUNDLED_UNIT_INTEL_TRANSCRIPT_PATH = Path(__file__).with_name("data") / "unit-intel-transcript.json"
 BUNDLED_UNIT_VOICE_TRANSCRIPT_PATH = Path(__file__).with_name("data") / "unit-voice-transcript.json"
+BUNDLED_UNIT_NAME_TRANSLATIONS_PATH = Path(__file__).with_name("data") / "unit-name-translations.json"
 BUNDLED_VOICE_TRANSLATION_PATH = (
     Path(__file__).with_name("data") / "voice-translation-supplement.json"
 )
@@ -142,6 +143,20 @@ def sync_known_names(path: Path, *, timeout: float = 30.0) -> dict[str, object]:
     manifest_path = path.with_name("manifest.json")
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return manifest
+
+
+def load_unit_name_translations() -> dict[str, dict[str, str]]:
+    """TechnoType/Country 的中文显示名补充，键统一为小写。"""
+    try:
+        payload = json.loads(BUNDLED_UNIT_NAME_TRANSLATIONS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    translations: dict[str, str] = {}
+    for group in ("countries", "entities"):
+        for key, value in (payload.get(group) or {}).items():
+            if isinstance(key, str) and isinstance(value, str) and value.strip():
+                translations[key.casefold()] = value.strip()
+    return translations
 
 
 def load_audio_transcript(
@@ -510,6 +525,7 @@ __all__ = [
     "BUNDLED_VOICE_TRANSLATION_PATH",
     "load_audio_transcript",
     "load_audio_translations",
+    "load_unit_name_translations",
     "load_known_names",
     "reference_status",
     "sync_audio_transcript",
