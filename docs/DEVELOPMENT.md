@@ -4,21 +4,20 @@
 
 ## 环境
 
-- Windows x64；
 - Python 3.11 或更高版本；
 - Node.js 18 或更高版本；
-- 项目、测试、构建和 Git 命令统一在 `cmd.exe` 中运行；
 - 游戏安装只作为静态、只读测试输入，禁止运行其中的程序。
 
-初始化：
+初始化（命令在仓库根目录执行；Windows 把 `source .venv/bin/activate` 换成 `.venv\Scripts\activate`）：
 
-```bat
+```sh
 python -m venv .venv
-.venv\Scripts\python.exe -m pip install -e .[dev,release]
+source .venv/bin/activate
+pip install -e .[dev,release]
 cd frontend
 npm ci
 cd ..
-scripts\setup_dev.cmd
+git config core.hooksPath .githooks
 ```
 
 最后一条命令启用仓库内的 pre-commit 隐私扫描。

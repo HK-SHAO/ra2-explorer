@@ -21,15 +21,21 @@
 ## 构建与开发
 
 ```bash
-# 本地版：静态前端 + 本机服务（跨平台，无 Windows 依赖）
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -e .[dev]
+git config core.hooksPath .githooks
 cd frontend && npm install && npm run build
-ra2exp serve                       # 开发热更新：npm run dev
+
+ra2exp serve                       # 本地版：启动服务（开发热更新：npm run dev）
 
 # 离线网页包（Toy 版）：三步产出 toy.zip
 ra2exp pages export SOURCE_ID      # 导出派生快照
 ra2exp movies build SOURCE_ID      # 合成过场影片，生成 BV 引用清单
 python scripts/build_toy_package.py
 ```
+
+`SOURCE_ID` 由首次扫描游戏目录后列出，可用 `ra2exp sources` 查看。
 
 ## 亮点
 
