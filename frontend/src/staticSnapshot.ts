@@ -21,6 +21,30 @@ const externalSnapshotBase = (import.meta.env.VITE_RA2EXP_STATIC_CDN_BASE || "")
   .trim()
   .replace(/\/+$/, "");
 
+interface ExternalSnapshotRoute {
+  prefix: string;
+  base_url: string;
+}
+
+function parseExternalSnapshotRoutes() {
+  try {
+    const value = JSON.parse(import.meta.env.VITE_RA2EXP_STATIC_CDN_ROUTES || "[]") as unknown;
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((route): ExternalSnapshotRoute[] => {
+      if (!route || typeof route !== "object") return [];
+      const candidate = route as { prefix?: unknown; base_url?: unknown };
+      if (typeof candidate.prefix !== "string" || typeof candidate.base_url !== "string") return [];
+      const prefix = candidate.prefix.trim().replace(/^\/+/, "");
+      const baseUrl = candidate.base_url.trim().replace(/\/+$/, "");
+      return prefix && baseUrl ? [{ prefix, base_url: baseUrl }] : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
+const externalSnapshotRoutes = parseExternalSnapshotRoutes();
+
 const staticDataVersion = import.meta.env.VITE_RA2EXP_STATIC_DATA_VERSION?.trim() || "";
 
 interface StaticAssetBundle {
@@ -78,15 +102,21 @@ function isExternalSnapshotPath(path: string) {
 
 function snapshotUrl(path: string) {
   const normalized = path.replace(/^\/+/, "");
-  return externalSnapshotBase && isExternalSnapshotPath(normalized)
-    ? `${externalSnapshotBase}/${normalized}`
-    : localSnapshotUrl(normalized);
+  const route = externalSnapshotRoutes.find(
+    (item) => normalized === item.prefix || normalized.startsWith(item.prefix),
+  );
+  if (route) return `${route.base_url}/${normalized}`;
+  if (externalSnapshotBase && isExternalSnapshotPath(normalized)) {
+    return `${externalSnapshotBase}/${normalized}`;
+  }
+  return localSnapshotUrl(normalized);
 }
 
 export function staticSnapshotFallbackUrl(url: string) {
-  const externalPrefix = externalSnapshotBase ? `${externalSnapshotBase}/` : "";
-  if (!externalPrefix || !url.startsWith(externalPrefix)) return url;
-  return localSnapshotUrl(url.slice(externalPrefix.length));
+  const bases = [externalSnapshotBase, ...externalSnapshotRoutes.map((route) => route.base_url)]
+    .filter(Boolean);
+  const externalPrefix = bases.map((base) => `${base}/`).find((prefix) => url.startsWith(prefix));
+  return externalPrefix ? localSnapshotUrl(url.slice(externalPrefix.length)) : url;
 }
 
 async function fetchJson<T>(url: string) {

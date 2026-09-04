@@ -9,10 +9,31 @@ import pytest
 from scripts.publish_pages_cdn import (
     PagesCdnPublishError,
     _content_digest,
+    _is_cdn_member,
     _safe_member_path,
     prepare_package,
     publish_package,
 )
+
+
+@pytest.mark.parametrize(
+    ("path", "profile"),
+    [
+        ("manifest.json", "core"),
+        ("catalog/entities.zh-CN.json", "core"),
+        ("assets/example.json", "metadata"),
+        ("entities/zh-CN/example.json", "metadata"),
+        ("previews/entities/example/frame/0/0.webp", "entity-previews"),
+        ("previews/assets/example/auto/0.webp", "animation-previews"),
+    ],
+)
+def test_pages_cdn_profiles_route_expected_content(path: str, profile: str) -> None:
+    assert _is_cdn_member(path, profile)
+    assert all(
+        not _is_cdn_member(path, candidate)
+        for candidate in {"core", "metadata", "entity-previews", "animation-previews"}
+        - {profile}
+    )
 
 
 def _snapshot_archive(path: Path) -> Path:
