@@ -407,6 +407,11 @@ export async function staticSnapshotRequest<T>(path: string, init?: RequestInit)
     requireContent(currentManifest, "sounds");
     return await filterMedia(url.searchParams) as T;
   }
+  if (route === "/api/assets") {
+    const sourceId = url.searchParams.get("source_id") || currentManifest.source.id;
+    const formats = (url.searchParams.get("formats") || "").split(",").filter(Boolean);
+    return await staticMoviePage(sourceId, formats, url.searchParams.get("q") || "") as T;
+  }
 
   const entityMatch = route.match(/^\/api\/entities\/[^/]+\/([^/]+)$/);
   if (entityMatch) {
@@ -416,14 +421,26 @@ export async function staticSnapshotRequest<T>(path: string, init?: RequestInit)
     ) as T;
   }
   const metadataMatch = route.match(/^\/api\/assets\/([^/]+)\/metadata$/);
-  if (metadataMatch) return (await assetBundle(decodeURIComponent(metadataMatch[1]))).metadata as T;
+  if (metadataMatch) {
+    const assetId = decodeURIComponent(metadataMatch[1]);
+    const bundle = await movieBundle(assetId, currentManifest.source.id);
+    if (bundle) return bundle.metadata as T;
+    return (await assetBundle(assetId)).metadata as T;
+  }
   const associationMatch = route.match(/^\/api\/assets\/([^/]+)\/associations$/);
   if (associationMatch) {
-    const bundle = await assetBundle(decodeURIComponent(associationMatch[1]));
-    return bundle.associations[languageFrom(url.searchParams)] as T;
+    const assetId = decodeURIComponent(associationMatch[1]);
+    const bundle = await movieBundle(assetId, currentManifest.source.id);
+    if (bundle) return bundle.associations as T;
+    return (await assetBundle(assetId)).associations[languageFrom(url.searchParams)] as T;
   }
   const assetMatch = route.match(/^\/api\/assets\/([^/]+)$/);
-  if (assetMatch) return (await assetBundle(decodeURIComponent(assetMatch[1]))).asset as T;
+  if (assetMatch) {
+    const assetId = decodeURIComponent(assetMatch[1]);
+    const bundle = await movieBundle(assetId, currentManifest.source.id);
+    if (bundle) return bundle.asset as T;
+    return (await assetBundle(assetId)).asset as T;
+  }
   throw new Error(`精简网页版未包含此资源：${route}`);
 }
 
@@ -463,6 +480,85 @@ export function staticEntityThumbnailAtlasUrl(path: string, facing: number) {
 
 export function staticEntityModelUrl(entityId: string, frame = 0) {
   return snapshotUrl(`models/entities/${encodeURIComponent(entityId)}/${frame}.json`);
+}
+
+export interface MovieItem {
+  asset_id: string;
+  name: string;
+  crc: number;
+  size: number;
+  group: string;
+  start: number;
+  duration: number;
+}
+
+export interface MovieManifest {
+  bvid: string;
+  items: MovieItem[];
+  total_duration: number;
+}
+
+const emptyMovies: MovieManifest = { bvid: "", items: [], total_duration: 0 };
+let moviesPromise: Promise<MovieManifest> | null = null;
+
+function loadMovies(): Promise<MovieManifest> {
+  moviesPromise ||= loadJson<MovieManifest>("movies.json").catch(() => emptyMovies);
+  return moviesPromise;
+}
+
+function movieAsset(item: MovieItem, sourceId: string): Asset {
+  return {
+    id: item.asset_id,
+    source_id: sourceId,
+    archive_id: null,
+    archive_path: null,
+    ordinal: null,
+    virtual_path: `movies/${item.name}`,
+    name: item.name,
+    display_name: item.name,
+    crc: item.crc,
+    size: item.size,
+    format: "video",
+    extension: "bik",
+    confidence: "name",
+    storage_kind: "mix",
+    loose_relative_path: null,
+  };
+}
+
+const emptyAssociations: AssetAssociationPage = {
+  items: [], total: 0, texts: [], original_texts: [], localized_texts: [],
+  localized_text_origins: [], translated_texts: [],
+};
+
+export async function staticMoviePage(sourceId: string, formats: string[], query: string) {
+  if (!formats.includes("video")) return { items: [], total: 0 };
+  const movies = await loadMovies();
+  const needle = query.trim().toLocaleLowerCase();
+  const items = movies.items
+    .filter((item) => !needle || item.name.toLocaleLowerCase().includes(needle))
+    .map((item) => movieAsset(item, sourceId));
+  return { items, total: items.length };
+}
+
+export async function staticMovieEntry(assetId: string) {
+  const movies = await loadMovies();
+  const item = movies.items.find((candidate) => candidate.asset_id === assetId);
+  return item ? { bvid: movies.bvid, start: item.start, duration: item.duration } : null;
+}
+
+async function movieBundle(assetId: string, sourceId: string) {
+  const movies = await loadMovies();
+  const item = movies.items.find((candidate) => candidate.asset_id === assetId);
+  if (!item) return null;
+  return {
+    asset: movieAsset(item, sourceId),
+    metadata: {
+      format: "video", size: item.size, duration_seconds: item.duration,
+      file_name: item.name,
+    },
+    associations: emptyAssociations,
+  };
 }
 
 export function staticAssetModelUrl(assetId: string, frame = 0, playerColor = "") {

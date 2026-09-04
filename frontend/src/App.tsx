@@ -44,6 +44,7 @@ import {
   TextAsset,
   UpdateInfo,
   isStaticSnapshot,
+  staticMovieEntry,
   staticPopoutUrl,
 } from "./api";
 import {
@@ -2959,7 +2960,7 @@ function AssetGridCard({ asset, selected, onSelect }: { asset: Asset; selected: 
   return (
     <button className={`asset-card ${selected ? "selected" : ""}`} onClick={() => onSelect(asset.id)}>
       <span className={`asset-card-preview format-${asset.format}`}>
-        {asset.format === "video" ? <img loading="lazy" src={api.videoPosterUrl(asset.id)} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
+        {asset.format === "video" ? isStaticSnapshot ? <Icon name={assetIcon(asset.format)} size={32} /> : <img loading="lazy" src={api.videoPosterUrl(asset.id)} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
           : hasThumbnail ? <img loading="lazy" src={api.previewUrl(asset.id, 0, "", 3)} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
             : isAudio ? <span className="audio-glyph" aria-hidden="true">{[4, 11, 7, 17, 12, 20, 9, 14, 5, 10].map((height, index) => <i key={index} style={{ height }} />)}</span>
               : <Icon name={assetIcon(asset.format)} size={32} />}
@@ -4523,6 +4524,29 @@ function AudioProgress({ assetId, durationSeconds }: {
   </>;
 }
 
+// 离线包不携带视频文件：过场影片引用 B 站成片，按时间戳跳到对应段落。
+function StaticMoviePlayer({ assetId }: { assetId: string }) {
+  const [entry, setEntry] = useState<{ bvid: string; start: number } | null | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    setEntry(undefined);
+    void staticMovieEntry(assetId).then((result) => { if (!cancelled) setEntry(result); });
+    return () => { cancelled = true; };
+  }, [assetId]);
+  if (entry === undefined) return <span className="video-static-status">正在读取影片信息…</span>;
+  if (!entry) return <span className="video-static-status">该影片未收录进离线包</span>;
+  if (!entry.bvid) return <span className="video-static-status">成片视频整理中，敬请期待</span>;
+  return <iframe
+    className="bili-player"
+    src={`https://player.bilibili.com/player.html?bvid=${entry.bvid}&t=${Math.floor(entry.start)}&autoplay=0&danmaku=0&high_quality=1`}
+    scrolling="no"
+    frameBorder={0}
+    allow="fullscreen"
+    allowFullScreen
+    title="过场影片"
+  />;
+}
+
 function AudioDownloadAction({ assetId, label }: { assetId: string; label: string }) {
   return <a className="audio-download-action" href={api.contentUrl(assetId)} download={isStaticSnapshot ? `${label}.ogg` : true} title={`下载 ${label}`} aria-label={`下载 ${label}`}><Icon name="download" size={15} /></a>;
 }
@@ -5941,13 +5965,17 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
       )}
 
       {asset.format === "video" && <div className="video-preview">
-        {videoRequested && !videoFailed
-          ? <video controls autoPlay preload="metadata" src={api.videoUrl(asset.id)} poster={api.videoPosterUrl(asset.id)} onLoadedData={() => setVideoFailed(false)} onError={() => setVideoFailed(true)}>浏览器不支持视频播放。</video>
+        {isStaticSnapshot
+          ? <StaticMoviePlayer assetId={asset.id} />
           : <>
-            <img className="video-poster" src={api.videoPosterUrl(asset.id)} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
-            <button type="button" className="video-convert" onClick={() => { setVideoFailed(false); setVideoRequested(true); }} title={videoFailed ? "重试转换" : "转换并播放"} aria-label={videoFailed ? "重试转换" : "转换并播放"}><Icon name="play" size={22} /></button>
+            {videoRequested && !videoFailed
+              ? <video controls autoPlay preload="metadata" src={api.videoUrl(asset.id)} poster={api.videoPosterUrl(asset.id)} onLoadedData={() => setVideoFailed(false)} onError={() => setVideoFailed(true)}>浏览器不支持视频播放。</video>
+              : <>
+                <img className="video-poster" src={api.videoPosterUrl(asset.id)} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
+                <button type="button" className="video-convert" onClick={() => { setVideoFailed(false); setVideoRequested(true); }} title={videoFailed ? "重试转换" : "转换并播放"} aria-label={videoFailed ? "重试转换" : "转换并播放"}><Icon name="play" size={22} /></button>
+              </>}
+            {videoFailed && <strong className="video-error">视频转换失败</strong>}
           </>}
-        {videoFailed && <strong className="video-error">视频转换失败</strong>}
       </div>}
 
       {isText && <div className="text-preview">

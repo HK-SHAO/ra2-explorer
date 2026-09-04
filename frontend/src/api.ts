@@ -9,7 +9,7 @@ import {
   staticSnapshotRequest,
 } from "./staticSnapshot";
 
-export { isStaticSnapshot, staticPopoutUrl } from "./staticSnapshot";
+export { isStaticSnapshot, staticMovieEntry, staticPopoutUrl } from "./staticSnapshot";
 
 export type SourceState = "new" | "scanning" | "ready" | "ready_with_errors" | "failed";
 

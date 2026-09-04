@@ -1476,7 +1476,7 @@ def build_pages_snapshot(
         }
         _write_json(staging / "manifest.json", manifest)
         (staging / "ASSET-NOTICE.txt").write_text(
-            "RA2 Explorer GitHub Pages 精简快照\n"
+            "RA2 Explorer 资源精简快照\n"
             "仅包含单位浏览所需的派生预览、模型场景数据和压缩声音，"
             "不包含 MIX/BAG/INI/CSF 等原始游戏文件。\n",
             encoding="utf-8",

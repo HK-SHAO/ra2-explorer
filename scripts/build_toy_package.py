@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import zipfile
@@ -21,6 +22,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE_ROOT = ROOT / "frontend" / "dist-pages"
 DEFAULT_OUTPUT = ROOT / ".outputs" / "toy.zip"
+DEFAULT_MOVIES_MANIFEST = ROOT / ".outputs" / "ra2-movies" / "movies.json"
+
+
+def stage_movies_manifest(manifest: Path, bvid: str) -> None:
+    """把影片引用清单放进包内数据目录，bvid 留空时前端显示占位。"""
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    if bvid:
+        payload["bvid"] = bvid
+    target = PACKAGE_ROOT / "data" / "movies.json"
+    target.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
 def build_package(output: Path, *, overwrite: bool) -> dict[str, object]:
@@ -56,9 +67,14 @@ def build_package(output: Path, *, overwrite: bool) -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="打包 Toy 静态网页包")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--movies-manifest", type=Path, default=DEFAULT_MOVIES_MANIFEST,
+                        help="过场影片 BV 引用清单；不存在时跳过")
+    parser.add_argument("--bvid", default="", help="成片的 B 站 BV 号，写入引用清单")
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
     try:
+        if args.movies_manifest.is_file():
+            stage_movies_manifest(args.movies_manifest, args.bvid.strip())
         result = build_package(args.output, overwrite=args.overwrite)
     except (OSError, RuntimeError) as error:
         print(f"toy package build failed: {error}", file=sys.stderr)
