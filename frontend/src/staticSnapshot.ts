@@ -17,36 +17,6 @@ import type {
 
 export const isStaticSnapshot = import.meta.env.VITE_RA2EXP_STATIC_SNAPSHOT === "1";
 
-const externalSnapshotBase = (import.meta.env.VITE_RA2EXP_STATIC_CDN_BASE || "")
-  .trim()
-  .replace(/\/+$/, "");
-
-interface ExternalSnapshotRoute {
-  prefix: string;
-  base_url: string;
-}
-
-function parseExternalSnapshotRoutes() {
-  try {
-    const value = JSON.parse(import.meta.env.VITE_RA2EXP_STATIC_CDN_ROUTES || "[]") as unknown;
-    if (!Array.isArray(value)) return [];
-    return value.flatMap((route): ExternalSnapshotRoute[] => {
-      if (!route || typeof route !== "object") return [];
-      const candidate = route as { prefix?: unknown; base_url?: unknown };
-      if (typeof candidate.prefix !== "string" || typeof candidate.base_url !== "string") return [];
-      const prefix = candidate.prefix.trim().replace(/^\/+/, "");
-      const baseUrl = candidate.base_url.trim().replace(/\/+$/, "");
-      return prefix && baseUrl ? [{ prefix, base_url: baseUrl }] : [];
-    });
-  } catch {
-    return [];
-  }
-}
-
-const externalSnapshotRoutes = parseExternalSnapshotRoutes();
-
-const staticDataVersion = import.meta.env.VITE_RA2EXP_STATIC_DATA_VERSION?.trim() || "";
-
 interface StaticAssetBundle {
   asset: Asset;
   metadata: AssetMetadata;
@@ -74,49 +44,11 @@ function requireContent(manifest: StaticSnapshotManifest, content: "units" | "so
 
 const jsonCache = new Map<string, Promise<unknown>>();
 
-function publicUrl(path: string) {
+function snapshotUrl(path: string) {
   const base = import.meta.env.BASE_URL.endsWith("/")
     ? import.meta.env.BASE_URL
     : `${import.meta.env.BASE_URL}/`;
-  return `${base}${path.replace(/^\/+/, "")}`;
-}
-
-function localSnapshotUrl(path: string) {
-  const url = publicUrl(`data/${path}`);
-  return staticDataVersion
-    ? `${url}?data=${encodeURIComponent(staticDataVersion)}`
-    : url;
-}
-
-function isExternalSnapshotPath(path: string) {
-  const normalized = path.replace(/^\/+/, "");
-  return normalized === "manifest.json"
-    || normalized.startsWith("catalog/")
-    || normalized.startsWith("assets/")
-    || normalized.startsWith("entities/")
-    || normalized.startsWith("previews/assets/")
-    || normalized.startsWith("previews/entities/")
-    || normalized.startsWith("previews/entity-atlases/")
-    || normalized.startsWith("previews/entity-search-atlases/");
-}
-
-function snapshotUrl(path: string) {
-  const normalized = path.replace(/^\/+/, "");
-  const route = externalSnapshotRoutes.find(
-    (item) => normalized === item.prefix || normalized.startsWith(item.prefix),
-  );
-  if (route) return `${route.base_url}/${normalized}`;
-  if (externalSnapshotBase && isExternalSnapshotPath(normalized)) {
-    return `${externalSnapshotBase}/${normalized}`;
-  }
-  return localSnapshotUrl(normalized);
-}
-
-export function staticSnapshotFallbackUrl(url: string) {
-  const bases = [externalSnapshotBase, ...externalSnapshotRoutes.map((route) => route.base_url)]
-    .filter(Boolean);
-  const externalPrefix = bases.map((base) => `${base}/`).find((prefix) => url.startsWith(prefix));
-  return externalPrefix ? localSnapshotUrl(url.slice(externalPrefix.length)) : url;
+  return `${base}data/${path.replace(/^\/+/, "")}`;
 }
 
 async function fetchJson<T>(url: string) {
@@ -128,12 +60,7 @@ async function fetchJson<T>(url: string) {
 function loadJson<T>(path: string): Promise<T> {
   let pending = jsonCache.get(path) as Promise<T> | undefined;
   if (!pending) {
-    const primaryUrl = snapshotUrl(path);
-    const fallbackUrl = localSnapshotUrl(path);
-    pending = fetchJson<T>(primaryUrl).catch((primaryError: unknown) => {
-      if (primaryUrl === fallbackUrl) throw primaryError;
-      return fetchJson<T>(fallbackUrl);
-    });
+    pending = fetchJson<T>(snapshotUrl(path));
     pending.catch(() => jsonCache.delete(path));
     jsonCache.set(path, pending);
   }
@@ -532,10 +459,6 @@ export function staticEntityPreviewUrl(
 
 export function staticEntityThumbnailAtlasUrl(path: string, facing: number) {
   return snapshotUrl(path.replace("{facing}", String(facing)));
-}
-
-export function staticEntityThumbnailAtlasFallbackUrl(path: string, facing: number) {
-  return localSnapshotUrl(path.replace("{facing}", String(facing)));
 }
 
 export function staticEntityModelUrl(entityId: string, frame = 0) {

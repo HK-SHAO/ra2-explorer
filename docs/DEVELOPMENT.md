@@ -88,18 +88,16 @@ scripts\build_windows.cmd
 
 推送 `vX.Y.Z` tag 会触发 `.github\workflows\release.yml`，重新执行测试、隐私扫描、Windows 构建、包审计和 CLI smoke，随后创建 GitHub Release。版本号必须同步修改 `pyproject.toml`、`src/ra2_explorer/__init__.py` 和前端 package 文件。
 
-## GitHub Pages 数据
+## 静态网页包
 
 只有单位、声音、语义或渲染产物实际变化时才重建数据：
 
 ```bat
-.venv\Scripts\ra2exp.exe pages export SOURCE_ID --audio-bitrate 24k --workers 4 --overwrite
-.venv\Scripts\python.exe scripts\verify_pages_snapshot.py .runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip
-.venv\Scripts\python.exe scripts\publish_pages_snapshot.py .runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip --tag pages-data-X.Y.Z
-.venv\Scripts\python.exe scripts\publish_pages_cdn.py .runtime\RA2MD-Ext\pages\RA2-Explorer-Pages-Data.zip --version X.Y.Z --overwrite --publish
+.venv\Scripts\ra2exp.exe pages export SOURCE_ID --audio-bitrate 24k --workers 8 --overwrite
+.venv\Scripts\python.exe scripts\verify_pages_snapshot.py .outputs\toy\pages-data.zip
 ```
 
-普通 UI 修复只运行 `npm run build:pages`；Pages 输出到 `frontend\dist-pages`，不会覆盖本地版 `frontend\dist`。工作流从固定 GitHub 数据 Release 下载并审计完整快照，Vite 从 `packaging\pages-cdn.json` 注入固定 jsDelivr 基址。`GITHUB_TOKEN_RA2_EXPLORER` 与 `NPM_TOKEN` 只放在被忽略的 `.secrets\local.env` 或 CI secrets；数据 tag 和 npm 数据版本发布后不可覆盖。
+`npm run build:pages` 构建静态前端到 `frontend\dist-pages`（相对路径 base），不会覆盖本地版 `frontend\dist`。把快照数据放进 `frontend\dist-pages\data` 后整体打包，即得到可离线浏览、可直接发布到 Toy 的单文件 ZIP。
 
 ## 文档与提交
 
@@ -108,4 +106,4 @@ scripts\build_windows.cmd
 - 不提交聊天记录、提示词、个人叙述、本机路径、来源 UUID、临时截图、一次性 profile 或 token。
 - 功能稳定并通过对应验证后立即形成小提交；避免把不相关功能、文档清理和发行准备混在一个大提交中。
 
-更多边界见 [架构](ARCHITECTURE.md)、[发行说明](DISTRIBUTION.md)、[隐私与发布安全](PRIVACY.md) 和 [GitHub Pages](GITHUB_PAGES.md)。
+更多边界见 [架构](ARCHITECTURE.md)、[发行说明](DISTRIBUTION.md) 和 [隐私与发布安全](PRIVACY.md)。

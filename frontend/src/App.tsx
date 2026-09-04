@@ -2365,9 +2365,7 @@ function ExplorerApp() {
     if (!atlas) return;
     const atlasAngle = Math.min(Math.max(0, previewAngle), Math.max(0, atlas.facing_count - 1));
     const primaryUrl = api.entityThumbnailAtlasUrl(atlas.path, atlasAngle);
-    const fallbackUrl = api.entityThumbnailAtlasFallbackUrl(atlas.path, atlasAngle);
     void preloadThumbnailAtlas(primaryUrl).then((loaded) => {
-      if (!loaded && fallbackUrl !== primaryUrl) void preloadThumbnailAtlas(fallbackUrl);
     });
   }, [entities, previewAngle]);
 
@@ -4015,26 +4013,12 @@ function preloadThumbnailAtlas(url: string) {
   return pending;
 }
 
-function useThumbnailAtlasUrl(primaryUrl: string, fallbackUrl: string) {
-  const [resolvedUrl, setResolvedUrl] = useState(() => (
-    thumbnailAtlasStatus.get(primaryUrl) === "failed" ? fallbackUrl : primaryUrl
-  ));
+function useThumbnailAtlasUrl(atlasUrl: string) {
+  const [resolvedUrl, setResolvedUrl] = useState(atlasUrl);
   useEffect(() => {
-    let disposed = false;
-    if (!primaryUrl || primaryUrl === fallbackUrl) {
-      setResolvedUrl(primaryUrl);
-      return () => { disposed = true; };
-    }
-    if (thumbnailAtlasStatus.get(primaryUrl) === "failed") {
-      setResolvedUrl(fallbackUrl);
-      return () => { disposed = true; };
-    }
-    setResolvedUrl(primaryUrl);
-    void preloadThumbnailAtlas(primaryUrl).then((loaded) => {
-      if (!disposed && !loaded) setResolvedUrl(fallbackUrl);
-    });
-    return () => { disposed = true; };
-  }, [fallbackUrl, primaryUrl]);
+    setResolvedUrl(atlasUrl);
+    if (atlasUrl) void preloadThumbnailAtlas(atlasUrl);
+  }, [atlasUrl]);
   return resolvedUrl;
 }
 
@@ -4053,8 +4037,7 @@ function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle, com
     )
     : 0;
   const atlasUrl = atlas ? api.entityThumbnailAtlasUrl(atlas.path, atlasFacing) : "";
-  const atlasFallbackUrl = atlas ? api.entityThumbnailAtlasFallbackUrl(atlas.path, atlasFacing) : "";
-  const readyAtlasUrl = useThumbnailAtlasUrl(atlasUrl, atlasFallbackUrl);
+  const readyAtlasUrl = useThumbnailAtlasUrl(atlasUrl);
   const atlasColumn = atlas ? atlas.index % atlas.columns : 0;
   const atlasRow = atlas ? Math.floor(atlas.index / atlas.columns) : 0;
   const atlasContentBounds = compact && atlas && !searchAtlas
@@ -4216,8 +4199,6 @@ function preloadDecodedImageFrame(src: string, priority: ImageFetchPriority = "a
   image.decoding = "async";
   image.fetchPriority = priority;
   const promise = new Promise<HTMLImageElement>((resolve) => {
-    const fallbackSrc = api.snapshotFallbackUrl(src);
-    let fallbackAttempted = false;
     const finish = (cache = true) => {
       pendingImageFrames.delete(src);
       if (cache) {
@@ -4229,14 +4210,7 @@ function preloadDecodedImageFrame(src: string, priority: ImageFetchPriority = "a
       if (typeof image.decode === "function") void image.decode().catch(() => undefined).then(() => finish());
       else finish();
     };
-    image.onerror = () => {
-      if (!fallbackAttempted && fallbackSrc !== src) {
-        fallbackAttempted = true;
-        image.src = fallbackSrc;
-        return;
-      }
-      finish(false);
-    };
+    image.onerror = () => finish(false);
   });
   pendingImageFrames.set(src, { image, promise });
   image.src = src;

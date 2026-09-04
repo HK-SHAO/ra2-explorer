@@ -129,7 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     pages = subcommands.add_parser(
         "pages",
-        help="构建仅含单位与声音的 GitHub Pages 静态快照",
+        help="构建仅含单位与声音的静态资源快照",
     )
     pages_commands = pages.add_subparsers(dest="pages_action", required=True)
     pages_export = pages_commands.add_parser("export", help="导出精简静态资源快照")

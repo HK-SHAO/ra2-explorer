@@ -295,24 +295,16 @@ def verify_snapshot(path: Path, *, expected_sha256: str | None = None) -> dict[s
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="审计 RA2 Explorer GitHub Pages 快照")
+    parser = argparse.ArgumentParser(description="审计 RA2 Explorer 静态快照")
     parser.add_argument("path", type=Path, help="快照目录或 ZIP 文件")
     parser.add_argument("--sha256", help="ZIP 的预期 SHA-256")
-    parser.add_argument("--lock", type=Path, help="从 Pages 数据锁定清单读取 SHA-256")
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
     try:
-        expected_sha256 = args.sha256
-        if args.lock:
-            lock = json.loads(args.lock.read_text(encoding="utf-8"))
-            lock_sha256 = str(lock["sha256"])
-            if expected_sha256 and expected_sha256.casefold() != lock_sha256.casefold():
-                raise SnapshotValidationError("命令行与锁定清单中的 SHA-256 不一致")
-            expected_sha256 = lock_sha256
-        result = verify_snapshot(args.path, expected_sha256=expected_sha256)
+        result = verify_snapshot(args.path, expected_sha256=args.sha256)
     except (
         KeyError,
         OSError,

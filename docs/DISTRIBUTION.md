@@ -4,7 +4,7 @@
 
 | 发行物 | 入口 | 数据来源 | 适用范围 |
 | --- | --- | --- | --- |
-| GitHub Pages 精简版 | <https://hkshao.github.io/ra2-explorer/> | 固定单位/声音派生快照 | 无需安装的在线体验 |
+| 静态网页包（toy.zip） | 自行发布，如 B 站 Toy | 固定单位/声音派生快照 | 无需安装的离线体验 |
 | Windows 本地 Web 应用 | [GitHub Releases](https://github.com/HK-SHAO/ra2-explorer/releases) | 用户自己的官方安装或 `.ra2pack` | 完整解析、地图、导出和离线使用 |
 
 两者共用 React UI。本地版使用系统已有浏览器和一个只监听回环地址的 Python 服务，不附带 Electron、Chromium、WebView 或游戏程序。
@@ -30,16 +30,15 @@
 | 解压目录（210 个文件） | 59,247,611 | 56.5 MiB |
 | `RA2-Explorer-Web-x64.zip` | 35,557,284 | 33.9 MiB |
 
-具体 Release 可能因 Python、依赖或压缩器小幅变化。普通本地用户不会下载或复制数百 MiB 的 MIX；首次导入直接关联本机安装。Pages 数据的当前体积、访问流量和 CDN 子集只在 [GitHub Pages 说明](GITHUB_PAGES.md) 维护，精确字节数与摘要以两个锁定清单为准。Pages 访客不会下载数据 ZIP，而是按页面、预取队列和用户操作请求静态文件。
+具体 Release 可能因 Python、依赖或压缩器小幅变化。普通本地用户不会下载或复制数百 MiB 的 MIX；首次导入直接关联本机安装。
 
-## 大文件隔离
+## 静态网页包
 
-主分支只追踪代码、`packaging\pages-data.json` 和 `packaging\pages-cdn.json`。Pages 完整 ZIP 以 8 MiB 分片存放在独立 GitHub 数据 Release；锁定清单固定 tag、每片大小与 SHA-256，以及合并后整包大小与 SHA-256。高频清单、目录、卡片图集和搜索小图图集固定到 npm 精确版本并由 jsDelivr 分发。浏览器只请求所需文件，CDN 失败时回退 Pages 同源副本。`.ra2pack`、游戏文件和本地发行输出均位于被 Git 忽略的目录。
+由 `ra2exp pages export` 导出派生快照、`npm run build:pages` 构建静态前端，两者合并后压缩为单文件 ZIP：包根含 `index.html`，全部资源为相对路径，可直接离线浏览或发布到 B 站 Toy。浏览器按页面、预取队列和用户操作请求静态文件。`.ra2pack`、游戏文件和本地发行输出均位于被 Git 忽略的目录。
 
 ## 自动发布
 
 - `.github\workflows\release.yml` 在 Windows 与 `cmd.exe` 中执行测试、Ruff、隐私扫描、generic 构建、包内容审计、CLI smoke、ZIP、attestation 和 GitHub Release 发布。
-- `.github\workflows\pages.yml` 下载锁定数据，解包前后审计，构建 `frontend\dist-pages` 并通过官方 Pages actions 发布。
 
 公共 EXE 尚未进行 Authenticode 签名时，Windows SmartScreen 可能显示未知发布者。构建来源证明可以核对 workflow 与 commit，但不替代代码签名。
 
