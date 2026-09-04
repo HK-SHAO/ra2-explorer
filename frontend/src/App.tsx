@@ -1792,7 +1792,11 @@ function ExplorerApp() {
   function selectEntityCard(id: string) {
     cancelCatalogListFocus();
     const entity = visibleEntities.find((item) => item.id === id);
-    if (entity) rememberEntityCard(id, entity.kind, entityUsage);
+    if (entity) {
+      rememberEntityCard(id, entity.kind, entityUsage);
+      const detailPreviewUrl = entityDetailPreviewUrl(entity, sourceId, previewAngle);
+      if (detailPreviewUrl) void preloadDecodedImageFrame(detailPreviewUrl, "high");
+    }
     setSelectedEntityId(id);
   }
 
@@ -2350,13 +2354,26 @@ function ExplorerApp() {
       .map((index) => visibleEntities[index])
       .filter((entity, index, items): entity is EntitySummary => Boolean(entity)
         && items.findIndex((item) => item?.id === entity.id) === index);
+    const currentPreviewUrl = nearby[0]
+      ? entityDetailPreviewUrl(nearby[0], sourceId, previewAngle)
+      : "";
+    if (currentPreviewUrl) void preloadDecodedImageFrame(currentPreviewUrl, "high");
     const timer = window.setTimeout(() => {
       for (const entity of nearby) {
         void api.entity(sourceId, entity.id, gameLanguage, sourceRevision).catch(() => undefined);
       }
     }, 60);
-    return () => window.clearTimeout(timer);
-  }, [view, sourceId, sourceRevision, visibleEntities, selectedEntityId, gameLanguage]);
+    const neighborTimer = window.setTimeout(() => {
+      for (const entity of nearby.slice(1, 3)) {
+        const url = entityDetailPreviewUrl(entity, sourceId, previewAngle);
+        if (url) void preloadDecodedImageFrame(url, "low");
+      }
+    }, 1_200);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(neighborTimer);
+    };
+  }, [view, sourceId, sourceRevision, visibleEntities, selectedEntityId, gameLanguage, previewAngle]);
 
   useEffect(() => {
     if (view !== "assets" || !isMediaCategory || mediaItems.length === 0) return;
@@ -3929,6 +3946,19 @@ function entityCardPreviewUrl(entity: EntitySummary, sourceId: string, previewAn
     compact,
     playerColor: entityCardPlayerColor(entity),
     revision: sourceRevision,
+  });
+}
+
+function entityDetailPreviewUrl(entity: EntitySummary, sourceId: string, previewAngle: PreviewAngle) {
+  if (!entity.renderable || entity.voxel || entity.body_format === "vxl") return "";
+  const facing = entity.facing_format
+    ? entityFacingForPreviewAngle(entity.facing_format, previewAngle)
+    : 0;
+  return api.entityPreviewUrl(sourceId, entity.id, {
+    frame: 0,
+    facing,
+    playerColor: entityCardPlayerColor(entity),
+    scale: 4,
   });
 }
 
