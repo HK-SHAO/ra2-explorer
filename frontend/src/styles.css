@@ -83,10 +83,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .sidebar-toggle { width: 2rem; height: 2rem; flex: 0 0 auto; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: .1875rem; color: #777d87; background: transparent; cursor: pointer; }
 .sidebar-toggle:hover { border-color: #454a53; color: #e2e3e5; background: #1d2025; }
 .sidebar-toggle .icon { transform: rotate(180deg); }
-.sidebar-settings { position: relative; min-height: 2.625rem; flex: 0 0 auto; display: flex; align-items: center; gap: .5625rem; margin: .4375rem .5625rem .625rem; padding: 0 .6875rem; border: 1px solid var(--line); border-radius: .1875rem; color: #b8bbc1; background: #181a1f; font-size: .8125rem; cursor: pointer; }
-.sidebar-settings:hover { border-color: #555a64; color: #f0f1f2; background: #1d2025; }
-.sidebar-settings .icon { color: #d05a54; }
-.sidebar-settings > i { width: .4375rem; height: .4375rem; margin-left: auto; border-radius: 50%; background: #e1534d; box-shadow: 0 0 .5rem rgba(225,83,77,.7); }
+.sidebar-brand-settings { position: relative; width: 2rem; height: 2rem; flex: 0 0 auto; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: .1875rem; color: #777d87; background: transparent; cursor: pointer; }
+.sidebar-brand-settings:hover { border-color: #454a53; color: #e2e3e5; background: #1d2025; }
+.sidebar-brand-settings .icon { color: #d05a54; }
+.sidebar-brand-settings > i { position: absolute; top: .375rem; right: .375rem; width: .4375rem; height: .4375rem; border-radius: 50%; background: #e1534d; box-shadow: 0 0 .5rem rgba(225,83,77,.7); }
 .source-heading { padding: 1.0625rem; border-bottom: 1px solid var(--line-soft); }
 .eyebrow { display: block; color: #a7abb3; font: 600 .625rem/1 var(--sans-condensed); letter-spacing: .18em; text-transform: uppercase; }
 .source-select-wrap { position: relative; display: block; }
@@ -134,9 +134,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .workspace.sidebar-collapsed .library-tree button span b, .workspace.sidebar-collapsed .library-tree button em { display: none; }
 .workspace.sidebar-collapsed .tree-grandchild { display: none; }
 .workspace.sidebar-collapsed .videos-tree-branch .tree-child-group:not(:first-child) { display: none; }
-.workspace.sidebar-collapsed .sidebar-settings { width: 2.625rem; justify-content: center; margin: .4375rem auto .625rem; padding: 0; }
-.workspace.sidebar-collapsed .sidebar-settings span { display: none; }
-.workspace.sidebar-collapsed .sidebar-settings > i { position: absolute; top: .375rem; right: .375rem; margin: 0; }
 .reference-card { margin: auto .75rem .8125rem; padding: .8125rem; border: 1px solid var(--line-soft); border-radius: .1875rem; background: #15171b; }
 .reference-title { display: flex; align-items: center; gap: .5rem; color: #c9cbd0; font-size: .6875rem; font-weight: 600; }
 .reference-title .icon { color: var(--quiet); }
@@ -907,7 +904,7 @@ body { font-size: .875rem; }
 
 @container app (max-width: 1080px) {
   .workspace.detail-right { grid-template-columns: var(--sidebar-width) minmax(18.75rem, 1fr) .375rem minmax(18.75rem, var(--detail-panel-size)); }
-  .media-filter-strip, .entity-panel .filter-strip { align-items: stretch; flex-direction: column; }
+  .media-filter-strip, .entity-panel .filter-strip, .asset-panel .filter-strip { align-items: stretch; flex-direction: column; }
   .media-filter-actions { justify-content: flex-end; }
 }
 
@@ -959,15 +956,17 @@ body { font-size: .875rem; }
   .workspace.sidebar-collapsed .sidebar-brand { min-height: 0; padding: .375rem .125rem .3125rem .5rem; border-bottom: 0; }
   .workspace.sidebar-collapsed .source-heading { height: auto; padding: .375rem .125rem .3125rem .25rem; }
   .workspace.sidebar-collapsed .source-select-wrap { height: 2.125rem; }
-  .workspace.sidebar-collapsed .library-tree { flex: 1 1 0; min-width: 0; display: flex; flex-wrap: nowrap; align-items: center; gap: .125rem; padding: .375rem .25rem .3125rem; overflow-x: auto; overflow-y: hidden; }
+  .workspace.sidebar-collapsed .library-tree { flex: 1 1 0; min-width: 0; display: flex; flex-wrap: nowrap; align-items: center; justify-content: safe center; gap: .125rem; padding: .375rem .25rem .3125rem; overflow-x: auto; overflow-y: hidden; }
   .workspace.sidebar-collapsed .library-tree .tree-branch,
   .workspace.sidebar-collapsed .library-tree .tree-children,
   .workspace.sidebar-collapsed .library-tree .tree-child-group { display: contents; }
-  .workspace.sidebar-collapsed .library-tree button { width: auto; min-width: 2.125rem; height: 2.125rem; flex: 0 0 auto; }
-  .workspace.sidebar-collapsed .sidebar-settings { width: 2.375rem; min-height: 2.125rem; margin: .375rem .5rem 0 0; padding: 0; }
-  .workspace.sidebar-collapsed .sidebar-settings span { display: none; }
+  .workspace.sidebar-collapsed .library-tree button { width: auto; min-width: 2.125rem; height: 2.125rem; flex: 0 0 auto; border: 1px solid var(--line); border-radius: .1875rem; }
+  .workspace.sidebar-collapsed .library-tree button:hover { border-color: #454a53; background: rgba(255,255,255,.04); }
+  .workspace.sidebar-collapsed .library-tree button.active { border-color: #7d3d39; background: #281d1e; color: #f0d7d5; }
+  .workspace.sidebar-collapsed .library-tree button.active .icon { color: #f0d7d5; }
+  .workspace.sidebar-collapsed .sidebar-toggle,
+  .workspace.sidebar-collapsed .sidebar-brand-settings { border-color: var(--line); }
   .sidebar-brand { min-height: 3.625rem; }
-  .sidebar-settings { margin-bottom: .5625rem; }
   .source-heading { padding: .6875rem .8125rem; }
   .summary-grid, .reference-card { display: none; }
   .library-tree { max-height: min(19.375rem, 40dvh); }
@@ -979,6 +978,8 @@ body { font-size: .875rem; }
   .entity-search-cluster > .catalog-search-submit { grid-column: 2; grid-row: 2; }
   .asset-toolbar > .layout-toggle, .search-results-toolbar > .search-results-close { grid-column: 2; grid-row: 1; }
   .media-filter-actions { flex-wrap: wrap; row-gap: .5rem; }
+  .media-filter-actions > .group-toggle { flex-basis: 100%; }
+  .media-filter-actions > .group-collapse-toggle { flex: 1 1 auto; min-width: max-content; }
   .sort-control { flex: 1 1 11rem; }
   .sort-control > span { white-space: nowrap; }
   .sort-control select { width: 100%; }

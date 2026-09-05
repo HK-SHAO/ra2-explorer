@@ -1443,7 +1443,8 @@ function ExplorerApp() {
   );
   const updateRequestRef = useRef(false);
   const sidebarCollapsedRef = useRef(
-    window.localStorage.getItem("ra2exp-sidebar-collapsed") === "true",
+    window.localStorage.getItem("ra2exp-sidebar-collapsed") === "true"
+    || window.innerWidth <= 580,
   );
   const workspaceRef = useRef<HTMLElement>(null);
   const [detailBottomSize, setDetailBottomSize] = useState(
@@ -2747,6 +2748,7 @@ function ExplorerApp() {
               <div className="brand-mark" aria-hidden="true"><span>R</span><i /></div>
               <strong>RA2 Explorer</strong>
               <SidebarToggle initialCollapsed={sidebarCollapsedRef.current} onChange={updateSidebarCollapsed} />
+              <button className="sidebar-brand-settings" type="button" onClick={openSettings} title={updateInfo?.update_available ? "设置 · 有可用更新" : "设置"} aria-label="设置"><Icon name="settings" />{updateInfo?.update_available && <i aria-label="有可用更新" />}</button>
             </div>
             {sources.length > 1 && <section className="source-heading">
               <label className="source-select-wrap" title="选择资料库">
@@ -2802,7 +2804,6 @@ function ExplorerApp() {
                 </button>
               ))}
             </nav>
-            <button className="sidebar-settings" type="button" onClick={openSettings} title={updateInfo?.update_available ? "设置 · 有可用更新" : "设置"}><Icon name="settings" /><span>设置</span>{updateInfo?.update_available && <i aria-label="有可用更新" />}</button>
           </aside>
 
           {searchResultsOpen ? <SearchResultsPanel
