@@ -21,13 +21,9 @@ from ra2_explorer.pages_snapshot import (
     _directory_stats,
     _entity_operation_effect_tasks,
     _entity_player_color,
-    _entity_search_thumbnail_cell,
-    _entity_thumbnail_atlas_cell,
     _EntityPreviewTask,
     _export_asset_bundles,
     _export_entity_previews,
-    _export_entity_search_thumbnail_atlases,
-    _export_entity_thumbnail_atlases,
     _export_shp_animation_previews,
     _pages_audio_stats,
     _prune_reused_exports,
@@ -37,15 +33,12 @@ from ra2_explorer.pages_snapshot import (
 )
 
 
-def test_pages_default_preload_search_atlas_matches_render_revision() -> None:
+def test_pages_env_has_no_retired_default_atlas() -> None:
     pages_env = (Path(__file__).parents[1] / "frontend" / ".env.pages").read_text(
         encoding="utf-8",
     )
 
-    assert (
-        "RA2EXP_DEFAULT_ATLAS="
-        f"previews/entity-search-atlases/1-r{PAGES_RENDER_REVISION}.webp"
-    ) in pages_env
+    assert "RA2EXP_DEFAULT_ATLAS=" not in pages_env
 
 
 def test_pages_prune_removes_only_stale_reused_exports(tmp_path: Path) -> None:
@@ -508,24 +501,6 @@ def test_pages_infantry_thumbnail_uses_the_shared_card_framing(tmp_path: Path) -
         assert 0.68 <= visible_ratio <= 0.75
 
 
-def test_pages_thumbnail_atlas_cell_matches_card_dimensions() -> None:
-    source = Image.new("RGBA", (20, 10), (255, 0, 0, 255))
-
-    cell = _entity_thumbnail_atlas_cell(source, "shp")
-
-    assert cell.size == (144, 135)
-    assert cell.getchannel("A").getbbox() == (10, 33, 134, 95)
-
-
-def test_pages_search_thumbnail_cell_is_centered_and_pre_fitted() -> None:
-    source = Image.new("RGBA", (20, 10), (255, 0, 0, 255))
-
-    cell = _entity_search_thumbnail_cell(source)
-
-    assert cell.size == (36, 36)
-    assert cell.getchannel("A").getbbox() == (2, 10, 34, 26)
-
-
 def test_pages_entity_card_player_colors_follow_exclusive_side() -> None:
     assert _entity_player_color({"sides": ["GDI"]}) == "blue"
     assert _entity_player_color({"sides": ["Nod"]}) == "red"
@@ -536,129 +511,6 @@ def test_pages_entity_card_player_colors_follow_exclusive_side() -> None:
         "sides": [],
         "affiliation": {"kind": "side", "id": "GDI"},
     }) == "blue"
-
-
-def test_pages_exports_one_thumbnail_atlas_request_per_entity_kind(
-    tmp_path: Path,
-) -> None:
-    entities = []
-    for entity_id, kind, supports_facing in (
-        ("TANK", "vehicle", True),
-        ("SOLDIER", "infantry", True),
-        ("CANNON", "building", True),
-    ):
-        facing_count = 8 if supports_facing else 1
-        for facing in range(facing_count):
-            output = (
-                tmp_path
-                / "previews"
-                / "entities"
-                / entity_id
-                / "frame"
-                / str(facing)
-                / "0.webp"
-            )
-            output.parent.mkdir(parents=True, exist_ok=True)
-            Image.new("RGBA", (24, 16), (facing, 20, 30, 255)).save(
-                output,
-                format="WEBP",
-                lossless=True,
-            )
-        entities.append(
-            {
-                "id": entity_id,
-                "kind": kind,
-                "body_format": "shp",
-                "renderable": True,
-                "preview": {
-                    "format": "shp",
-                    "supports_facing": supports_facing,
-                },
-            }
-        )
-
-    metadata = _export_entity_thumbnail_atlases(tmp_path, entities)
-
-    assert metadata["TANK"]["facing_count"] == 8
-    assert metadata["SOLDIER"]["facing_count"] == 8
-    assert metadata["CANNON"]["facing_count"] == 8
-    assert metadata["SOLDIER"]["content_bounds"] == [
-        {"x": 10, "y": 22, "width": 124, "height": 83}
-    ] * 8
-    assert metadata["SOLDIER"]["path"] == (
-        f"previews/entity-atlases/infantry/{{facing}}-r{PAGES_RENDER_REVISION}.webp"
-    )
-    assert (
-        tmp_path / f"previews/entity-atlases/vehicle/7-r{PAGES_RENDER_REVISION}.webp"
-    ).is_file()
-    assert (
-        tmp_path / f"previews/entity-atlases/building/7-r{PAGES_RENDER_REVISION}.webp"
-    ).is_file()
-    assert (
-        tmp_path / f"previews/entity-atlases/infantry/7-r{PAGES_RENDER_REVISION}.webp"
-    ).is_file()
-    with Image.open(
-        tmp_path
-        / f"previews/entity-atlases/infantry/0-r{PAGES_RENDER_REVISION}.webp"
-    ) as atlas:
-        assert atlas.size == (144, 135)
-
-
-def test_pages_exports_one_shared_search_thumbnail_atlas_per_angle(
-    tmp_path: Path,
-) -> None:
-    entities = []
-    for entity_id, image_format, supports_facing in (
-        ("TANK", "vxl", False),
-        ("SOLDIER", "shp", True),
-    ):
-        source_dir = "thumbnail" if image_format == "vxl" else "frame"
-        for facing in range(8 if supports_facing else 1):
-            output = (
-                tmp_path
-                / "previews"
-                / "entities"
-                / entity_id
-                / source_dir
-                / ("0" if image_format == "vxl" else str(facing))
-                / "0.webp"
-            )
-            output.parent.mkdir(parents=True, exist_ok=True)
-            Image.new("RGBA", (24, 16), (facing, 20, 30, 255)).save(
-                output,
-                format="WEBP",
-                lossless=True,
-            )
-        entities.append(
-            {
-                "id": entity_id,
-                "kind": "vehicle" if image_format == "vxl" else "infantry",
-                "body_format": image_format,
-                "renderable": True,
-                "preview": {
-                    "format": image_format,
-                    "supports_facing": supports_facing,
-                },
-            }
-        )
-
-    metadata = _export_entity_search_thumbnail_atlases(tmp_path, entities)
-
-    expected_path = (
-        f"previews/entity-search-atlases/{{facing}}-r{PAGES_RENDER_REVISION}.webp"
-    )
-    assert metadata["SOLDIER"]["path"] == expected_path
-    assert metadata["TANK"]["path"] == expected_path
-    assert metadata["SOLDIER"]["facing_count"] == 8
-    assert metadata["SOLDIER"]["cell_width"] == 36
-    atlas_path = (
-        tmp_path / f"previews/entity-search-atlases/1-r{PAGES_RENDER_REVISION}.webp"
-    )
-    with Image.open(atlas_path) as atlas:
-        assert atlas.size == (72, 36)
-        soldier_index = int(metadata["SOLDIER"]["index"])
-        center_x = soldier_index * 36 + 18
-        assert atlas.convert("RGBA").getpixel((center_x, 18))[:3] == (5, 20, 30)
 
 
 def test_pages_audio_stats_include_lightweight_media_facets() -> None:

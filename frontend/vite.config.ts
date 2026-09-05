@@ -26,13 +26,15 @@ export default defineConfig(({ mode }) => {
   const repositoryUrl = (env.VITE_RA2EXP_REPOSITORY_URL || "https://github.com/HK-SHAO/ra2-explorer").replace(/\/$/, "");
   const publicBase = env.RA2EXP_PUBLIC_BASE || "/";
   const normalizedBase = publicBase.endsWith("/") ? publicBase : `${publicBase}/`;
-  const defaultAtlas = env.RA2EXP_DEFAULT_ATLAS?.replace(/^\/+/, "");
+  // Bust cached data JSONs on every local rebuild; deploys set their own stamp.
+  const buildStamp = Date.now().toString(36);
   const browserStateVersion = env.VITE_RA2EXP_BROWSER_STATE_VERSION
-    || buildCommit || buildTag || "development";
+    || [buildCommit, buildTag].filter(Boolean).concat(buildStamp).join(".")
+    || `dev-${buildStamp}`;
   const preloadPagesAssets = {
     name: "preload-pages-startup-assets",
     transformIndexHtml() {
-      if (mode !== "pages" || !defaultAtlas) return [];
+      if (mode !== "pages") return [];
       const snapshotUrl = (path: string) => {
         const version = browserStateVersion ? `?v=${encodeURIComponent(browserStateVersion)}` : "";
         return `${normalizedBase}data/${path}${version}`;
@@ -46,16 +48,6 @@ export default defineConfig(({ mode }) => {
         {
           tag: "link",
           attrs: { rel: "preload", as: "fetch", crossorigin: "anonymous", href: snapshotUrl("catalog/entities.zh-CN.json") },
-          injectTo: "head-prepend" as const,
-        },
-        {
-          tag: "link",
-          attrs: {
-            rel: "preload",
-            as: "image",
-            type: "image/webp",
-            href: snapshotUrl(defaultAtlas),
-          },
           injectTo: "head-prepend" as const,
         },
       ];

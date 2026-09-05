@@ -42,7 +42,7 @@ from ra2_explorer.storage import Database
 ENTITY_KINDS = ("vehicle", "infantry", "aircraft", "building")
 ENTITY_USAGES = ("buildable", "hero", "tech", "civilian", "scenario")
 UNAFFILIATED_SIDE = "unaffiliated"
-SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v25",)
+SEMANTIC_CATALOG_CACHE_IDENTITY = ("semantic-catalog-v26",)
 UNIT_NAME_TRANSLATIONS = load_unit_name_translations()
 _PLANNING_SIDE_IDS = ("GDI", "Nod", "ThirdSide")
 _TYPE_SECTIONS = {
@@ -497,6 +497,13 @@ class GameEntity:
         turret = self.component("turret")
         body_is_voxel = bool(body and body["format"] == "vxl")
         turret_is_voxel = bool(turret and turret.get("format") == "vxl")
+        has_voxel_turret = bool(turret and turret.get("format") == "vxl")
+        sequence_facings = any(
+            sample.animation and sample.animation.facing_step > 0
+            for association in self.media
+            if association.slot == "body_sequence"
+            for sample in association.samples
+        )
         facing_format = (
             "vxl"
             if body_is_voxel or turret_is_voxel
@@ -537,6 +544,14 @@ class GameEntity:
             "component_count": sum(component.asset is not None for component in self.components),
             "body_format": body["format"] if body else None,
             "facing_format": facing_format,
+            "supports_facing": bool(
+                body and (body["format"] == "vxl" or has_voxel_turret or sequence_facings)
+            ),
+            "facing_count": (
+                8
+                if self.voxel or has_voxel_turret or sequence_facings
+                else _positive_int(self.art.get("facings"), 1)
+            ),
             "media_kinds": sorted({association.kind for association in self.media}),
             "media_count": len(self.media),
             "cost": self.rules.get("cost"),
@@ -1660,6 +1675,8 @@ class SemanticLibrary:
         sounds = _merge_ini_inputs(self.reader, sound_assets, warnings)
         eva = _merge_ini_inputs(self.reader, eva_assets, warnings)
         themes = _merge_ini_inputs(self.reader, theme_assets, warnings)
+        themes_ra2 = _merge_ini_inputs(self.reader, theme_assets[:1], warnings) if theme_assets else {}
+        themes_yr = _merge_ini_inputs(self.reader, theme_assets[1:], warnings) if len(theme_assets) > 1 else {}
         strings, voice_strings = _merge_csf_inputs(
             self.reader,
             csf_assets,
@@ -1783,7 +1800,7 @@ class SemanticLibrary:
             eva_events,
             voice_strings,
             strings,
-            _theme_entries(themes),
+            _theme_entries(themes, themes_ra2, themes_yr),
         )
         return SemanticCatalog(
             source_id,
@@ -2377,14 +2394,38 @@ def _mission_event_slot(asset_stem: str, events: Iterable[str]) -> str:
 class ThemeEntry:
     stem: str
     title: str | None
+    group: str = "theme_music"
 
 
-def _theme_entries(themes: dict[str, dict[str, str]]) -> tuple[ThemeEntry, ...]:
+def _theme_entries(
+    themes: dict[str, dict[str, str]],
+    themes_ra2: dict[str, dict[str, str]],
+    themes_yr: dict[str, dict[str, str]],
+) -> tuple[ThemeEntry, ...]:
     """Bind THEME.INI soundtrack entries to their audio file stems.
 
     Retail THEME.INI keeps a [Themes] index plus one section per track whose
     Sound key names the audio file and whose Name key points at a CSF label.
+    Named tracks join the RA2 or YR battle playlist; the unnamed
+    INTRO/LOADING/CREDITS/SCORE states bind their own interface music.
     """
+    named: dict[str, str] = {}
+    special: dict[str, str] = {}
+    for origin, source in (("ra2_music", themes_ra2), ("yuri_music", themes_yr)):
+        for section, values in source.items():
+            if section.casefold() == "themes":
+                continue
+            sound = str(values.get("sound") or "").strip()
+            if not sound:
+                continue
+            stem = sound.rsplit(".", 1)[0].casefold()
+            if not stem:
+                continue
+            if str(values.get("name") or "").strip():
+                named.setdefault(stem, origin)
+            else:
+                special.setdefault(stem, "interface_music")
+
     entries: list[ThemeEntry] = []
     seen: set[str] = set()
     for section, values in themes.items():
@@ -2399,7 +2440,12 @@ def _theme_entries(themes: dict[str, dict[str, str]]) -> tuple[ThemeEntry, ...]:
             continue
         seen.add(folded)
         title = str(values.get("name") or "").strip() or None
-        entries.append(ThemeEntry(stem, title))
+        entries.append(ThemeEntry(stem, title, named.get(folded) or special.get(folded, "theme_music")))
+    for stem, group in {**special, **named}.items():
+        if stem in seen:
+            continue
+        seen.add(stem)
+        entries.append(ThemeEntry(stem, None, group))
     return tuple(entries)
 
 
@@ -2676,7 +2722,7 @@ def _build_media_items(
         if state is None:
             continue
         state["music"] = True
-        state["groups"].add("theme_music")
+        state["groups"].add(entry.group)
         state["events"].add(entry.stem)
         state["slots"].add("theme")
         title = strings.get(str(entry.title).casefold()) if strings and entry.title else None

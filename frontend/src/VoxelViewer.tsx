@@ -106,9 +106,11 @@ export function VoxelViewer({ url, label, viewKey, previewAngle, resetAngle = pr
       renderer.domElement.setAttribute("aria-label", `${label} 交互式三维模型`);
       mount.appendChild(renderer.domElement);
 
-      const ambientLight = new THREE.AmbientLight(0xd8dde5, 0.72);
-      const keyLight = new THREE.DirectionalLight(0xfff0d1, 1.08);
-      keyLight.position.set(-4, 7, 5);
+      // Mirror the fixed-face Westwood shading used by the snapshot previews
+      // (top 1.12, left 0.70, right 0.88) with neutral white light.
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.55);
+      const keyLight = new THREE.DirectionalLight(0xffffff, 0.6);
+      keyLight.position.set(3.2, 8, 5.6);
       scene.add(ambientLight, keyLight);
 
       const controls = new OrbitControls(camera, renderer.domElement);

@@ -44,6 +44,7 @@ import {
   TextAsset,
   UpdateInfo,
   isStaticSnapshot,
+  staticMovieCatalog,
   staticMovieEntry,
   staticPopoutUrl,
 } from "./api";
@@ -116,6 +117,7 @@ type IconName =
   | "infantry"
   | "info"
   | "list"
+  | "music"
   | "pause"
   | "play"
   | "popout"
@@ -148,6 +150,7 @@ const iconPaths: Record<IconName, ReactNode> = {
     search: <><circle cx="11" cy="11" r="7" /><path d="m16 16 5 5" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 9 19.37a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15a1.7 1.7 0 0 0-1.55-1.03H3v-4h.08A1.7 1.7 0 0 0 4.63 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63a1.7 1.7 0 0 0 1-1.55V3h4v.08A1.7 1.7 0 0 0 15 4.63a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9a1.7 1.7 0 0 0 1.55 1.03H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z" /></>,
     sound: <><path d="M4 10h3l4-4v12l-4-4H4zM15 9c1.5 1.5 1.5 4.5 0 6M18 6c3.5 3.5 3.5 8.5 0 12" /></>,
+    music: <><path d="M9 19V6l10-2v12" /><circle cx="6.5" cy="19" r="2.5" /><circle cx="16.5" cy="16" r="2.5" /></>,
     spark: <><path d="m12 3 1.1 4.2L17 9l-3.9 1.8L12 15l-1.1-4.2L7 9l3.9-1.8z" /><path d="m19 15 .6 2.4L22 18.5l-2.4 1.1L19 22l-.6-2.4-2.4-1.1 2.4-1.1z" /></>,
     swatch: <><path d="M4 4h6v16H4zM10 7h5v13h-5zM15 10h5v10h-5z" /><path d="M7 16h.01M12.5 16h.01M17.5 16h.01" /></>,
     unit: <><path d="M5 10h11l3 3v4H5z" /><path d="M8 10V7h6l2 3M14 7l3-2M4 17h16" /><circle cx="8" cy="18" r="2" /><circle cx="17" cy="18" r="2" /></>,
@@ -289,6 +292,7 @@ const dependencyPropertyLabels: Record<string, string> = {
 };
 
 const mediaSlotLabels: Record<string, string> = {
+  theme: "主题曲",
   select: "选中",
   move: "移动",
   attack: "攻击",
@@ -547,6 +551,9 @@ const mediaCategoryKinds: Record<string, MediaKind> = {
 
 const mediaGroupLabels: Record<string, string> = {
   theme_music: "主题音乐",
+  ra2_music: "红色警戒 2",
+  yuri_music: "尤里的复仇",
+  interface_music: "界面音乐",
   selection_voice: "选中回应",
   movement_voice: "移动指令",
   combat_voice: "攻击指令",
@@ -642,15 +649,6 @@ function formatBytes(value: number) {
 function formatDuration(value: number) {
   const total = Math.max(0, Math.round(value));
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
-}
-
-function canUseCompactTextTag(value: string) {
-  if (value.includes("\n")) return false;
-  const widthHint = Array.from(value.trim()).reduce((total, character) => {
-    const point = character.codePointAt(0) || 0;
-    return total + (point >= 0x2e80 ? 2 : 1);
-  }, 0);
-  return widthHint <= 48;
 }
 
 function crcLabel(value: number | null) {
@@ -828,7 +826,7 @@ const assetCategories: Array<{
 }> = [
   { id: "voices", label: "游戏语音", formats: ["bag_audio", "wav", "aud"], icon: "play" },
   { id: "sounds", label: "游戏音效", formats: ["bag_audio", "wav", "aud"], icon: "play" },
-  { id: "music", label: "游戏音乐", formats: ["wav", "aud"], icon: "sound" },
+  { id: "music", label: "游戏音乐", formats: ["wav", "aud"], icon: "music" },
   { id: "maps", label: "地图", formats: ["map"], icon: "grid" },
   { id: "images", label: "图像", formats: ["pcx"], icon: "image" },
   { id: "sprites", label: "精灵动画", formats: ["shp"], icon: "image" },
@@ -1407,6 +1405,9 @@ function ExplorerApp() {
   const [searchMediaTotal, setSearchMediaTotal] = useState(0);
   const [searchSuggestionLoading, setSearchSuggestionLoading] = useState(false);
   const [mediaGroup, setMediaGroup] = useState(rememberedLocation.mediaGroup || "");
+  const [movieCatalog, setMovieCatalog] = useState<Awaited<ReturnType<typeof staticMovieCatalog>> | null>(null);
+  const [movieGroup, setMovieGroup] = useState("");
+  const [movieCollapsed, setMovieCollapsed] = useState<Record<string, boolean>>({});
   const [mediaEventType, setMediaEventType] = useState(rememberedLocation.mediaEventType || "");
   const [mediaGrouped, setMediaGrouped] = useState(
     () => window.localStorage.getItem("ra2exp-media-grouped-v1") !== "false",
@@ -1472,6 +1473,61 @@ function ExplorerApp() {
     || null;
   const selectedCategoryId = selectedCategory?.id || "";
   const isMediaCategory = selectedCategoryId in mediaCategoryKinds;
+  const isMovieGrouped = selectedCategoryId === "videos" && isStaticSnapshot && !!movieCatalog;
+  const showMovieTree = isStaticSnapshot && !!movieCatalog
+    && visibleCategories.some((item) => item.id === "videos");
+
+  useEffect(() => {
+    if (!isStaticSnapshot) return;
+    let cancelled = false;
+    staticMovieCatalog().then((catalog) => {
+      if (!cancelled) setMovieCatalog(catalog);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const movieSections = useMemo(() => {
+    if (!isMovieGrouped || !movieCatalog) return [];
+    const meta = (asset: Asset) => movieCatalog.entries.get(asset.id) || { group: "unknown" };
+    const sections: Array<{ key: string; label: string; count: number; items: Asset[] }> = [];
+    for (const group of movieCatalog.groups) {
+      if (movieGroup && group.id !== movieGroup) continue;
+      const items = assets.filter((asset) => meta(asset).group === group.id);
+      if (!items.length) continue;
+      sections.push({ key: group.id, label: group.label, count: items.length, items });
+    }
+    return sections;
+  }, [isMovieGrouped, movieCatalog, movieGroup, assets]);
+
+  function toggleMovieSection(key: string) {
+    setMovieCollapsed((current) => {
+      const next = { ...current };
+      if (next[key]) delete next[key];
+      else next[key] = true;
+      return next;
+    });
+  }
+
+  const allMovieSectionsExpanded = movieSections.every((section) => !movieCollapsed[section.key]);
+
+  function toggleAllMovieSections() {
+    setMovieCollapsed(allMovieSectionsExpanded
+      ? Object.fromEntries(movieSections.map((section) => [section.key, true]))
+      : {});
+  }
+
+  function renderAssetItem(asset: Asset) {
+    if (layout === "list") {
+      return <button key={asset.id} className={`asset-row ${selectedId === asset.id ? "selected" : ""}`} onClick={() => selectAssetCard(asset.id)}>
+        <span className={`file-icon format-${asset.format}`}><Icon name={assetIcon(asset.format)} /></span>
+        <span className="asset-main"><strong>{assetDisplayName(asset)}</strong><small>{formatLabels[asset.format] || asset.format.toUpperCase()}</small></span>
+        <span className="asset-size">{formatBytes(asset.size)}</span>
+        <Icon name="chevron" size={15} />
+      </button>;
+    }
+    return <AssetGridCard key={asset.id} asset={asset} selected={selectedId === asset.id} onSelect={selectAssetCard} />;
+  }
+
   const mediaKind: MediaKind = mediaCategoryKinds[selectedCategoryId] || "sound";
   const categoryFormats = (selectedCategory?.formats || [])
     .filter((formatName) => enabledFormats.includes(formatName));
@@ -1645,15 +1701,18 @@ function ExplorerApp() {
 
   function beginDetailResize(event: ReactPointerEvent<HTMLDivElement>) {
     event.preventDefault();
+    const handle = event.currentTarget;
     const placement = detailPlacement;
     const audioCompact = compactAudioDetail;
-    const bounds = event.currentTarget.parentElement!.getBoundingClientRect();
+    const bounds = handle.parentElement!.getBoundingClientRect();
     let latest = detailSize;
+    let dragging = true;
     const previousCursor = document.body.style.cursor;
     const previousSelection = document.body.style.userSelect;
     document.body.style.cursor = placement === "bottom" ? "row-resize" : "col-resize";
     document.body.style.userSelect = "none";
     const move = (moveEvent: PointerEvent) => {
+      if (!dragging) return;
       const requested = placement === "bottom"
         ? bounds.bottom - moveEvent.clientY
         : bounds.right - moveEvent.clientX;
@@ -1661,16 +1720,20 @@ function ExplorerApp() {
       setCurrentDetailSize(latest, placement, false, audioCompact);
     };
     const stop = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", stop);
-      window.removeEventListener("pointercancel", stop);
+      if (!dragging) return;
+      dragging = false;
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", stop);
+      handle.removeEventListener("pointercancel", stop);
+      if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
       document.body.style.cursor = previousCursor;
       document.body.style.userSelect = previousSelection;
       setCurrentDetailSize(latest, placement, true, audioCompact);
     };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop);
-    window.addEventListener("pointercancel", stop);
+    handle.setPointerCapture(event.pointerId);
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", stop);
+    handle.addEventListener("pointercancel", stop);
   }
 
   function resizeDetailWithKeyboard(event: ReactKeyboardEvent<HTMLDivElement>) {
@@ -1761,6 +1824,7 @@ function ExplorerApp() {
     setAssetFormatTag("");
     setMediaGroup("");
     setMediaEventType("");
+    setMovieGroup("");
     if (["voices", "sounds"].includes(category)) setMediaLoading(true);
     else setAssetPageLoading(true);
     setMediaItems([]);
@@ -2351,7 +2415,7 @@ function ExplorerApp() {
   useEffect(() => {
     if (view !== "entities" || !sourceId || !sourceRevision || visibleEntities.length === 0) return;
     const urls = visibleEntities
-      .filter((entity) => entity.renderable && !entity.thumbnail_atlas)
+      .filter((entity) => entity.renderable)
       .map((entity) => entityCardPreviewUrl(entity, sourceId, previewAngle, sourceRevision));
     for (const url of urls.slice(0, 12)) void preloadCardPreview(url, "foreground");
     const timer = window.setTimeout(
@@ -2360,16 +2424,6 @@ function ExplorerApp() {
     );
     return () => window.clearTimeout(timer);
   }, [view, sourceId, sourceRevision, visibleEntities, previewAngle]);
-
-  useEffect(() => {
-    if (!isStaticSnapshot) return;
-    const atlas = entities.find((entity) => entity.search_thumbnail_atlas)?.search_thumbnail_atlas;
-    if (!atlas) return;
-    const atlasAngle = Math.min(Math.max(0, previewAngle), Math.max(0, atlas.facing_count - 1));
-    const primaryUrl = api.entityThumbnailAtlasUrl(atlas.path, atlasAngle);
-    void preloadThumbnailAtlas(primaryUrl).then((loaded) => {
-    });
-  }, [entities, previewAngle]);
 
   useEffect(() => {
     if (view !== "entities" || !sourceId || visibleEntities.length === 0) return;
@@ -2726,12 +2780,23 @@ function ExplorerApp() {
                 <div className="tree-parent"><Icon name="play" /><strong>声音</strong><em>{mediaKindCounts.reduce((count, item) => count + item.count, 0) || categoryCount(stats, audioFormats)}</em></div>
                 <div className="tree-children">
                   {visibleCategories.filter((item) => item.id in mediaCategoryKinds).map((item) => { const kind = mediaCategoryKinds[item.id]; return <div className="tree-child-group" key={item.id}>
-                    <button title={item.label} className={view === "assets" && assetCategory === item.id && !mediaGroup ? "active" : ""} onClick={() => selectAssetCategory(item.id)}><span><Icon name={item.id === "voices" ? "voice" : "sound"} /><b>{item.label}</b></span>{mediaKindCounts.length > 0 && <em>{mediaKindCounts.find((count) => count.kind === kind)?.count || 0}</em>}</button>
-                    {view === "assets" && assetCategory === item.id && mediaGroups.filter((group) => group.group.endsWith(`_${kind}`)).map((group) => <button title={mediaGroupLabels[group.group] || group.group} className={`tree-grandchild ${mediaGroup === group.group ? "active" : ""}`} key={group.group} onClick={() => selectMediaGroup(mediaGroup === group.group ? "" : group.group)}><span><Icon name={item.id === "voices" ? "voice" : "sound"} /><b>{mediaGroupLabels[group.group] || group.group}</b></span><em>{group.count}</em></button>)}
+                    <button title={item.label} className={view === "assets" && assetCategory === item.id && !mediaGroup ? "active" : ""} onClick={() => selectAssetCategory(item.id)}><span><Icon name={item.id === "voices" ? "voice" : item.id === "music" ? "music" : "sound"} /><b>{item.label}</b></span>{mediaKindCounts.length > 0 && <em>{mediaKindCounts.find((count) => count.kind === kind)?.count || 0}</em>}</button>
+                    {view === "assets" && assetCategory === item.id && mediaGroups.filter((group) => group.group.endsWith(`_${kind}`)).map((group) => <button title={mediaGroupLabels[group.group] || group.group} className={`tree-grandchild ${mediaGroup === group.group ? "active" : ""}`} key={group.group} onClick={() => selectMediaGroup(mediaGroup === group.group ? "" : group.group)}><span><Icon name={item.id === "voices" ? "voice" : item.id === "music" ? "music" : "sound"} /><b>{mediaGroupLabels[group.group] || group.group}</b></span><em>{group.count}</em></button>)}
                   </div>; })}
                 </div>
               </section>}
-              {visibleCategories.filter((item) => !(item.id in mediaCategoryKinds)).map((item) => (
+              {showMovieTree && movieCatalog && <section className="tree-branch videos-tree-branch">
+                <div className="tree-parent"><Icon name="play" /><strong>过场影片</strong><em>{movieCatalog.groups.reduce((count, group) => count + group.count, 0)}</em></div>
+                <div className="tree-children">
+                  <div className="tree-child-group">
+                    <button title="全部影片" className={view === "assets" && assetCategory === "videos" && !movieGroup ? "active" : ""} onClick={() => selectAssetCategory("videos")}><span><Icon name="play" /><b>全部影片</b></span><em>{movieCatalog.groups.reduce((count, group) => count + group.count, 0)}</em></button>
+                  </div>
+                  {movieCatalog.groups.map((group) => <div className="tree-child-group" key={group.id}>
+                    <button title={group.label} className={view === "assets" && assetCategory === "videos" && movieGroup === group.id ? "active" : ""} onClick={() => { selectAssetCategory("videos"); setMovieGroup(group.id); }}><span><Icon name="play" /><b>{group.label}</b></span><em>{group.count}</em></button>
+                  </div>)}
+                </div>
+              </section>}
+              {visibleCategories.filter((item) => !(item.id in mediaCategoryKinds) && !(showMovieTree && item.id === "videos")).map((item) => (
                 <button key={item.id} title={item.label} className={`tree-leaf ${view === "assets" && assetCategory === item.id ? "active" : ""}`} onClick={() => selectAssetCategory(item.id)}>
                   <span><Icon name={item.icon} /><b>{item.label}</b></span><em>{categoryCount(stats, item.formats.filter((formatName) => enabledFormats.includes(formatName)))}</em>
                 </button>
@@ -2763,7 +2828,7 @@ function ExplorerApp() {
             total={mediaTotal}
             loading={mediaLoading}
             search={catalogSearch}
-            groups={mediaGroups.filter((group) => group.group.endsWith(mediaKind === "voice" ? "_voice" : "_sound"))}
+            groups={mediaGroups.filter((group) => group.group.endsWith(mediaKind === "voice" ? "_voice" : mediaKind === "music" ? "_music" : "_sound"))}
             countries={mediaCountries}
             selectedGroup={mediaGroup}
             setSelectedGroup={selectMediaGroup}
@@ -2795,14 +2860,20 @@ function ExplorerApp() {
               <LayoutToggle layout={layout} onChange={updateLayout} />
             </div>
             <div className="filter-strip">
-              <div className="tag-filter" role="group" aria-label="按格式筛选">
-                {categoryFormats.length > 1 && <button className={!assetFormatTag ? "active" : ""} onClick={() => setAssetFormatTag("")}>不限格式</button>}
-                {categoryFormats.map((formatName) => <button key={formatName} className={assetFormatTag === formatName || categoryFormats.length === 1 ? "active" : ""} onClick={() => setAssetFormatTag(categoryFormats.length === 1 ? "" : formatName)}>
-                  {formatLabels[formatName] || formatName.toUpperCase()}<em>{stats.formats.find((item) => item.format === formatName)?.count || 0}</em>
-                </button>)}
+              <div className={`tag-filter ${isMovieGrouped ? "movie-group-filter" : ""}`} role="group" aria-label={isMovieGrouped ? "按战役分类筛选" : "按格式筛选"}>
+                {isMovieGrouped && movieCatalog ? <>
+                  <button className={!movieGroup ? "active" : ""} onClick={() => setMovieGroup("")}>全部影片<em>{total}</em></button>
+                  {movieCatalog.groups.map((group) => <button key={group.id} className={movieGroup === group.id ? "active" : ""} onClick={() => setMovieGroup(movieGroup === group.id ? "" : group.id)}>{group.label}<em>{group.count}</em></button>)}
+                </> : <>
+                  {categoryFormats.length > 1 && <button className={!assetFormatTag ? "active" : ""} onClick={() => setAssetFormatTag("")}>不限格式</button>}
+                  {categoryFormats.map((formatName) => <button key={formatName} className={assetFormatTag === formatName || categoryFormats.length === 1 ? "active" : ""} onClick={() => setAssetFormatTag(categoryFormats.length === 1 ? "" : formatName)}>
+                    {formatLabels[formatName] || formatName.toUpperCase()}<em>{stats.formats.find((item) => item.format === formatName)?.count || 0}</em>
+                  </button>)}
+                </>}
               </div>
               <div className="media-filter-actions asset-filter-actions">
-                <span className="result-count">显示 {assets.length} / {total}</span>
+                <span className="result-count">显示 {isMovieGrouped && movieGroup ? movieSections[0]?.count ?? 0 : assets.length} / {total}</span>
+                {isMovieGrouped && movieSections.length > 0 && <button type="button" className="group-collapse-toggle" aria-expanded={allMovieSectionsExpanded} onClick={toggleAllMovieSections}><Icon name="chevron" size={14} /><span>{allMovieSectionsExpanded ? "全部收起" : "全部展开"}</span></button>}
                 <label className="sort-control"><span>排序</span><select value={assetSort} onChange={(event) => setAssetSort(event.target.value as AssetSort)}>
                   <option value="name_asc">名称 A–Z</option>
                   <option value="name_desc">名称 Z–A</option>
@@ -2811,7 +2882,21 @@ function ExplorerApp() {
                 </select></label>
               </div>
             </div>
-            <div ref={assetListScroll.ref} className={`asset-list ${layout === "grid" ? "asset-grid" : "list-columns"}`} tabIndex={0} aria-label="资产列表" onScroll={(event) => { assetListScroll.remember(event); const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void loadMoreAssets(); }}>
+            {isMovieGrouped ? (movieGroup ? <div ref={assetListScroll.ref} className={`asset-list ${layout === "grid" ? "asset-grid" : "list-columns"}`} tabIndex={0} aria-label="过场影片列表" onScroll={(event) => { assetListScroll.remember(event); const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void loadMoreAssets(); }}>
+              {(movieSections[0]?.items ?? []).map((asset) => renderAssetItem(asset))}
+            </div> : <div ref={assetListScroll.ref} className="asset-list movie-grouped-list" tabIndex={0} aria-label="过场影片列表" onScroll={(event) => { assetListScroll.remember(event); const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void loadMoreAssets(); }}>
+              {movieSections.map((section) => (
+                <section className={`media-group-section ${movieCollapsed[section.key] ? "collapsed" : "expanded"}`} key={section.key}>
+                  <button type="button" className="media-group-header" aria-expanded={!movieCollapsed[section.key]} onClick={() => toggleMovieSection(section.key)}>
+                    <span className="media-group-heading"><strong title={section.label}>{section.label}</strong><em>{section.count}</em></span>
+                    <Icon name="chevron" size={15} />
+                  </button>
+                  {!movieCollapsed[section.key] && <div className={layout === "grid" ? "asset-grid media-grid media-group-items" : "list-columns media-group-items"}>
+                    {section.items.map((asset) => renderAssetItem(asset))}
+                  </div>}
+                </section>
+              ))}
+            </div>) : <div ref={assetListScroll.ref} className={`asset-list ${layout === "grid" ? "asset-grid" : "list-columns"}`} tabIndex={0} aria-label="资产列表" onScroll={(event) => { assetListScroll.remember(event); const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void loadMoreAssets(); }}>
               {layout === "list" ? assets.map((asset) => (
                 <button key={asset.id} className={`asset-row ${selectedId === asset.id ? "selected" : ""}`} onClick={() => selectAssetCard(asset.id)}>
                   <span className={`file-icon format-${asset.format}`}><Icon name={assetIcon(asset.format)} /></span>
@@ -2823,7 +2908,7 @@ function ExplorerApp() {
               {assets.length < total && <button className="load-more" disabled={assetPageLoading} onClick={() => void loadMoreAssets()}>{assetPageLoading ? "正在载入…" : `载入更多（剩余 ${(total - assets.length).toLocaleString("zh-CN")}）`}</button>}
               {assetPageLoading && assets.length === 0 && <div className="entity-loading"><div className="radar small"><span /></div><strong>正在载入资产…</strong></div>}
               {!assetPageLoading && assets.length === 0 && <div className="no-results"><Icon name="search" size={28} /><strong>没有匹配的资产</strong><button onClick={() => { setAssetQuery(""); setAssetFormatTag(""); }}>清除筛选</button></div>}
-            </div>
+            </div>}
           </section>}
 
           <div className="workspace-resizer" role="separator" tabIndex={0} aria-label="调整详情区域大小" aria-orientation={detailPlacement === "bottom" ? "horizontal" : "vertical"} aria-valuenow={detailSize} onPointerDown={beginDetailResize} onKeyDown={resizeDetailWithKeyboard}><span /></div>
@@ -3962,16 +4047,13 @@ function entityAffiliationSide(entity: EntitySummary) {
 }
 
 function entityCardPreviewUrl(entity: EntitySummary, sourceId: string, previewAngle: PreviewAngle, sourceRevision: string, compact = false) {
-  const staticFacing = entity.body_format !== "vxl" && entity.facing_format
-    ? entityFacingForPreviewAngle(entity.facing_format, previewAngle)
-    : 0;
-  const facing = isStaticSnapshot
-    ? staticFacing
-    : entityFacingForPreviewAngle(entity.facing_format, previewAngle);
+  const facing = entity.voxel || !entity.supports_facing
+    ? 0
+    : entityFacingForPreviewAngle(entity.facing_format ?? "shp", previewAngle);
   return api.entityPreviewUrl(sourceId, entity.id, {
     facing,
     scale: 2,
-    thumbnail: true,
+    thumbnail: entity.voxel,
     compact,
     playerColor: entityCardPlayerColor(entity),
     revision: sourceRevision,
@@ -3980,7 +4062,7 @@ function entityCardPreviewUrl(entity: EntitySummary, sourceId: string, previewAn
 
 function entityDetailPreviewUrl(entity: EntitySummary, sourceId: string, previewAngle: PreviewAngle) {
   if (!entity.renderable || entity.voxel || entity.body_format === "vxl") return "";
-  const facing = entity.facing_format
+  const facing = entity.facing_format && entity.supports_facing
     ? entityFacingForPreviewAngle(entity.facing_format, previewAngle)
     : 0;
   return api.entityPreviewUrl(sourceId, entity.id, {
@@ -3991,69 +4073,10 @@ function entityDetailPreviewUrl(entity: EntitySummary, sourceId: string, preview
   });
 }
 
-const thumbnailAtlasStatus = new Map<string, "loaded" | "failed">();
-const pendingThumbnailAtlases = new Map<string, Promise<boolean>>();
-
-function preloadThumbnailAtlas(url: string) {
-  const known = thumbnailAtlasStatus.get(url);
-  if (known) return Promise.resolve(known === "loaded");
-  const existing = pendingThumbnailAtlases.get(url);
-  if (existing) return existing;
-  const pending = new Promise<boolean>((resolve) => {
-    const image = new Image();
-    image.decoding = "async";
-    image.onload = () => {
-      thumbnailAtlasStatus.set(url, "loaded");
-      pendingThumbnailAtlases.delete(url);
-      resolve(true);
-    };
-    image.onerror = () => {
-      thumbnailAtlasStatus.set(url, "failed");
-      pendingThumbnailAtlases.delete(url);
-      resolve(false);
-    };
-    image.src = url;
-  });
-  pendingThumbnailAtlases.set(url, pending);
-  return pending;
-}
-
-function useThumbnailAtlasUrl(atlasUrl: string) {
-  const [resolvedUrl, setResolvedUrl] = useState(atlasUrl);
-  useEffect(() => {
-    setResolvedUrl(atlasUrl);
-    if (atlasUrl) void preloadThumbnailAtlas(atlasUrl);
-  }, [atlasUrl]);
-  return resolvedUrl;
-}
-
 function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle, compact = false }: { entity: EntitySummary; sourceId: string; sourceRevision: string; previewAngle: PreviewAngle; compact?: boolean }) {
   const previewRef = useRef<HTMLSpanElement>(null);
   const affiliationSide = entityAffiliationSide(entity);
-  const searchAtlas = compact && isStaticSnapshot ? entity.search_thumbnail_atlas : undefined;
-  const atlas = searchAtlas ?? (isStaticSnapshot ? entity.thumbnail_atlas : undefined);
-  const requestedFacing = entity.facing_format
-    ? entityFacingForPreviewAngle(entity.facing_format, previewAngle)
-    : 0;
-  const atlasFacing = atlas
-    ? Math.min(
-      Math.max(0, searchAtlas ? previewAngle : requestedFacing),
-      Math.max(0, atlas.facing_count - 1),
-    )
-    : 0;
-  const atlasUrl = atlas ? api.entityThumbnailAtlasUrl(atlas.path, atlasFacing) : "";
-  const readyAtlasUrl = useThumbnailAtlasUrl(atlasUrl);
-  const atlasColumn = atlas ? atlas.index % atlas.columns : 0;
-  const atlasRow = atlas ? Math.floor(atlas.index / atlas.columns) : 0;
-  const atlasContentBounds = compact && atlas && !searchAtlas
-    ? atlas.content_bounds?.[atlasFacing]
-    : undefined;
-  const atlasContentWidth = atlasContentBounds?.width ?? atlas?.cell_width ?? 1;
-  const atlasContentHeight = atlasContentBounds?.height ?? atlas?.cell_height ?? 1;
-  const atlasScale = compact && atlas && !searchAtlas
-    ? Math.min(34 / atlasContentWidth, 34 / atlasContentHeight)
-    : 1;
-  const url = entity.renderable && !atlas
+  const url = entity.renderable
     ? entityCardPreviewUrl(entity, sourceId, previewAngle, sourceRevision, compact)
     : "";
   const [readyUrl, setReadyUrl] = useState(() => hasLoadedCardPreview(url) ? url : "");
@@ -4093,17 +4116,7 @@ function EntityCardPreview({ entity, sourceId, sourceRevision, previewAngle, com
 
   return <span ref={previewRef} className={`asset-card-preview entity-card-preview format-${entity.body_format || "unknown"} ${entity.renderable ? "ready" : "missing"} ${compact ? "catalog-suggestion-thumbnail" : ""}`}>
     {entity.renderable
-      ? atlas
-        ? <span className={`entity-thumbnail-atlas ${searchAtlas ? "entity-search-thumbnail-atlas" : compact ? "legacy-search-thumbnail-atlas" : ""}`} aria-hidden="true" style={{
-          width: atlasContentWidth,
-          height: atlasContentHeight,
-          backgroundImage: `url("${readyAtlasUrl}")`,
-          backgroundPosition: `${-(atlasColumn * atlas.cell_width + (atlasContentBounds?.x ?? 0))}px ${-(atlasRow * atlas.cell_height + (atlasContentBounds?.y ?? 0))}px`,
-          transform: compact && !searchAtlas
-            ? `translate(-50%, -50%) scale(${atlasScale})`
-            : undefined,
-        }} />
-        : readyUrl && <img decoding="async" fetchPriority="low" src={readyUrl} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
+      ? readyUrl && <img decoding="async" fetchPriority="low" src={readyUrl} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />
       : <Icon name="unit" size={34} />}
     {!compact && entity.affiliation && <span className={`entity-affiliation-badge affiliation-${entity.affiliation.kind} affiliation-${affiliationClassId(entity.affiliation.id)} ${affiliationSide ? `affiliation-${affiliationClassId(affiliationSide)}` : ""}`} title={entity.affiliation.display_name}>
       {entity.affiliation.display_name}
@@ -4922,7 +4935,7 @@ function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, b
 
   const fittedImageStyle = useMemo<CSSProperties | undefined>(() => {
     if (!imageFit || viewportSize.width <= 0 || viewportSize.height <= 0) return undefined;
-    const padding = Math.max(32, Math.min(viewportSize.width, viewportSize.height) * 0.12);
+    const padding = Math.max(20, Math.min(viewportSize.width, viewportSize.height) * 0.06);
     const availableWidth = Math.max(1, viewportSize.width - padding * 2);
     const availableHeight = Math.max(1, viewportSize.height - padding * 2);
     const focusCenterX = imageFit.focusBounds.x + imageFit.focusBounds.width / 2;
@@ -4935,7 +4948,7 @@ function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, b
       focusCenterY - imageFit.bounds.y,
       imageFit.bounds.y + imageFit.bounds.height - focusCenterY,
     ));
-    const scale = Math.min(1.75,
+    const scale = Math.min(2.25,
       availableWidth / stableWidth,
       availableHeight / stableHeight,
     );
@@ -5743,8 +5756,8 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
               </div>
             </div>}
 
-            <details className="entity-section compact-section entity-components" open>
-              <summary><span>资源文件</span><em>{entity.components.length}</em></summary>
+            {entity.components.length > 0 && <div className="entity-components">
+              <h3>资源文件</h3>
               <div className="component-chips resource-file-list">
                 {entity.components.map((component) => component.asset ? isStaticSnapshot ? <span key={component.role} title={`${component.asset.virtual_path} · ${formatBytes(component.asset.size)}`}>
                   <Icon name={assetIcon(component.asset.format)} size={14} />
@@ -5763,7 +5776,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
                   <em>未找到</em>
                 </span>)}
               </div>
-            </details>
+            </div>}
           </section>}
         </div>
       </div>
@@ -6036,7 +6049,7 @@ function DetailPanel({ asset, metadata, textAsset, textQuery, setTextQuery, fram
       {isAudio && activeAudioDetailTab === "data" && <div className={`metadata sound-metadata ${hasAudioRelationshipTabs ? "" : "sound-metadata-direct"}`} role={hasAudioRelationshipTabs ? "tabpanel" : undefined} id={hasAudioRelationshipTabs ? "audio-data-panel" : undefined} aria-labelledby={hasAudioRelationshipTabs ? "audio-data-tab" : undefined}>
         {hasAudioRelationshipTabs && <h3>资产信息</h3>}
         <ul className="sound-metadata-tags" aria-label="音频元信息">{audioMetadataTags.map((tag) => <li key={`${tag.label}-${tag.value}`} title={`${tag.label}：${tag.value}`}><span>{tag.label}</span><strong className={tag.mono ? "mono" : ""}>{tag.value}</strong></li>)}</ul>
-        {audioTextRows.length > 0 && <dl className="sound-transcript-list">{audioTextRows.map((row) => <div className={canUseCompactTextTag(row.value) ? "sound-transcript-tag" : "sound-transcript-block"} key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl>}
+        {audioTextRows.length > 0 && <dl className="sound-transcript-list">{audioTextRows.map((row) => <div className="sound-transcript-block" key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl>}
       </div>}
       {!isAudio && <div className="metadata">
         <h3>资产信息</h3>
@@ -6152,7 +6165,7 @@ function SettingsDialog({
           <div className="settings-content">
             {isStaticSnapshot && <div className="settings-build-info" role="status">
               <Icon name="info" size={17} />
-              <span><strong>精简网页版</strong><small className="settings-build-meta">
+              <span><strong>精简网页版（完整版请查看仓库）</strong><small className="settings-build-meta">
                 {buildInfo.revisionUrl
                   ? <a href={buildInfo.revisionUrl} target="_blank" rel="noreferrer" title={buildInfo.revisionTitle}>{buildInfo.revision}</a>
                   : <span>{buildInfo.revision}</span>}
@@ -6166,8 +6179,8 @@ function SettingsDialog({
                 <div className="display-setting-row">
                   <strong>详情布局</strong>
                   <div className="layout-choice" role="group" aria-label="详情区域布局">
-                    <button type="button" className={detailPlacement === "bottom" ? "active" : ""} onClick={() => onDetailPlacementChange("bottom")}>上下</button>
-                    <button type="button" className={detailPlacement === "right" ? "active" : ""} onClick={() => onDetailPlacementChange("right")}>左右</button>
+                    <button type="button" className={detailPlacement === "bottom" ? "active" : ""} onClick={() => onDetailPlacementChange("bottom")}>左右</button>
+                    <button type="button" className={detailPlacement === "right" ? "active" : ""} onClick={() => onDetailPlacementChange("right")}>上下</button>
                   </div>
                 </div>
                 <div className="display-setting-row">
@@ -6189,13 +6202,6 @@ function SettingsDialog({
                   <select className="display-setting-select" aria-label="单位默认预览角度" value={previewAngle} onChange={(event) => onPreviewAngleChange(normalizePreviewAngle(Number(event.target.value)))}>
                     {previewAngleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
-                </div>
-                <div className="display-setting-row">
-                  <strong>声音分组标题</strong>
-                  <div className="layout-choice" role="group" aria-label="声音分组标题对齐方式">
-                    <button type="button" className={mediaHeaderAlignment === "left" ? "active" : ""} onClick={() => onMediaHeaderAlignmentChange("left")}>左对齐</button>
-                    <button type="button" className={mediaHeaderAlignment === "center" ? "active" : ""} onClick={() => onMediaHeaderAlignmentChange("center")}>居中</button>
-                  </div>
                 </div>
               </div>
             </section>
@@ -6277,11 +6283,11 @@ function SettingsDialog({
             <section className="settings-section" id="settings-about">
               <header><h3>关于</h3></header>
               <div className="about-list">
-                <a href="https://github.com/HK-SHAO/ra2-explorer" target="_blank" rel="noreferrer">
-                  <Icon name="spark" size={16} /><div><strong>本仓库 · HK-SHAO</strong><small>github.com/HK-SHAO/ra2-explorer</small></div>
-                </a>
                 <a href="https://github.com/Hansimov/ra2-explorer" target="_blank" rel="noreferrer">
                   <Icon name="info" size={16} /><div><strong>原作者 · Hansimov</strong><small>github.com/Hansimov/ra2-explorer</small></div>
+                </a>
+                <a href="https://github.com/HK-SHAO/ra2-explorer" target="_blank" rel="noreferrer">
+                  <Icon name="spark" size={16} /><div><strong>本仓库 · HK-SHAO</strong><small>github.com/HK-SHAO/ra2-explorer</small></div>
                 </a>
               </div>
             </section>

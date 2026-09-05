@@ -44,6 +44,7 @@ function requireContent(manifest: StaticSnapshotManifest, content: "units" | "so
 }
 
 const jsonCache = new Map<string, Promise<unknown>>();
+const JSON_CACHE_LIMIT = 256;
 
 const dataVersion = (import.meta.env.VITE_RA2EXP_BROWSER_STATE_VERSION || "").trim();
 
@@ -69,6 +70,14 @@ function loadJson<T>(path: string): Promise<T> {
     pending = fetchJson<T>(snapshotUrl(path));
     pending.catch(() => jsonCache.delete(path));
     jsonCache.set(path, pending);
+  } else {
+    jsonCache.delete(path);
+    jsonCache.set(path, pending);
+  }
+  while (jsonCache.size > JSON_CACHE_LIMIT) {
+    const oldest = jsonCache.keys().next().value as string | undefined;
+    if (!oldest) break;
+    jsonCache.delete(oldest);
   }
   return pending;
 }
@@ -492,10 +501,6 @@ export function staticEntityPreviewUrl(
   );
 }
 
-export function staticEntityThumbnailAtlasUrl(path: string, facing: number) {
-  return snapshotUrl(path.replace("{facing}", String(facing)));
-}
-
 export function staticEntityModelUrl(entityId: string, frame = 0) {
   return snapshotUrl(`models/entities/${encodeURIComponent(entityId)}/${frame}.json`);
 }
@@ -561,6 +566,43 @@ export async function staticMoviePage(sourceId: string, formats: string[], query
     .filter((item) => !needle || item.name.toLocaleLowerCase().includes(needle))
     .map((item) => movieAsset(item, sourceId));
   return { items, total: items.length };
+}
+
+const MOVIE_GROUP_ORDER: Array<[id: string, label: string]> = [
+  ["intro", "片头 Logo"],
+  ["ra2-ally", "红警 2 · 盟军"],
+  ["ra2-soviet", "红警 2 · 苏军"],
+  ["yr-ally", "尤复 · 盟军"],
+  ["yr-soviet", "尤复 · 苏军"],
+  ["world", "世界地图"],
+  ["promo", "宣传片"],
+  ["unknown", "其他"],
+];
+
+export interface MovieCatalog {
+  groups: Array<{ id: string; label: string; count: number }>;
+  entries: Map<string, { group: string }>;
+}
+
+let movieCatalogPromise: Promise<MovieCatalog> | null = null;
+
+export function staticMovieCatalog(): Promise<MovieCatalog> {
+  movieCatalogPromise ||= loadMovies().then((movies) => {
+    const counts = new Map<string, number>();
+    const entries = new Map<string, { group: string }>();
+    for (const item of movies.items) {
+      const group = MOVIE_GROUP_ORDER.some(([id]) => id === item.group) ? item.group : "unknown";
+      counts.set(group, (counts.get(group) || 0) + 1);
+      entries.set(item.asset_id, { group });
+    }
+    return {
+      groups: MOVIE_GROUP_ORDER
+        .filter(([id]) => counts.has(id))
+        .map(([id, label]) => ({ id, label, count: counts.get(id)! })),
+      entries,
+    };
+  });
+  return movieCatalogPromise;
 }
 
 export function staticMoviePosterUrl(assetId: string) {

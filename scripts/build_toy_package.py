@@ -96,7 +96,12 @@ def build_package(output: Path, *, overwrite: bool) -> dict[str, object]:
 
 
 def serve(port: int) -> None:
-    handler = partial(SimpleHTTPRequestHandler, directory=str(PACKAGE_ROOT))
+    class NoCacheHandler(SimpleHTTPRequestHandler):
+        def end_headers(self) -> None:
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            super().end_headers()
+
+    handler = partial(NoCacheHandler, directory=str(PACKAGE_ROOT))
     print(f"本地预览：http://127.0.0.1:{port}/（Ctrl+C 停止）", flush=True)
     ThreadingHTTPServer(("127.0.0.1", port), handler).serve_forever()
 

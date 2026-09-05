@@ -5,13 +5,13 @@ import {
   staticAudioUrl,
   staticEntityModelUrl,
   staticEntityPreviewUrl,
-  staticEntityThumbnailAtlasUrl,
   staticMoviePosterUrl,
   staticSnapshotRequest,
 } from "./staticSnapshot";
 
 export {
   isStaticSnapshot,
+  staticMovieCatalog,
   staticMovieEntry,
   staticMoviePosterUrl,
   staticPopoutUrl,
@@ -195,21 +195,6 @@ export type EntityKind = "vehicle" | "infantry" | "aircraft" | "building";
 export type EntityUsage = "buildable" | "hero" | "tech" | "civilian" | "scenario";
 export type GameLanguage = "zh-CN" | "zh-TW";
 
-export interface EntityThumbnailAtlas {
-  path: string;
-  index: number;
-  columns: number;
-  cell_width: number;
-  cell_height: number;
-  facing_count: number;
-  content_bounds?: Array<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  }>;
-}
-
 export interface EntitySummary {
   id: string;
   kind: EntityKind;
@@ -229,6 +214,8 @@ export interface EntitySummary {
   component_count: number;
   body_format: string | null;
   facing_format: "vxl" | "shp" | null;
+  supports_facing: boolean;
+  facing_count: number;
   media_kinds: Array<"voice" | "sound" | "animation">;
   media_count: number;
   cost: string | null;
@@ -247,8 +234,6 @@ export interface EntitySummary {
     display_name: string;
     icon: EntityComponentAsset | null;
   } | null;
-  thumbnail_atlas?: EntityThumbnailAtlas;
-  search_thumbnail_atlas?: EntityThumbnailAtlas;
 }
 
 export type AssetSort = "name_asc" | "name_desc" | "size_desc" | "size_asc";
@@ -709,9 +694,6 @@ export const api = {
     if (options.revision) params.set("r", options.revision);
     return `/api/entities/${encodeURIComponent(sourceId)}/${encodeURIComponent(entityId)}/preview.png?${params}`;
   },
-  entityThumbnailAtlasUrl: (path: string, facing: number) => isStaticSnapshot
-    ? staticEntityThumbnailAtlasUrl(path, facing)
-    : "",
   entityModelUrl: (
     sourceId: string,
     entityId: string,
