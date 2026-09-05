@@ -1,5 +1,25 @@
 import { useEffect, useRef, useState } from "react";
-import * as THREE from "three";
+import {
+  AmbientLight,
+  Box3,
+  BoxGeometry,
+  Color,
+  DirectionalLight,
+  Float32BufferAttribute,
+  GridHelper,
+  InstancedBufferAttribute,
+  InstancedMesh,
+  MeshBasicMaterial,
+  MeshLambertMaterial,
+  NoToneMapping,
+  OrthographicCamera,
+  Scene,
+  Sphere,
+  SRGBColorSpace,
+  StaticDrawUsage,
+  Vector3,
+  WebGLRenderer,
+} from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 export interface VoxelSceneData {
@@ -15,13 +35,13 @@ export interface VoxelSceneData {
 }
 
 interface ViewerEngine {
-  scene: THREE.Scene;
-  camera: THREE.OrthographicCamera;
-  renderer: THREE.WebGLRenderer;
+  scene: Scene;
+  camera: OrthographicCamera;
+  renderer: WebGLRenderer;
   controls: OrbitControls;
-  model: THREE.InstancedMesh | null;
-  grid: THREE.GridHelper | null;
-  fitBounds: THREE.Box3 | null;
+  model: InstancedMesh | null;
+  grid: GridHelper | null;
+  fitBounds: Box3 | null;
   viewKey: string | null;
   viewHeight: number;
   updateProjection: (() => void) | null;
@@ -30,6 +50,15 @@ interface ViewerEngine {
 }
 
 type PreviewAngle = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+const VOXEL_FACE_BRIGHTNESS = {
+  right: 0.88,
+  left: 0.7,
+  top: 1.12,
+  bottom: 0.55,
+  front: 0.8,
+  back: 0.74,
+};
 
 const MODEL_RESPONSE_CACHE = "ra2exp-model-scenes-v5";
 const MAX_MEMORY_SCENES = 12;
@@ -92,24 +121,22 @@ export function VoxelViewer({ url, label, viewKey, previewAngle, resetAngle = pr
     let lastWidth = 0;
     let lastHeight = 0;
     try {
-      const scene = new THREE.Scene();
-      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.001, 10_000);
-      const renderer = new THREE.WebGLRenderer({
+      const scene = new Scene();
+      const camera = new OrthographicCamera(-1, 1, 1, -1, 0.001, 10_000);
+      const renderer = new WebGLRenderer({
         alpha: true,
         antialias: true,
         powerPreference: "high-performance",
       });
-      renderer.outputColorSpace = THREE.SRGBColorSpace;
-      renderer.toneMapping = THREE.NoToneMapping;
+      renderer.outputColorSpace = SRGBColorSpace;
+      renderer.toneMapping = NoToneMapping;
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.domElement.tabIndex = 0;
       renderer.domElement.setAttribute("aria-label", `${label} 交互式三维模型`);
       mount.appendChild(renderer.domElement);
 
-      // Mirror the fixed-face Westwood shading used by the snapshot previews
-      // (top 1.12, left 0.70, right 0.88) with neutral white light.
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.55);
-      const keyLight = new THREE.DirectionalLight(0xffffff, 0.6);
+      const ambientLight = new AmbientLight(0xffffff, 0.55);
+      const keyLight = new DirectionalLight(0xffffff, 0.6);
       keyLight.position.set(3.2, 8, 5.6);
       scene.add(ambientLight, keyLight);
 
@@ -264,16 +291,16 @@ export function VoxelViewer({ url, label, viewKey, previewAngle, resetAngle = pr
     disposeModel(engine);
 
     const geometry = data.lighting === "westwood_vpl"
-      ? unlitVoxelGeometry()
-      : new THREE.BoxGeometry(1, 1, 1);
+      ? voxelGeometry()
+      : new BoxGeometry(1, 1, 1);
     const material = data.lighting === "westwood_vpl"
-      ? new THREE.MeshBasicMaterial({ color: 0xffffff })
-      : new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
-    const model = new THREE.InstancedMesh(geometry, material, data.voxels.length);
-    model.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+      ? new MeshBasicMaterial({ color: 0xffffff, vertexColors: true })
+      : new MeshLambertMaterial({ color: 0xffffff, flatShading: true });
+    const model = new InstancedMesh(geometry, material, data.voxels.length);
+    model.instanceMatrix.setUsage(StaticDrawUsage);
     const matrices = model.instanceMatrix.array as Float32Array;
     const colors = new Float32Array(data.voxels.length * 3);
-    const color = new THREE.Color();
+    const color = new Color();
     const colorCache = new Map<number, readonly [number, number, number]>();
     data.voxels.forEach((voxel, index) => {
       const [x, y, z, size, red, green, blue] = voxel;
@@ -290,7 +317,7 @@ export function VoxelViewer({ url, label, viewKey, previewAngle, resetAngle = pr
       const colorKey = (red << 16) | (green << 8) | blue;
       let linear = colorCache.get(colorKey);
       if (!linear) {
-        color.setRGB(red / 255, green / 255, blue / 255, THREE.SRGBColorSpace);
+        color.setRGB(red / 255, green / 255, blue / 255, SRGBColorSpace);
         linear = [color.r, color.g, color.b];
         colorCache.set(colorKey, linear);
       }
@@ -300,20 +327,20 @@ export function VoxelViewer({ url, label, viewKey, previewAngle, resetAngle = pr
       colors[colorOffset + 2] = linear[2];
     });
     model.instanceMatrix.needsUpdate = true;
-    model.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
+    model.instanceColor = new InstancedBufferAttribute(colors, 3);
     model.instanceColor.needsUpdate = true;
     const box = sceneBounds(data.bounds);
     model.boundingBox = box.clone();
-    model.boundingSphere = box.getBoundingSphere(new THREE.Sphere());
+    model.boundingSphere = box.getBoundingSphere(new Sphere());
     engine.scene.add(model);
     engine.model = model;
     engine.fitBounds = preservedBounds || box.clone();
     engine.viewKey = loadedViewKey;
-    const center = engine.fitBounds.getCenter(new THREE.Vector3());
-    const size = engine.fitBounds.getSize(new THREE.Vector3());
+    const center = engine.fitBounds.getCenter(new Vector3());
+    const size = engine.fitBounds.getSize(new Vector3());
     const diameter = Math.max(size.length(), 0.1);
     const gridSize = Math.max(size.x, size.z, diameter * 0.75, 0.5) * 1.7;
-    const grid = new THREE.GridHelper(gridSize, 12, 0x424852, 0x292d34);
+    const grid = new GridHelper(gridSize, 12, 0x424852, 0x292d34);
     grid.position.set(center.x, box.min.y - Math.max(diameter * 0.012, 0.002), center.z);
     const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
     gridMaterials.forEach((item) => {
@@ -326,7 +353,7 @@ export function VoxelViewer({ url, label, viewKey, previewAngle, resetAngle = pr
       const radius = Math.max(diameter / 2, 0.05);
       const distance = Math.max(radius * 4, 1);
       const angle = requestedAngle * (Math.PI / 4);
-      const direction = new THREE.Vector3(Math.sin(angle), 1, Math.cos(angle)).normalize();
+      const direction = new Vector3(Math.sin(angle), 1, Math.cos(angle)).normalize();
       engine.camera.near = Math.max(distance - radius * 2.5, 0.000_1);
       engine.camera.far = Math.max(distance + radius * 4, 100);
       engine.camera.position.copy(center).addScaledVector(direction, distance);
@@ -454,37 +481,27 @@ function cacheVoxelScene(url: string, scene: VoxelSceneData) {
   }
 }
 
-function unlitVoxelGeometry() {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute([
-    -0.5, -0.5, -0.5,
-    0.5, -0.5, -0.5,
-    0.5, 0.5, -0.5,
-    -0.5, 0.5, -0.5,
-    -0.5, -0.5, 0.5,
-    0.5, -0.5, 0.5,
-    0.5, 0.5, 0.5,
-    -0.5, 0.5, 0.5,
-  ], 3));
-  geometry.setIndex([
-    0, 2, 1, 0, 3, 2,
-    4, 5, 6, 4, 6, 7,
-    0, 1, 5, 0, 5, 4,
-    3, 7, 6, 3, 6, 2,
-    1, 2, 6, 1, 6, 5,
-    0, 4, 7, 0, 7, 3,
-  ]);
-  geometry.computeBoundingBox();
-  geometry.computeBoundingSphere();
+function voxelGeometry() {
+  const geometry = new BoxGeometry(1, 1, 1);
+  const faces = ["right", "left", "top", "bottom", "front", "back"] as const;
+  const colors = new Float32Array(geometry.attributes.position.count * 3);
+  faces.forEach((face, index) => {
+    const brightness = VOXEL_FACE_BRIGHTNESS[face];
+    for (let corner = 0; corner < 4; corner += 1) {
+      const offset = (index * 4 + corner) * 3;
+      colors.fill(brightness, offset, offset + 3);
+    }
+  });
+  geometry.setAttribute("color", new Float32BufferAttribute(colors, 3));
   return geometry;
 }
 
 function sceneBounds(bounds: VoxelSceneData["bounds"]) {
   const minimum = bounds.min;
   const maximum = bounds.max;
-  return new THREE.Box3(
-    new THREE.Vector3(minimum[0], minimum[2], minimum[1]),
-    new THREE.Vector3(maximum[0], maximum[2], maximum[1]),
+  return new Box3(
+    new Vector3(minimum[0], minimum[2], minimum[1]),
+    new Vector3(maximum[0], maximum[2], maximum[1]),
   );
 }
 
@@ -512,21 +529,21 @@ function disposeModel(engine: ViewerEngine) {
 }
 
 function fittedViewHeight(
-  bounds: THREE.Box3,
-  camera: THREE.OrthographicCamera,
+  bounds: Box3,
+  camera: OrthographicCamera,
   aspect: number,
 ) {
   camera.updateMatrixWorld(true);
   const { min, max } = bounds;
   const corners = [
-    new THREE.Vector3(min.x, min.y, min.z),
-    new THREE.Vector3(min.x, min.y, max.z),
-    new THREE.Vector3(min.x, max.y, min.z),
-    new THREE.Vector3(min.x, max.y, max.z),
-    new THREE.Vector3(max.x, min.y, min.z),
-    new THREE.Vector3(max.x, min.y, max.z),
-    new THREE.Vector3(max.x, max.y, min.z),
-    new THREE.Vector3(max.x, max.y, max.z),
+    new Vector3(min.x, min.y, min.z),
+    new Vector3(min.x, min.y, max.z),
+    new Vector3(min.x, max.y, min.z),
+    new Vector3(min.x, max.y, max.z),
+    new Vector3(max.x, min.y, min.z),
+    new Vector3(max.x, min.y, max.z),
+    new Vector3(max.x, max.y, min.z),
+    new Vector3(max.x, max.y, max.z),
   ];
   let minimumX = Number.POSITIVE_INFINITY;
   let maximumX = Number.NEGATIVE_INFINITY;

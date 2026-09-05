@@ -190,6 +190,25 @@ function SidebarToggle({ initialCollapsed, onChange }: {
   );
 }
 
+function SidebarSettings({ hasUpdate, className, onOpen }: {
+  hasUpdate: boolean;
+  className: string;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      className={className}
+      type="button"
+      onClick={onOpen}
+      title={hasUpdate ? "设置 · 有可用更新" : "设置"}
+      aria-label="设置"
+    >
+      <Icon name="settings" />
+      {hasUpdate && <i aria-label="有可用更新" />}
+    </button>
+  );
+}
+
 const formatLabels: Record<string, string> = {
   shp: "SHP 动画",
   pal: "PAL 配色表",
@@ -1602,7 +1621,7 @@ function ExplorerApp() {
     ? compactAudioDetail ? audioDetailBottomSize : detailBottomSize
     : detailRightSize;
   const workspaceStyle = {
-    "--sidebar-width": sidebarCollapsedRef.current ? "3.625rem" : "14rem",
+    "--sidebar-width": sidebarCollapsedRef.current ? "3.625rem" : "15.5rem",
     "--detail-panel-size": `${detailSize}px`,
   } as CSSProperties;
   const assetScrollKey = [sourceId, selectedCategoryId, assetFormatTag, mediaEventType, isMediaCategory ? "" : assetQuery, assetSort, layout]
@@ -1672,7 +1691,7 @@ function ExplorerApp() {
       return;
     }
     workspace.classList.toggle("sidebar-collapsed", next);
-    workspace.style.setProperty("--sidebar-width", next ? "3.625rem" : "14rem");
+    workspace.style.setProperty("--sidebar-width", next ? "3.625rem" : "15.5rem");
     window.requestAnimationFrame(() => window.requestAnimationFrame(resumeCardPreviews));
   }
 
@@ -2748,7 +2767,7 @@ function ExplorerApp() {
               <div className="brand-mark" aria-hidden="true"><span>R</span><i /></div>
               <strong>RA2 Explorer</strong>
               <SidebarToggle initialCollapsed={sidebarCollapsedRef.current} onChange={updateSidebarCollapsed} />
-              <button className="sidebar-brand-settings" type="button" onClick={openSettings} title={updateInfo?.update_available ? "设置 · 有可用更新" : "设置"} aria-label="设置"><Icon name="settings" />{updateInfo?.update_available && <i aria-label="有可用更新" />}</button>
+              <SidebarSettings className="sidebar-brand-settings" hasUpdate={!!updateInfo?.update_available} onOpen={openSettings} />
             </div>
             {sources.length > 1 && <section className="source-heading">
               <label className="source-select-wrap" title="选择资料库">
@@ -4724,6 +4743,62 @@ function unionImageBounds(bounds: Array<{ x: number; y: number; width: number; h
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
+function scanImageContentBounds(image: HTMLImageElement) {
+  const width = image.naturalWidth;
+  const height = image.naturalHeight;
+  if (width <= 0 || height <= 0) return null;
+  const sampleScale = Math.min(1, 2048 / Math.max(width, height));
+  const sampleWidth = Math.max(1, Math.round(width * sampleScale));
+  const sampleHeight = Math.max(1, Math.round(height * sampleScale));
+  const canvas = document.createElement("canvas");
+  canvas.width = sampleWidth;
+  canvas.height = sampleHeight;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return null;
+  context.imageSmoothingEnabled = false;
+  context.drawImage(image, 0, 0, sampleWidth, sampleHeight);
+  let pixels: Uint8ClampedArray;
+  try {
+    pixels = context.getImageData(0, 0, sampleWidth, sampleHeight).data;
+  } catch {
+    return null;
+  }
+  let left = sampleWidth;
+  let top = sampleHeight;
+  let right = -1;
+  let bottom = -1;
+  for (let y = 0; y < sampleHeight; y += 1) {
+    for (let x = 0; x < sampleWidth; x += 1) {
+      if (pixels[(y * sampleWidth + x) * 4 + 3] <= 4) continue;
+      if (x < left) left = x;
+      if (y < top) top = y;
+      if (x > right) right = x;
+      if (y > bottom) bottom = y;
+    }
+  }
+  if (right < left || bottom < top) return null;
+  return {
+    x: left / sampleScale,
+    y: top / sampleScale,
+    width: (right - left + 1) / sampleScale,
+    height: (bottom - top + 1) / sampleScale,
+  };
+}
+
+function sameImageFit(current: ImageFrameFit | null, next: ImageFrameFit) {
+  return Boolean(current
+    && current.width === next.width
+    && current.height === next.height
+    && current.bounds.x === next.bounds.x
+    && current.bounds.y === next.bounds.y
+    && current.bounds.width === next.bounds.width
+    && current.bounds.height === next.bounds.height
+    && current.focusBounds.x === next.focusBounds.x
+    && current.focusBounds.y === next.focusBounds.y
+    && current.focusBounds.width === next.focusBounds.width
+    && current.focusBounds.height === next.focusBounds.height);
+}
+
 function shpFrameBounds(frame: NonNullable<AssetMetadata["frames"]>[number]) {
   const content = frame.content_bounds;
   return content && content.width > 0 && content.height > 0
@@ -4805,6 +4880,7 @@ function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, b
   const [imageFit, setImageFit] = useState<ImageFrameFit | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ pointerId: number; x: number; y: number; panX: number; panY: number } | null>(null);
+  const scannedBounds = useRef(new Map<string, ImageFrameFit["bounds"] | null>());
   const frameFitIdentity = frameFit
     ? `${frameFit.width}:${frameFit.height}:${frameFit.bounds.x}:${frameFit.bounds.y}:${frameFit.bounds.width}:${frameFit.bounds.height}:${frameFit.focusBounds.x}:${frameFit.focusBounds.y}:${frameFit.focusBounds.width}:${frameFit.focusBounds.height}`
     : "";
@@ -4816,6 +4892,7 @@ function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, b
 
   useEffect(() => {
     reset();
+    scannedBounds.current.clear();
   }, [fitKey, fitContent, frameFitIdentity]);
 
   useEffect(() => {
@@ -4851,78 +4928,31 @@ function ImageViewport({ src, alt, fitKey, fitContent = true, frameFit = null, b
     const width = image.naturalWidth;
     const height = image.naturalHeight;
     if (width <= 0 || height <= 0) return;
-    if (frameFit) {
-      const scaleX = width / frameFit.width;
-      const scaleY = height / frameFit.height;
-      const nextFit = {
-        width,
-        height,
-        bounds: {
-          x: frameFit.bounds.x * scaleX,
-          y: frameFit.bounds.y * scaleY,
-          width: frameFit.bounds.width * scaleX,
-          height: frameFit.bounds.height * scaleY,
-        },
-        focusBounds: {
-          x: frameFit.focusBounds.x * scaleX,
-          y: frameFit.focusBounds.y * scaleY,
-          width: frameFit.focusBounds.width * scaleX,
-          height: frameFit.focusBounds.height * scaleY,
-        },
-      };
-      setImageFit((current) => current
-        && current.width === nextFit.width
-        && current.height === nextFit.height
-        && current.bounds.x === nextFit.bounds.x
-        && current.bounds.y === nextFit.bounds.y
-        && current.bounds.width === nextFit.bounds.width
-        && current.bounds.height === nextFit.bounds.height
-        && current.focusBounds.x === nextFit.focusBounds.x
-        && current.focusBounds.y === nextFit.focusBounds.y
-        && current.focusBounds.width === nextFit.focusBounds.width
-        && current.focusBounds.height === nextFit.focusBounds.height
-        ? current
-        : nextFit);
+    const scan = scannedBounds.current;
+    const cacheKey = image.currentSrc || image.src;
+    if (!scan.has(cacheKey)) scan.set(cacheKey, scanImageContentBounds(image));
+    const scanned = scan.get(cacheKey) ?? null;
+    if (!frameFit) {
+      const bounds = scanned || { x: 0, y: 0, width, height };
+      setImageFit({ width, height, bounds, focusBounds: bounds });
       return;
     }
-    const sampleScale = Math.min(1, 2048 / Math.max(width, height));
-    const sampleWidth = Math.max(1, Math.round(width * sampleScale));
-    const sampleHeight = Math.max(1, Math.round(height * sampleScale));
-    const canvas = document.createElement("canvas");
-    canvas.width = sampleWidth;
-    canvas.height = sampleHeight;
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    if (!context) return;
-    context.imageSmoothingEnabled = false;
-    context.drawImage(image, 0, 0, sampleWidth, sampleHeight);
-    try {
-      const pixels = context.getImageData(0, 0, sampleWidth, sampleHeight).data;
-      let left = sampleWidth;
-      let top = sampleHeight;
-      let right = -1;
-      let bottom = -1;
-      for (let y = 0; y < sampleHeight; y += 1) {
-        for (let x = 0; x < sampleWidth; x += 1) {
-          if (pixels[(y * sampleWidth + x) * 4 + 3] <= 4) continue;
-          left = Math.min(left, x);
-          top = Math.min(top, y);
-          right = Math.max(right, x);
-          bottom = Math.max(bottom, y);
-        }
-      }
-      const bounds = right >= left && bottom >= top
-        ? {
-            x: left / sampleScale,
-            y: top / sampleScale,
-            width: (right - left + 1) / sampleScale,
-            height: (bottom - top + 1) / sampleScale,
-          }
-        : { x: 0, y: 0, width, height };
-      setImageFit({ width, height, bounds, focusBounds: bounds });
-    } catch {
-      const bounds = { x: 0, y: 0, width, height };
-      setImageFit({ width, height, bounds, focusBounds: bounds });
-    }
+    const scaleX = width / frameFit.width;
+    const scaleY = height / frameFit.height;
+    const scaleBounds = (source: ImageFrameFit["bounds"]) => ({
+      x: source.x * scaleX,
+      y: source.y * scaleY,
+      width: source.width * scaleX,
+      height: source.height * scaleY,
+    });
+    const serverBounds = scaleBounds(frameFit.bounds);
+    const nextFit = {
+      width,
+      height,
+      bounds: scanned ? unionImageBounds([serverBounds, scanned]) || serverBounds : serverBounds,
+      focusBounds: scaleBounds(frameFit.focusBounds),
+    };
+    setImageFit((current) => (sameImageFit(current, nextFit) ? current : nextFit));
   }
 
   useEffect(() => {
@@ -5514,6 +5544,7 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
   const soundCount = soundAssociations.reduce((count, association) => count + association.samples.length, 0);
   const hasBodySequences = bodyAnimationAssociations.length > 0;
   const hasRawBodyAnimation = entity.kind !== "building" && frameCount > 1 && !hasBodySequences;
+  const hasPreviewRenderOptions = Boolean(entity.voxel || entity.preview.supports_facing || entity.preview.supports_player_color);
   const rawBodyAnimationTitle = entity.voxel ? "模型姿态" : "未分组主体帧";
   const rawBodyAnimationMeta = entity.voxel
     ? `${frameCount} 帧 · HVA 逐帧变换`
@@ -5690,10 +5721,10 @@ function EntityDetailPanel({ sourceId, sourceRevision = "", entity, loading, pla
               }}>{activeAnimationCandidates.map((sample) => <option value={sample.name} key={sample.name}>{sample.name}</option>)}</select></label>}
               {activeAnimationAsset && <button type="button" className="return-body-action" onClick={() => { setActiveAnimation(null); setPlaying(hasRawBodyAnimation); }}>返回主体</button>}
             </div>}
-            <div className="entity-render-options compact-render-options">
+            {hasPreviewRenderOptions && <div className="entity-render-options compact-render-options">
               {(entity.voxel || entity.preview.supports_facing) && <label><span>角度</span><select aria-label="单位预览角度" value={previewAngle} onChange={(event) => setPreviewAngle(normalizePreviewAngle(Number(event.target.value)))}>{previewAngleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
               {entity.preview.supports_player_color && <label title="选择玩家颜色"><select aria-label="玩家颜色" value={playerColor} onChange={(event) => setPlayerColorSelection({ entityId: entity.id, color: event.target.value })}><option value="">原始色</option>{selectablePlayerColors.map((color) => <option key={color.id} value={color.id}>{playerColorLabels[color.id] || color.id}</option>)}</select></label>}
-            </div>
+            </div>}
           </div> : <div className="unsupported-preview"><Icon name="unit" size={34} /><strong>{entityBodyStatusLabel(entity)}</strong></div>}
         </div>
 
